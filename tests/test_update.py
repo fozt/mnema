@@ -34,12 +34,13 @@ def release(monkeypatch, tmp_path):
         "find_spec",
         lambda name, *a: object() if name == "pystray" else real_find_spec(name, *a),
     )
-    state = {"version": "0.3.0", "calls": [], "commands": [], "failure": ""}
+    # 99.0.0: a release newer than any real one
+    state = {"version": "99.0.0", "calls": [], "commands": [], "failure": ""}
 
     def archive(extra=None):
         files = {
             "pyproject.toml": (
-                '[project]\nname="mnema"\nversion="0.3.0"\n'
+                '[project]\nname="mnema"\nversion="99.0.0"\n'
                 '[project.scripts]\nmnema = "mnema.cli:main"\n'
             ),
             "uv.lock": "locked",
@@ -94,7 +95,7 @@ def release(monkeypatch, tmp_path):
 
 def test_check_shows_only_application_version_without_git_or_dependency_resolution(release):
     found = update.check()
-    assert found.any and found.text() == "Mnema 0.3.0"
+    assert found.any and found.text() == "Mnema 99.0.0"
     assert release["commands"] == []
     assert release["calls"] == ["/latest"]
 
@@ -124,7 +125,7 @@ def test_http_redirect_is_rejected_before_request_even_if_next_hop_is_https(
         if archive:
             update._download(
                 update.Release(
-                    version="0.3.0", archive="https://release.test/archive", sha256="0" * 64
+                    version="99.0.0", archive="https://release.test/archive", sha256="0" * 64
                 ),
                 tmp_path / "release.tar.gz",
             )
@@ -144,7 +145,7 @@ def test_apply_prepares_new_locked_environment_and_never_changes_checkout(
     monkeypatch.setenv("PYTHONPATH", str(checkout))
     monkeypatch.setenv("PYTHONEXECUTABLE", str(checkout / ".venv/bin/python"))
     result = update.apply()
-    assert result.version == "0.3.0" and result.changed
+    assert result.version == "99.0.0" and result.changed
     assert result.python is not None
     assert Path(result.python).parent.parent.parent.is_relative_to(tmp_path / "data/mnema/releases")
     commands = release["commands"]
@@ -227,14 +228,14 @@ def test_build_release_matches_manifest_archive_and_lock(tmp_path):
 
     root = tmp_path / "source"
     (root / "mnema").mkdir(parents=True)
-    (root / "mnema/__init__.py").write_text('__version__ = "0.3.0"\n')
-    (root / "pyproject.toml").write_text('[project]\nversion="0.3.0"\n')
-    (root / "uv.lock").write_text('[[package]]\nname="mnema"\nversion="0.3.0"\n')
+    (root / "mnema/__init__.py").write_text('__version__ = "99.0.0"\n')
+    (root / "pyproject.toml").write_text('[project]\nversion="99.0.0"\n')
+    (root / "uv.lock").write_text('[[package]]\nname="mnema"\nversion="99.0.0"\n')
     (root / "README.md").write_text("Mnema")
     subprocess.run(["git", "init", "-q", str(root)], check=True)
     subprocess.run(["git", "-C", str(root), "add", "mnema/__init__.py"], check=True)
     (root / "mnema/.env").write_text("HF_TOKEN=secret\n")  # outside git: never in the archive
-    archive, manifest = build(root, tmp_path / "dist", "v0.3.0", "https://releases.test")
+    archive, manifest = build(root, tmp_path / "dist", "v99.0.0", "https://releases.test")
     original_archive = archive.read_bytes()
     original_manifest = manifest.read_bytes()
     for path in root.rglob("*"):
@@ -242,7 +243,7 @@ def test_build_release_matches_manifest_archive_and_lock(tmp_path):
             os.utime(path, (1_600_000_000, 1_600_000_000))
             path.chmod(0o600)
     rebuilt_archive, rebuilt_manifest = build(
-        root, tmp_path / "rebuilt", "v0.3.0", "https://releases.test"
+        root, tmp_path / "rebuilt", "v99.0.0", "https://releases.test"
     )
     assert rebuilt_archive.read_bytes() == original_archive
     assert rebuilt_manifest.read_bytes() == original_manifest
@@ -256,7 +257,7 @@ def test_build_release_matches_manifest_archive_and_lock(tmp_path):
     destination = tmp_path / "unpacked"
     destination.mkdir()
     update._unpack(archive, destination, info.version)
-    assert (destination / "mnema/__init__.py").read_text() == '__version__ = "0.3.0"\n'
+    assert (destination / "mnema/__init__.py").read_text() == '__version__ = "99.0.0"\n'
     assert not (destination / "mnema/.env").exists()
     with pytest.raises(ValueError, match="одну версию"):
         build(root, tmp_path / "bad", "v0.4.0", "https://releases.test")
@@ -334,7 +335,7 @@ def test_mac_update_tells_why_the_new_app_did_not_build(release, tmp_path, monke
 def test_interrupted_attempts_are_removed_but_installed_versions_kept(release, tmp_path):
     """An exit or a crash during preparation must not leave its folder behind for good."""
     root = tmp_path / "data/mnema/releases"
-    (root / "0.3.0-abc123/.venv").mkdir(parents=True)
+    (root / "99.0.0-abc123/.venv").mkdir(parents=True)
     (root / "0.1.0").mkdir()
     (root / "0.1.0/.mnema-installed.json").write_text("{}")
     (root / "personal").mkdir()
@@ -450,7 +451,7 @@ def test_server_repeated_update_reads_installed_version_not_old_cli(release, ser
     release["commands"].clear()
     release["calls"].clear()
     result = update.apply(server=True)
-    assert not result.changed and result.version == "0.3.0"
+    assert not result.changed and result.version == "99.0.0"
     assert len(server_install["activation"]) == 1
     assert release["calls"] == ["/latest"] and not release["commands"]
     unchanged_server_config(server_install)
@@ -463,7 +464,7 @@ def test_server_preparation_failure_does_not_touch_service(release, server_insta
         update.apply(server=True)
     assert not server_install["activation"]
     assert server_install["unit"].read_text() == server_install["original"]
-    assert not list(update._release_root().glob("0.3.0-*"))
+    assert not list(update._release_root().glob("99.0.0-*"))
     unchanged_server_config(server_install)
 
 
@@ -473,7 +474,7 @@ def test_server_activation_failure_restores_original_unit(release, server_instal
         update.apply(server=True)
     assert len(server_install["activation"]) == 2
     assert server_install["unit"].read_text() == server_install["original"]
-    assert not list(update._release_root().glob("0.3.0-*"))
+    assert not list(update._release_root().glob("99.0.0-*"))
     assert server_install["repo"].is_dir()
     unchanged_server_config(server_install)
 
@@ -513,13 +514,13 @@ def test_server_starts_the_launcher_of_the_built_release(built_release, release,
 
 def test_server_release_without_launcher_does_not_touch_service(release, server_install):
     release["archive"] = release["build_archive"](
-        {"pyproject.toml": '[project]\nname="mnema"\nversion="0.3.0"\n'}
+        {"pyproject.toml": '[project]\nname="mnema"\nversion="99.0.0"\n'}
     )
     with pytest.raises(MediaError, match="проверку запуска"):
         update.apply(server=True)
     assert not server_install["activation"]
     assert server_install["unit"].read_text() == server_install["original"]
-    assert not list(update._release_root().glob("0.3.0-*"))
+    assert not list(update._release_root().glob("99.0.0-*"))
 
 
 def test_server_failed_rollback_keeps_both_releases(release, server_install):
@@ -527,7 +528,7 @@ def test_server_failed_rollback_keeps_both_releases(release, server_install):
     with pytest.raises(MediaError, match="Обе версии сохранены"):
         update.apply(server=True)
     assert server_install["repo"].is_dir()
-    assert len(list(update._release_root().glob("0.3.0-*"))) == 1
+    assert len(list(update._release_root().glob("99.0.0-*"))) == 1
     unchanged_server_config(server_install)
 
 
@@ -650,7 +651,7 @@ def test_server_false_readiness_rolls_back_instead_of_reporting_success(
         update.apply(server=True)
     assert checked and len(server_install["activation"]) == 2
     assert server_install["unit"].read_text() == server_install["original"]
-    assert not list(update._release_root().glob("0.3.0-*"))
+    assert not list(update._release_root().glob("99.0.0-*"))
 
 
 def test_server_timeout_and_failed_rollback_preserve_candidate(
@@ -668,7 +669,7 @@ def test_server_timeout_and_failed_rollback_preserve_candidate(
     with pytest.raises(MediaError, match="Обе версии сохранены"):
         update.apply(server=True)
     assert len(server_install["activation"]) == 2
-    assert len(list(update._release_root().glob("0.3.0-*"))) == 1
+    assert len(list(update._release_root().glob("99.0.0-*"))) == 1
     unchanged_server_config(server_install)
 
 
@@ -752,15 +753,15 @@ def test_github_release_assets_are_followed_to_their_host_over_https(release, mo
         seen.append(url)
         if request.url.host == "github.com":
             if "/latest/download/" in path:
-                tagged = url.replace("/latest/download/", "/download/v0.3.0/")
+                tagged = url.replace("/latest/download/", "/download/v99.0.0/")
                 return httpx.Response(302, headers={"Location": tagged})
             asset = f"https://release-assets.githubusercontent.com/asset/{path.rsplit('/', 1)[1]}"
             return httpx.Response(302, headers={"Location": asset + "?sp=r&sig=signed"})
         assert request.url.host == "release-assets.githubusercontent.com"
         if path.endswith("/mnema-release.json"):
             manifest = {
-                "version": "0.3.0",
-                "archive": f"{releases}/download/v0.3.0/mnema-0.3.0.tar.gz",
+                "version": "99.0.0",
+                "archive": f"{releases}/download/v99.0.0/mnema-99.0.0.tar.gz",
                 "sha256": hashlib.sha256(release["archive"]).hexdigest(),
             }
             return httpx.Response(
@@ -771,11 +772,11 @@ def test_github_release_assets_are_followed_to_their_host_over_https(release, mo
         return httpx.Response(200, content=release["archive"])
 
     monkeypatch.setattr(update, "TRANSPORT", httpx.MockTransport(github))
-    assert update.apply().version == "0.3.0"
+    assert update.apply().version == "99.0.0"
     assert all(url.startswith("https://") for url in seen)
     assert [url for url in seen if "release-assets" in url] == [
         "https://release-assets.githubusercontent.com/asset/mnema-release.json?sp=r&sig=signed",
-        "https://release-assets.githubusercontent.com/asset/mnema-0.3.0.tar.gz?sp=r&sig=signed",
+        "https://release-assets.githubusercontent.com/asset/mnema-99.0.0.tar.gz?sp=r&sig=signed",
     ]
 
 
