@@ -45,6 +45,13 @@ signature, that nothing loads libraries from outside the bundle and the system, 
 commands, ffmpeg through mnema, and the engine started the way the app starts it. `./install.sh
 client` keeps building Mnema.app from the checkout into `~/Applications` for development.
 
+The README screenshots are rendered, not captured: on a Mac with Command Line Tools,
+`uv run python -m scripts.screenshots` builds the panel from invented recordings through the real
+panel model, once in English and once in Russian, draws it with the Mac app's preview and writes
+`docs/images/panel-{light,dark}.png` (English, for README.md) and
+`docs/images/panel-{light,dark}.ru.png` (Russian, for README.ru.md). Run it after changing how the
+panel looks.
+
 ## How the code is organized
 
 One Python package runs everywhere: the Mac app, the Linux client, the command line and the

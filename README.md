@@ -6,7 +6,7 @@ your own server; only the transcript text goes to the language model you choose.
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Android-lightgrey)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
-[Документация на русском →](README.ru.md)
+[Read this in Russian →](README.ru.md)
 
 <p align="center">
   <picture>
@@ -30,8 +30,7 @@ your own server; only the transcript text goes to the language model you choose.
 - **Command line** for files and links: transcribe a video or a YouTube link, translate,
   compress, merge tracks.
 - **MCP server** so Claude and other assistants can transcribe and read your recordings.
-
-The interface is in Russian for now.
+- **English and Russian interface**, following the system language.
 
 ## How it works
 
@@ -61,23 +60,21 @@ Requirements: Apple Silicon, macOS 14.2 or later.
    Settings → Privacy & Security*, scroll down to *Security*, click *Open Anyway* next to "Mnema
    was blocked", confirm with your password or Touch ID, and click *Open Anyway* once more. macOS
    remembers the choice.
-3. Click the Mnema icon in the menu bar, then *⋯ → Настройки…* (Settings). On the *Запись*
-   (Recording) tab click *Выбрать модель…* (Choose model) and pick a provider, paste its key and
-   choose a model. Mnema checks the key and the model before saving.
-4. Click *Начать запись* (Start recording). macOS asks for microphone and system audio access the
-   first time.
+3. Click the Mnema icon in the menu bar, then *⋯ → Settings…*. On the *Recording* tab click
+   *Choose model…* and pick a provider, paste its key and choose a model. Mnema checks the key and
+   the model before saving.
+4. Click *Start recording*. macOS asks for microphone and system audio access the first time.
 
 Speech models (about 1.3 GB) are downloaded on the first recording.
 
 Opened straight from the disk image, Mnema asks to be moved to *Applications* first. On its first
 start it turns on *Open at login* and links the `mnema` command to `~/.local/bin/mnema` unless
-something else is already there. Updates come from GitHub Releases: *⋯ → Настройки… → Общие →
-Проверить обновления* (Settings → General → Check for updates) downloads the new app and replaces
-this one in place, so Mnema has to stay in a folder you can write to, such as *Applications*. To
-remove Mnema, turn off *Open at login* (Settings → General), quit it, move it to the Trash and
-delete the `~/.local/bin/mnema` link if Mnema made it; settings stay in `~/.config/mnema`,
-recordings in `~/mnema`. The licenses of everything inside the app are in
-`Mnema.app/Contents/Resources/licenses`.
+something else is already there. Updates come from GitHub Releases: *⋯ → Settings… → General →
+Check for updates* downloads the new app and replaces this one in place, so Mnema has to stay in a
+folder you can write to, such as *Applications*. To remove Mnema, turn off *Open at login*
+(*Settings → General*), quit it, move it to the Trash and delete the `~/.local/bin/mnema` link if
+Mnema made it; settings stay in `~/.config/mnema`, recordings in `~/mnema`. The licenses of
+everything inside the app are in `Mnema.app/Contents/Resources/licenses`.
 
 ### Server (Linux)
 
@@ -119,7 +116,7 @@ git clone https://github.com/fozt/mnema.git && cd mnema
 ```
 
 Mnema appears in the applications menu and in the top panel. Without a server it only records;
-recordings are processed once you connect one in *Настройки → Сервер*.
+recordings are processed once you connect one in *Settings → Server*.
 
 ### Android
 
@@ -128,15 +125,15 @@ other phones Mnema may record only your microphone, and it tells you when call a
 
 1. Download `mnema.apk` from [Releases](https://github.com/fozt/mnema/releases/latest) and install
    it (allow installs from your browser).
-2. Follow the *Начало работы* (Getting started) checklist: file access, notifications, no battery
+2. Follow the *Getting started* checklist: file access, notifications, no battery
    limits.
 3. Start the recording helper. It needs Wi-Fi debugging, which is in *Developer options* (tap
    *Build number* seven times to unlock them). The app walks you through pairing; no computer is
    needed. After a reboot, start the helper again from the record screen.
-4. In *Настройки → Обработка → Сервер* tap *Добавить сервер* and paste an invite from your server.
+4. In *Settings → Processing → Server* tap *Add server* and paste an invite from your server.
 
 The phone records both sides of a call as two tracks and keeps recordings in
-`Documents/Mnema`. It updates itself from *Настройки → Обновление*.
+`Documents/Mnema`. It updates itself from *Settings → Updates*.
 
 ## Using Mnema
 
@@ -155,11 +152,10 @@ are sections; move recordings between them from the card menu. Texts sync betwee
 through the server; audio stays where it was recorded.
 
 **Language** is detected from the speech. If it comes out wrong, pick it in the menu of the
-recording that is being processed, or in *⋯ → Обработать запись…* (Process recording) for an
-existing one.
+recording that is being processed, or in *⋯ → Process recording…* for an existing one.
 
-**Without a model** you still get the transcript; the card offers *Составить пересказ* (Make
-summary) once a model is set.
+**Without a model** you still get the transcript; the card offers *Summarize* once a model is
+set.
 
 ### Choosing a model
 

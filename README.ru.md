@@ -10,8 +10,8 @@
 
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/images/panel-dark.png">
-    <img src="docs/images/panel-light.png" width="360" alt="Панель Mnema в строке меню macOS">
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/panel-dark.ru.png">
+    <img src="docs/images/panel-light.ru.png" width="360" alt="Панель Mnema в строке меню macOS">
   </picture>
 </p>
 
@@ -30,6 +30,7 @@
 - **Командная строка** для файлов и ссылок: расшифровать видео или ссылку на YouTube, перевести,
   сжать, свести дорожки.
 - **MCP-сервер**: Claude и другие ассистенты могут расшифровывать и читать ваши записи.
+- **Интерфейс на русском и английском**, по языку системы.
 
 ## Как это устроено
 
