@@ -42,8 +42,9 @@ uv's Python 3.12 with every package, the `mnema` and `mnema-mcp` commands and ff
 bundle, signs it ad hoc and writes the zip and the DMG (about ten minutes, 1.4 GB unpacked).
 `--smoke` (or `scripts/smoke_mac_app.py APP`) then checks it under a temporary home: the
 signature, that nothing loads libraries from outside the bundle and the system, the bundled
-commands, ffmpeg through mnema, and the engine started the way the app starts it. `./install.sh
-client` keeps building Mnema.app from the checkout into `~/Applications` for development.
+commands, ffmpeg through mnema, and the engine started the way the app starts it. `--sources`
+also writes `third-party-sources-X.Y.Z.tar.gz` (below). `./install.sh client` keeps building
+Mnema.app from the checkout into `~/Applications` for development.
 
 The README screenshots are rendered, not captured: on a Mac with Command Line Tools,
 `uv run python -m scripts.screenshots` builds the panel from invented recordings through the real
@@ -152,18 +153,20 @@ builds, each in its own job:
 - the LGPL ffmpeg (CI on `main` caches it until `scripts/build_ffmpeg.sh` changes; a tag reads
   that cache and never writes one);
 - `Mnema-X.Y.Z-mac.zip` (Mac app updates) and `Mnema-X.Y.Z.dmg` (installs), checked by the smoke,
-  and the sdists of the (L)GPL Python packages inside the app;
+  and `third-party-sources-X.Y.Z.tar.gz`: the source code of every (L)GPL component inside the
+  app (ffmpeg and LAME, the sdists of the (L)GPL Python packages, libsndfile and mpg123 from the
+  soundfile wheel), with a README naming the binary each file belongs to
+  (`scripts/third_party_sources.py`);
 - the signed `mnema-X.Y.Z.apk`;
 - the server image `ghcr.io/fozt/mnema:X.Y.Z` for linux/amd64 and linux/arm64, each built and
   started on its own runner, which checks the healthcheck and an invite.
 
 Then it writes the manifests `mnema-release.json` (with the `mac` block) and `mnema-android.json`
-with `scripts/build_release.py`, uploads everything with the ffmpeg and lame source tarballs,
-the package sdists and the licenses to a draft release, checks the asset list, tags the image `latest` and publishes the release as the latest. The
-apps read the manifests from `https://github.com/fozt/mnema/releases/latest/download/`, the
-server installer pulls `ghcr.io/fozt/mnema:latest`. GitHub creates the image package private on
-its first push: make it public once in the package settings, otherwise the release stops before
-it is published.
+with `scripts/build_release.py`, uploads everything to a draft release, checks the asset list,
+tags the image `latest` and publishes the release as the latest. The apps read the manifests from
+`https://github.com/fozt/mnema/releases/latest/download/`, the server installer pulls
+`ghcr.io/fozt/mnema:latest`. GitHub creates the image package private on its first push: make it
+public once in the package settings, otherwise the release stops before it is published.
 
 The APK needs four repository secrets: `ANDROID_KEYSTORE_BASE64` (`base64 -i key.jks`),
 `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD`. Without them the

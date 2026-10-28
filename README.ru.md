@@ -76,7 +76,8 @@ Releases: «⋯ → Настройки… → Общие → Проверить 
 Удалить Mnema: выключите «Открывать при входе в систему» («Настройки → Общие»), выйдите из неё,
 перенесите в Корзину и удалите ссылку `~/.local/bin/mnema`, если её поставила Mnema; настройки
 останутся в `~/.config/mnema`, записи — в `~/mnema`. Лицензии всего, что внутри приложения, — в
-`Mnema.app/Contents/Resources/licenses`.
+`Mnema.app/Contents/Resources/licenses`, исходный код его частей под LGPL и GPL — в
+`third-party-sources-X.Y.Z.tar.gz` на той же странице выпуска.
 
 ### Сервер (Linux)
 

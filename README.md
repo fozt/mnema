@@ -74,7 +74,8 @@ Check for updates* downloads the new app and replaces this one in place, so Mnem
 folder you can write to, such as *Applications*. To remove Mnema, turn off *Open at login*
 (*Settings → General*), quit it, move it to the Trash and delete the `~/.local/bin/mnema` link if
 Mnema made it; settings stay in `~/.config/mnema`, recordings in `~/mnema`. The licenses of
-everything inside the app are in `Mnema.app/Contents/Resources/licenses`.
+everything inside the app are in `Mnema.app/Contents/Resources/licenses`; the source code of its
+LGPL and GPL parts is `third-party-sources-X.Y.Z.tar.gz` on the same release page.
 
 ### Server (Linux)
 

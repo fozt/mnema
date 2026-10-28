@@ -1,13 +1,14 @@
 """Build a self-contained Mnema.app for macOS (arm64), its update zip and the DMG.
 
     uv run python -m scripts.build_mac_app --out DIR [--ffmpeg PREFIX] [--version X.Y.Z] [--smoke]
-        [--sources DIR]
+        [--sources]
 
 Layout: Contents/MacOS/Mnema (the Swift panel), Contents/Resources/python (uv-managed
 python-build-standalone 3.12 with the app's packages installed into it), Contents/Resources/bin
 (mnema and mnema-mcp wrappers, ffmpeg and ffprobe from PREFIX/bin), Contents/Resources/licenses.
 Every path is relative to the bundle, so the app runs from wherever it is copied. Without
---ffmpeg the app uses ffmpeg from PATH (a warning says so).
+--ffmpeg the app uses ffmpeg from PATH (a warning says so). --sources also writes
+third-party-sources-X.Y.Z.tar.gz (scripts/third_party_sources.py) next to the zip and the DMG.
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from mnema.extras import MAC as EXTRAS  # noqa: E402 - the one list of what the Mac app ships
+from scripts import third_party_sources  # noqa: E402
 
 SWIFT_PACKAGE = ROOT / "mnema" / "bar" / "macos"
 BUNDLE_ID = "com.mnema.bar"
@@ -160,16 +162,16 @@ def trim(python_home: Path) -> int:
 
 
 _COPYLEFT = re.compile(r"\bL?GPL\b|GNU (Lesser |Library )?General Public", re.I)
-# native libraries under the LGPL inside wheels that are themselves permissive
-_NATIVE_COPYLEFT = {"soundfile": "libsndfile, with mpg123 and LAME inside (LGPL-2.1-or-later)"}
 _LICENSE_FILE = re.compile(r"^(LICEN[CS]E|COPYING|NOTICE|AUTHORS)", re.I)
 SOURCE_OFFER = """\
-Mnema.app includes components under the GNU LGPL or GPL, listed below. Their source code is
-attached to the Mnema release this app comes from (https://github.com/fozt/mnema/releases),
-together with the source of ffmpeg and LAME. For any component whose source is not there, open an
-issue at https://github.com/fozt/mnema/issues and it will be provided, for three years after the
-release. You may replace the LGPL libraries in the bundle with modified versions.
+Mnema.app includes components under the GNU LGPL or GPL, listed below. Their source code is in
+third-party-sources-{version}.tar.gz attached to the Mnema release this app comes from
+(https://github.com/fozt/mnema/releases/tag/v{version}), except those under "On request". For
+those, or if the archive is not there, open an issue at
+{issues} and the source will be provided, for three years after the release. You may
+replace the LGPL libraries in the bundle with modified versions.
 
+ffmpeg and LAME (LGPL): bin/ffmpeg, bin/ffprobe
 """
 
 
@@ -181,7 +183,7 @@ def _metadata(dist_info: Path) -> dict[str, list[str]]:
     return {key.lower(): msg.get_all(key) or [] for key in set(msg.keys())}
 
 
-def package_licenses(site_packages: Path, dest: Path) -> list[str]:
+def package_licenses(site_packages: Path, dest: Path, app_version: str) -> list[str]:
     """Copy the license files of every installed distribution into dest/python/<name>-<ver>/,
     write dest/THIRD-PARTY.txt and dest/SOURCE-OFFER.txt; returns the copyleft distributions."""
     lines, copyleft, offer = [], [], []
@@ -209,42 +211,16 @@ def package_licenses(site_packages: Path, dest: Path) -> list[str]:
         if _COPYLEFT.search(kind):
             copyleft.append(name)
             offer.append(f"{name} {version}: {kind}")
-        if native := _NATIVE_COPYLEFT.get(name.lower()):
-            offer.append(f"{name} {version}: {native}")
+    for source in third_party_sources.native_sources(site_packages):
+        if source.license:
+            offer.append(f"{source.about} ({source.license})")
+    if requested := third_party_sources.on_request(site_packages):
+        offer += ["", "On request:", *requested]
     dest.mkdir(parents=True, exist_ok=True)
     (dest / "THIRD-PARTY.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
-    (dest / "SOURCE-OFFER.txt").write_text(
-        SOURCE_OFFER + "ffmpeg and LAME: LGPL\n" + "\n".join(offer) + "\n",
-        encoding="utf-8",
-    )
+    header = SOURCE_OFFER.format(version=app_version, issues=third_party_sources.ISSUES)
+    (dest / "SOURCE-OFFER.txt").write_text(header + "\n".join(offer) + "\n", encoding="utf-8")
     return copyleft
-
-
-def copyleft_sources(names: list[str], dest: Path) -> list[Path]:
-    """The sdists of the copyleft distributions, as uv.lock pins them (URL and sha256)."""
-    import hashlib
-    import urllib.request
-
-    lock = tomllib.loads((ROOT / "uv.lock").read_text(encoding="utf-8"))
-    wanted = {n.lower().replace("_", "-") for n in names}
-    dest.mkdir(parents=True, exist_ok=True)
-    saved = []
-    for pkg in lock.get("package", []):
-        sdist = pkg.get("sdist")
-        if pkg["name"] not in wanted or not sdist:
-            continue
-        url, digest = sdist["url"], sdist["hash"].removeprefix("sha256:")
-        with urllib.request.urlopen(url, timeout=120) as response:  # noqa: S310 - pinned https
-            data = response.read()
-        if hashlib.sha256(data).hexdigest() != digest:
-            raise SystemExit(f"{url}: sha256 differs from uv.lock")
-        path = dest / url.rsplit("/", 1)[-1]
-        path.write_bytes(data)
-        saved.append(path)
-        wanted.discard(pkg["name"])
-    if wanted:
-        raise SystemExit(f"no sdist in uv.lock for: {', '.join(sorted(wanted))}")
-    return saved
 
 
 def source_tree(work: Path) -> Path:
@@ -384,7 +360,7 @@ def write_metadata(app: Path, python: Path, version: str) -> None:
     run([python, "-I", "-B", "-c", code, app, version])
 
 
-def assemble(out: Path, ffmpeg: Path | None, version: str, sources: Path | None = None) -> Path:
+def assemble(out: Path, ffmpeg: Path | None, version: str, sources: bool = False) -> Path:
     app = out / "Mnema.app"
     work = out / ".build"
     shutil.rmtree(app, ignore_errors=True)
@@ -411,10 +387,10 @@ def assemble(out: Path, ffmpeg: Path | None, version: str, sources: Path | None 
     shutil.copy2(ROOT / "LICENSE", licenses / "Mnema-LICENSE")
     shutil.copy2(res / "python" / "lib" / PY / "LICENSE.txt", licenses / "Python-LICENSE.txt")
     site = res / "python" / "lib" / PY / "site-packages"
-    copyleft = package_licenses(site, licenses)
-    if sources is not None:
-        say(f"sources of {', '.join(copyleft)}")
-        copyleft_sources(copyleft, sources)
+    copyleft = package_licenses(site, licenses, version)
+    if sources and ffmpeg is not None:
+        archive = third_party_sources.write(out, version, ffmpeg, site, copyleft)
+        say(f"{archive} {archive.stat().st_size / 2**20:.0f} MB")
     if ffmpeg is not None:
         for tool in ("ffmpeg", "ffprobe"):
             shutil.copy2(ffmpeg / "bin" / tool, bin_dir / tool)
@@ -459,7 +435,10 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--ffmpeg", type=Path, help="prefix with bin/ffmpeg, bin/ffprobe, licenses/")
     p.add_argument("--version", help="must match pyproject.toml (default: that version)")
     p.add_argument("--smoke", action="store_true", help="check the built app")
-    p.add_argument("--sources", type=Path, help="save the sdists of the (L)GPL packages here")
+    p.add_argument(
+        "--sources", action="store_true",
+        help="also write third-party-sources-X.Y.Z.tar.gz (needs --ffmpeg)",
+    )  # fmt: skip
     args = p.parse_args(argv)
     if sys.platform != "darwin":
         raise SystemExit("Mnema.app builds on macOS only")
@@ -468,9 +447,10 @@ def main(argv: list[str] | None = None) -> None:
         raise SystemExit(f"--version {args.version} differs from pyproject.toml {version}")
     if args.ffmpeg is not None and not (args.ffmpeg / "bin" / "ffmpeg").exists():
         raise SystemExit(f"{args.ffmpeg}/bin/ffmpeg not found")
+    if args.sources and args.ffmpeg is None:
+        raise SystemExit("--sources needs --ffmpeg: the archive carries its sources")
     out = args.out.resolve()
-    sources = args.sources.resolve() if args.sources else None
-    app = assemble(out, args.ffmpeg.resolve() if args.ffmpeg else None, version, sources)
+    app = assemble(out, args.ffmpeg.resolve() if args.ffmpeg else None, version, args.sources)
     archive, image = package(app, version)
     for path in (archive, image):
         say(f"{path} {path.stat().st_size / 2**20:.0f} MB")
