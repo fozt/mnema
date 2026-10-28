@@ -17,7 +17,7 @@ class MediaIndexTest {
     @After fun noScanner() { MediaIndex.scanner = null }
 
     private fun section(): File = tmp.newFolder("projects").also { section ->
-        File(section, "2026-10-27_Созвон").apply { mkdirs(); File(this, "summary.md").writeText("суть") }
+        File(section, "2026-10-27_Созвон").apply { mkdirs(); File(this, "summary.txt").writeText("суть") }
         File(section, "2026-10-26_Дейли").apply { mkdirs(); File(this, "transcript.txt").writeText("текст") }
     }
 
@@ -33,7 +33,7 @@ class MediaIndexTest {
         }
         assertEquals("перенесено", result)
         assertEquals(2, tries)
-        assertEquals(listOf(setOf("summary.md", "transcript.txt") to true), scanned)
+        assertEquals(listOf(setOf("summary.txt", "transcript.txt") to true), scanned)
     }
 
     @Test
@@ -62,8 +62,8 @@ class MediaIndexTest {
     fun replacedFileIsIndexedWithoutWaiting() {
         val calls = mutableListOf<Pair<List<String>, Boolean>>()
         MediaIndex.scanner = { files, wait -> calls += files.map { it.name } to wait }
-        val file = tmp.newFile("summary.md")
+        val file = tmp.newFile("summary.txt")
         dev.mnema.app.transcript.atomicWrite(file, "новая суть".toByteArray())
-        assertEquals(listOf(listOf("summary.md") to false), calls)
+        assertEquals(listOf(listOf("summary.txt") to false), calls)
     }
 }

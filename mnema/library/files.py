@@ -20,6 +20,7 @@ from .disk import (
     inside,
     listing,
     meta_id,
+    migrate_summary,
     nested,
     read_file,
     read_record,
@@ -104,6 +105,7 @@ class LibraryFiles:
                         raise LibraryError(
                             503, _("There is another recording inside the recording")
                         )
+                    migrate_summary(path, files)
                     record = self._record(path)
                     if record.id in ids:
                         raise LibraryError(503, _("Two recordings in the library have the same id"))

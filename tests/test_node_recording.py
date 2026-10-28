@@ -150,7 +150,7 @@ def test_recording_result_date_part_progress_and_cleanup(tmp_path, monkeypatch, 
     assert result["folder"] == f"2026-10-22_{folder_title}{suffix}"
     assert "[0:00] mic: " in result["files"]["transcript.txt"]
     assert "[0:00] system: " in result["files"]["transcript.txt"]
-    assert "- [" in result["files"]["summary.md"]
+    assert "- [" in result["files"]["summary.txt"]
     run = result["run"]
     assert run["status"] == "ok" and run["settings"]["node"] == "Мой узел"
     assert run["part"] == {"start": 10, "end": 95}
@@ -192,7 +192,7 @@ def test_recording_without_model_and_recording_notices(tmp_path, monkeypatch):
         _start(client, quiet=("mic",), recording_error="Запись оборвалась"),
     )["result"]
     assert result["folder"] is None
-    assert result["files"]["transcript.txt"] and result["files"].get("summary.md") is None
+    assert result["files"]["transcript.txt"] and result["files"].get("summary.txt") is None
     run = result["run"]
     assert run["notes"][0]["step"] == "record"
     assert "Запись оборвалась" in run["remarks"][0]
@@ -389,7 +389,7 @@ def test_live_text_finalization_uses_normal_summary_threshold_without_asr(
     result = _wait(client, response.json()["id"])["result"]
     assert result["run"]["status"] == "ok" and result["run"]["kind"] == "process"
     assert "transcript.txt" not in result["files"]
-    assert bool(result["files"].get("summary.md")) is long
+    assert bool(result["files"].get("summary.txt")) is long
     assert len(calls) == 1
     assert not long or "summary" in calls[0]["messages"][0]["content"]
 
@@ -451,7 +451,7 @@ def test_live_text_translation_without_summary_uses_existing_finalization(tmp_pa
     result = _wait(client, response.json()["id"])["result"]
     assert called == [(text, "ru", True)]
     assert result["files"]["translation.md"].strip() == "Готовый перевод"
-    assert result["files"]["summary.md"] is None and result["run"]["status"] == "ok"
+    assert result["files"]["summary.txt"] is None and result["run"]["status"] == "ok"
     assert result["folder"] == "2026-10-22_Переведённый звонок"
 
 
@@ -463,8 +463,8 @@ def test_summary_write_failure_keeps_past_asr_notice_after_rename(tmp_path, monk
     write = Path.write_text
 
     def fail_summary(file, *a, **kw):
-        if file.name == "summary.md":
-            raise OSError("Disk full at /private/node/summary.md")
+        if file.name == "summary.txt":
+            raise OSError("Disk full at /private/node/summary.txt")
         return write(file, *a, **kw)
 
     monkeypatch.setattr(Path, "write_text", fail_summary)
@@ -578,7 +578,7 @@ def test_timestamps_do_not_inflate_summary_threshold(tmp_path, monkeypatch):
 
     transcript = result["files"]["transcript.txt"]
     assert len(unstamped(transcript)) < 600 <= len(transcript)
-    assert result["files"]["summary.md"] is None
+    assert result["files"]["summary.txt"] is None
     assert result["folder"] == "2026-10-22_Проверка ошибок"
     assert len(calls) == 1 and "summary" not in calls[0]["messages"][0]["content"]
 
@@ -644,8 +644,8 @@ def test_summary_failure_keeps_files_and_name_then_retries_without_asr(
     params["past"] = run
     retry = summarize()
     assert retry["run"]["status"] == "ok" and retry["run"]["error"] is None
-    assert set(retry["files"]) == {"summary.md"}
-    assert retry["files"]["summary.md"].startswith("Готовим выпуск.\n")
+    assert set(retry["files"]) == {"summary.txt"}
+    assert retry["files"]["summary.txt"].startswith("Готовим выпуск.\n")
     assert retry["folder"] == (None if manual else "2026-10-22_Подготовка выпуска")
     assert prior.model_dump(mode="json") in retry["run"]["notes"]
     assert not any(n["step"] in ("summary", "title") for n in retry["run"]["notes"])
@@ -664,7 +664,7 @@ def test_full_recording_model_failure_keeps_successful_asr_with_retry_notice(tmp
     result = _wait(client, _start(client))["result"]
     assert result["run"]["status"] == "ok"
     assert result["files"]["transcript.txt"]
-    assert result["files"]["summary.md"] is None
+    assert result["files"]["summary.txt"] is None
     assert result["run"]["summary"]["engine"] == "none"
     assert any(
         n["step"] == "summary" and "закончились деньги" in n["cause"]

@@ -12,7 +12,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
 
-from .disk import LibraryError, inside, safe_path
+from .disk import LibraryError, inside, migrate_summary, safe_path
 from .layout import Kind, hidden, kind
 
 
@@ -45,6 +45,8 @@ def _read(folder: Path, relative: str, real: Path, known: Collection[str]) -> Fo
     files, folders = _entries(folder)
     level = 2 if section else 1
     what = kind(level, files, folders, known=level == 1 and name in known)
+    if what is Kind.RECORD and migrate_summary(folder, set(files)) != files.keys():
+        files, folders = _entries(folder)
     if what is Kind.RECORD:
         for file in files:  # a file linking outside: the recording is neither shown nor touched
             inside(folder / file, real)

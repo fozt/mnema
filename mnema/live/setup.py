@@ -86,7 +86,7 @@ class LiveConfig(BaseModel):
     mic: bool = True  # False: no microphone, system audio only (needs system=True)
     lang: str | None = None  # recognition language as chosen; None: decided by the recording
     translate: str | None = None  # my language for two-way translation; None: no translation
-    summary: bool = True  # summary.md of the whole recording; the title comes from the same pass
+    summary: bool = True  # summary.txt of the whole recording; the title comes from the same pass
     summary_lang: str | None = None  # summary and title language (ru/en); None: the call's
     # auto (Parakeet, without it GigaAM for Russian, else Whisper) | parakeet | gigaam |
     # whisper | cloud "provider/model" (llm/asr)
@@ -961,7 +961,7 @@ def summarize_folder(
     on_base: Callable[[Path], None] | None = None,
 ) -> LiveResult:
     """ "Summarize": title and summary of the folder's transcript.txt by this process's model,
-    without the _SUMMARY_MIN_CHARS threshold. On success writes summary.md and renames a
+    without the _SUMMARY_MIN_CHARS threshold. On success writes summary.txt and renames a
     default name, keeping a part mark (on_base gets the new folder). Remarks: the previous ones
     minus title and summary, plus the new ones; the history gets Run(kind="summary"). No
     transcript.txt raises MediaError; without a model ops.admit refuses the job before this;
@@ -1032,7 +1032,7 @@ def _mix_recording(
         return None
 
 
-_SUMMARY_MIN_CHARS = 600  # ~a minute of speech; shorter gets no summary.md
+_SUMMARY_MIN_CHARS = 600  # ~a minute of speech; shorter gets no summary.txt
 PROCESSING_MARK = ".mnema-processing"  # running work: the node request and the user's title
 
 
@@ -1243,7 +1243,8 @@ def _slice_wav(src: Path, dst: Path, start: float, end: float | None) -> None:
 
 
 _RECORDING_FILES = {
-    "mic.wav", "system.wav", "recording.mp3", "transcript.txt", "summary.md", "translation.md",
+    "mic.wav", "system.wav", "recording.mp3", "transcript.txt", "summary.txt", "summary.md",
+    "translation.md",
     ".DS_Store",
 }  # fmt: skip
 

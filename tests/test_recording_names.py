@@ -107,7 +107,7 @@ def test_rename_changes_only_the_folder_name_and_keeps_the_part(tmp_path, monkey
     folder.mkdir()
     files = {
         "transcript.txt": "mic: текст\n",
-        "summary.md": "Суть.\n\n- пункт\n",
+        "summary.txt": "Суть.\n\n- пункт\n",
         meta.META_FILE: json.dumps(
             {"version": 1, "runs": [], "started": "2026-10-21T08:35:00+03:00"}
         ),

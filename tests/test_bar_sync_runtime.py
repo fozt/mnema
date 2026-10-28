@@ -422,10 +422,10 @@ def test_open_text_through_a_symlinked_library_root(app, tmp_path, monkeypatch):
     link.symlink_to(real, target_is_directory=True)
     monkeypatch.setenv("MNEMA_LIVE_DIR", str(link))
     _, id = record(real)
-    (real / "Call/summary.md").write_text("Итог")
+    (real / "Call/summary.txt").write_text("Итог")
     rt.handle(f"record:{id}:transcript")
     rt.handle(f"record:{id}:summary")
-    assert platform.opened == [link / "Call/transcript.txt", link / "Call/summary.md"]
+    assert platform.opened == [link / "Call/transcript.txt", link / "Call/summary.txt"]
 
 
 @pytest.mark.parametrize("on_server", [True, False], ids=["missing-on-server", "missing-here"])

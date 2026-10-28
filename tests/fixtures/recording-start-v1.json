@@ -12,7 +12,7 @@
     {"folder": "2026-10-20_Дейли", "files": [{"name": "mic.wav", "size": 19200044, "mtime": "2026-10-21T08:45:00Z"}], "start": "2026-10-20T08:35:00", "known": true},
     {"folder": "Созвон", "files": [{"name": "transcript.txt", "size": 10, "mtime": "2026-10-22T10:00:00Z"}, {"name": "call.m4a", "size": 1000, "mtime": "2026-10-22T09:00:00Z"}, {"name": "notes.m4a", "size": 1000, "mtime": "2026-10-22T09:30:00Z"}], "start": "2026-10-22T09:00:00", "known": true},
     {"folder": "Голосовое", "files": [{"name": "transcript.txt", "size": 10, "mtime": "2026-10-22T08:00:00Z"}, {"name": "old.wma", "size": 1000, "mtime": "2026-10-22T09:00:00Z"}], "start": "2026-10-22T09:00:00", "known": true},
-    {"folder": "Заметка", "files": [{"name": ".DS_Store", "size": 10, "mtime": "2026-10-01T00:00:00Z"}, {"name": "summary.md", "size": 10, "mtime": "2026-10-22T11:00:00Z"}, {"name": "transcript.txt", "size": 10, "mtime": "2026-10-22T10:00:00Z"}], "start": "2026-10-22T10:00:00", "known": true},
+    {"folder": "Заметка", "files": [{"name": ".DS_Store", "size": 10, "mtime": "2026-10-01T00:00:00Z"}, {"name": "summary.txt", "size": 10, "mtime": "2026-10-22T11:00:00Z"}, {"name": "transcript.txt", "size": 10, "mtime": "2026-10-22T10:00:00Z"}], "start": "2026-10-22T10:00:00", "known": true},
     {"folder": "2026-10-21_Дейли", "start": "2026-10-21T00:00:00", "known": false, "stored": false},
     {"folder": "Звонок маме", "known": false, "stored": false}
   ],

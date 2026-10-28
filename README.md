@@ -23,7 +23,7 @@ your own server; only the transcript text goes to the language model you choose.
   plus GigaAM (Russian) on your server. No audio is sent to the cloud.
 - **A title and a short summary** of every call from a cloud model of your choice: Gemini,
   DeepSeek, OpenAI, Claude, Qwen, OpenRouter or Groq. Free tiers are enough for daily use.
-- **Plain files you own**: every recording is a folder with `transcript.txt` and `summary.md`,
+- **Plain files you own**: every recording is a folder with `transcript.txt` and `summary.txt`,
   ready for Obsidian, an LLM or an archive.
 - **Your own server** for Linux and the phone, with invites per device and sync of texts
   between all devices.
@@ -154,7 +154,7 @@ a folder named after the call, for example `2026-10-21_Release planning`:
 | File | What it is |
 |---|---|
 | `transcript.txt` | The transcript, in paragraphs, each marked `mic` (you) or `system` (the other side) |
-| `summary.md` | The gist in one or two sentences, then the main points |
+| `summary.txt` | The gist in one or two sentences, then the main points |
 | `recording.mp3` | Both tracks mixed together |
 | `mic.wav`, `system.wav` | The original tracks |
 
@@ -222,7 +222,7 @@ claude mcp add mnema -- "$(dirname "$(readlink ~/.local/bin/mnema)")/mnema-mcp"
 - **Audio** stays on the device that recorded it, or goes to your own server when that server
   processes it.
 - **The model provider** receives only the transcript text, to write the title and the summary.
-- **Sync** carries texts only: `transcript.txt`, `summary.md` and processing history.
+- **Sync** carries texts only: `transcript.txt`, `summary.txt` and processing history.
 - **Cloud recognition** (Groq, OpenAI) is off unless you choose it on your server.
 - **Updates** are checked against GitHub Releases.
 

@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 from ..i18n import _
 from ..library.disk import LibraryError, fsync_dir, read_file, read_record, safe_path
 from ..library.models import FileBody, FileName, Manifest, Record, Stamp
-from ..live.naming import free_name, same_folder
+from ..live.naming import display_title, free_name, same_folder
 from . import state
 from .client import LibraryClient
 from .scan import FILES_LOCK, Scan, SyncError, created_ns, scan, stamp, write_file
@@ -70,6 +70,38 @@ def match_case(root: Path, relative: str, busy: set[str]) -> str:
         actual.append(name)
         parent = parent / name
     return "/".join(actual)
+
+
+def shown_title(path: str) -> str:
+    """A recording or section as the feed shows it: the folder name without the date."""
+    name = path.rpartition("/")[2]
+    return display_title(name).title or name
+
+
+def record_error(record: Record, reason: str) -> str:
+    """A sync error about one recording starts with its title."""
+    return _("“{title}”: {error}", title=shown_title(record.path), error=reason)
+
+
+def nested_error(path: str) -> str:
+    """path: "Recording/Inner" or "Section/Recording/Inner"."""
+    outer = path.rpartition("/")[0]
+    return _(
+        "“{title}” is inside the recording “{outer}”. Move it into a section: until then sync "
+        "skips both and deletes nothing on the server",
+        title=shown_title(path),
+        outer=shown_title(outer),
+    )
+
+
+def deep_error(path: str) -> str:
+    """path: "Section/Subfolder/Recording"."""
+    return _(
+        "“{title}” is in a subfolder of the section “{section}”. Move it into the section "
+        "itself: until then sync skips it and deletes nothing on the server",
+        title=shown_title(path),
+        section=path.partition("/")[0],
+    )
 
 
 class SyncEngine:
@@ -239,17 +271,12 @@ class _Cycle:
                 )
             self.local.complete = True
         if not self.local.complete:
-            self.status.errors.append(
-                _("Some local recordings could not be read; deletions are postponed")
-            )
-            self.status.errors.extend(
-                _("The recording “{path}” is inside another recording", path=path)
-                for path in self.local.nested
-            )
-            self.status.errors.extend(
-                _("The recording “{path}” is in a section subfolder", path=path)
-                for path in self.local.deep
-            )
+            if not self.local.readable or not (self.local.nested or self.local.deep):
+                self.status.errors.append(
+                    _("Some local recordings could not be read; deletions are postponed")
+                )
+            self.status.errors.extend(map(nested_error, self.local.nested))
+            self.status.errors.extend(map(deep_error, self.local.deep))
         groups: dict[str, list[Record]] = defaultdict(list)
         for record in self.local.manifest.records:
             groups[record.id].append(record)
@@ -333,12 +360,15 @@ class _Cycle:
                 elif left is not None and right is not None:
                     await self.merge(left, right, old)
             except (OSError, ValueError, KeyError, TypeError, LibraryError) as error:
-                self.status.errors.append(
+                self.selected()  # a server change ends the cycle with its own message
+                reason = (
                     str(error)
                     if isinstance(error, LibraryError)
                     else _("Could not sync the recording")
                 )
-                self.selected()
+                self.status.errors.append(
+                    record_error(next(r for r in (left, old, right) if r), reason)
+                )
         if not held and self.local.complete:
             await self.sections()
         if self.local.complete:
@@ -408,11 +438,12 @@ class _Cycle:
 
     async def merge(self, left: Record, right: Record, old: Record | None) -> None:
         if left.path != right.path:
-            if old is None or (left.path != old.path and right.path != old.path):
+            # Without a previous sync (a new server, a lost sync.json) the server's path wins.
+            if old is not None and left.path != old.path and right.path != old.path:
                 raise SyncError(
-                    _("The folder was renamed differently on each side; files are left in place")
+                    _("Renamed differently here and on the server; files are left in place")
                 )
-            if left.path != old.path:
+            if old is not None and left.path != old.path:
                 self.current(left)
                 right = await self.call(self.client.move(left.id, left.path, right.path))
             right = await self.common_path(right, left.path)

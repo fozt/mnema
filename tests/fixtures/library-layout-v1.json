@@ -10,7 +10,7 @@
         "Работа/memo.m4a",
         "Работа/mic.wav",
         "Работа/transcript.txt",
-        "Работа/summary.md",
+        "Работа/summary.txt",
         "Работа/notes.pdf"
       ],
       "sections": [
@@ -32,7 +32,7 @@
         ".mnema-sync-1/transcript.txt",
         "Работа/.obsidian/workspace.json",
         "Работа/.git/objects/ab/cdef",
-        "Работа/.Trash/old/summary.md"
+        "Работа/.Trash/old/summary.txt"
       ],
       "sections": [
         "Работа"
@@ -92,7 +92,7 @@
         "Работа/mic.wav",
         "Работа/system.wav",
         "Работа/transcript.txt",
-        "Работа/summary.md"
+        "Работа/summary.txt"
       ],
       "sections": [
         "Работа"

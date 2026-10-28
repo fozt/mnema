@@ -238,7 +238,7 @@ def test_tray_opens_record_folders_like_the_panel(tmp_path) -> None:
     raw.mkdir()
     state = BarState(
         last_result=folder / "transcript.txt",
-        last_summary=folder / "summary.md",
+        last_summary=folder / "summary.txt",
         unfinished=[raw],
     )
     items = menu(state, BarPrefs(), MenuEnv())
@@ -506,7 +506,7 @@ def test_summary_waits_for_the_down_server_and_retries_there(monkeypatch, tmp_pa
     assert platform.calls[-1] == (
         "100.64.0.9:8123 недоступен", "Пересказ не составлен", folder,
     )  # fmt: skip
-    assert rt.state.phase == Phase.IDLE and not (folder / "summary.md").exists()
+    assert rt.state.phase == Phase.IDLE and not (folder / "summary.txt").exists()
 
     answer = {"title": "Релиз", "about": "Договорились о релизе.", "summary": ["релиз в пятницу"]}
     reply = json.dumps(answer, ensure_ascii=False)
@@ -515,7 +515,7 @@ def test_summary_waits_for_the_down_server_and_retries_there(monkeypatch, tmp_pa
     [card] = library(root).cards
     rt.handle(f"record:{card.id}:retry")
     rt.join(timeout=10)
-    assert (root / "2026-10-02_Релиз" / "summary.md").exists() and rt.state.unreachable == {}
+    assert (root / "2026-10-02_Релиз" / "summary.txt").exists() and rt.state.unreachable == {}
     assert platform.calls[-1][0] == "Пересказ готов"
 
 
@@ -1147,7 +1147,7 @@ def test_summary_toggle_and_open_summary(tmp_path) -> None:
     rt.prefs = BarPrefs(summary_lang="en")
     assert rt._config().summary_lang == "en"
     rt.state.last_result = tmp_path / "2026-09-27_Дейли" / "transcript.txt"
-    rt.state.last_summary = tmp_path / "2026-09-27_Дейли" / "summary.md"
+    rt.state.last_summary = tmp_path / "2026-09-27_Дейли" / "summary.txt"
     assert "open_summary" in _keys(menu(rt.state, rt.prefs, MenuEnv()))
 
 
@@ -1970,7 +1970,7 @@ def test_recording_folder_detection(tmp_path) -> None:
 
     rec = tmp_path / "2026-09-27_Дейли"
     _wav(rec / "mic.wav")
-    for name in ("transcript.txt", "summary.md", "recording.mp3", ".mnema-meta.json"):
+    for name in ("transcript.txt", "summary.txt", "recording.mp3", ".mnema-meta.json"):
         (rec / name).write_text("x", encoding="utf-8")
     assert is_recording_folder(rec)
     (rec / "sub").mkdir()
@@ -1993,7 +1993,7 @@ class _NoMoney(Exception):
 
 def test_summarize_card_writes_summary_and_names_default_folder(monkeypatch, tmp_path) -> None:
     """Summarize: the summary by the model active now, a default-named folder gets a
-    title, the notification opens summary.md; of the remarks of the previous processing
+    title, the notification opens summary.txt; of the remarks of the previous processing
     (also after a stopped redo) only the one about the title and summary is removed, the
     others and "About the recording" stay; when the model refuses there is no summary, the
     name stays and the notification gives the reason; outside idle nothing happens."""
@@ -2034,7 +2034,7 @@ def test_summarize_card_writes_summary_and_names_default_folder(monkeypatch, tmp
     rt.handle(f"summarize:{folder}")
     rt.join(timeout=10)
     named = root / "2026-10-02_Релиз"
-    assert (named / "summary.md").exists() and not folder.exists()
+    assert (named / "summary.txt").exists() and not folder.exists()
     notes = _details(named)
     assert "Модель deepseek-chat не ответила" not in notes and asr in notes
     assert "Часть записи 0:10–1:35 из 3:00" in notes and "Полная запись перемещена" in notes
@@ -2044,9 +2044,9 @@ def test_summarize_card_writes_summary_and_names_default_folder(monkeypatch, tmp
     assert platform.calls[-1] == (
         "Пересказ готов",
         "Релиз · 02.10",
-        named / "summary.md",
+        named / "summary.txt",
     )
-    assert rt.state.phase == Phase.IDLE and rt.state.last_summary == named / "summary.md"
+    assert rt.state.phase == Phase.IDLE and rt.state.last_summary == named / "summary.txt"
 
     def refused(**kw):
         raise _NoMoney("Insufficient Balance")
@@ -2057,7 +2057,7 @@ def test_summarize_card_writes_summary_and_names_default_folder(monkeypatch, tmp
     (other / "transcript.txt").write_text("mic: созвон\n", encoding="utf-8")
     rt.handle(f"summarize:{other}")
     rt.join(timeout=10)
-    assert other.exists() and not (other / "summary.md").exists()
+    assert other.exists() and not (other / "summary.txt").exists()
     title, reason, _ = platform.calls[-1]
     assert title == "Пересказ не составлен" and reason
     assert rt.state.phase == Phase.IDLE

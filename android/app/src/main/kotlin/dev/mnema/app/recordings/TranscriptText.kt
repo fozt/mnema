@@ -32,7 +32,7 @@ fun parseDialog(text: String): List<DialogLine> {
     return lines.map { it.copy(text = it.text.trim()) }.filter { it.text.isNotEmpty() }
 }
 
-/** Gist and points of `summary.md` (fixture summary-v1, like the desktop _gist). */
+/** Gist and points of `summary.txt` (fixture summary-v1, like the desktop _gist). */
 fun parseSummaryFile(text: String): Summary {
     val lines = text.lines()
     val bullets = mutableListOf<StringBuilder>()

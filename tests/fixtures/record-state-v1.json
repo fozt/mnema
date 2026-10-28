@@ -1,5 +1,5 @@
 {
-  "about": "Одно правило состояния записи: Python live/meta.record_state, Kotlin recordState. files — файлы папки записи (имя → размер в байтах), runs — история обработок в meta, work — файл идущей работы глазами устройства (none — работы нет, running — идёт, interrupted — оборвалась), state — состояние: unprocessed, processing, processed, no_speech, audio_only, failed. Итог — последняя обработка записи (kind нет или «process», «Составить пересказ» — kind «summary» — не в счёт) со status ok или failed; stopped решает, только когда итога до неё не было; без status — не итог. ok — processed, если есть transcript.txt или summary.md, иначе no_speech; failed — failed; stopped — audio_only, а при тексте — processed. «Остановить обработку» дописывает stopped только обработке записи: остановленный пересказ историю не меняет. Работа идёт — processing; оборвалась у записи со звуком — unprocessed. Звук — WAV длиннее 44 байт заголовка или непустой файл другого звукового формата: .aac, .flac, .m4a, .mp3, .ogg, .opus, .wma, без учёта регистра. Без итога в истории (черновик mnema live, папка, собранная вручную): текст — processed, звук — unprocessed, без звука обрабатывать нечего — no_speech.",
+  "about": "Одно правило состояния записи: Python live/meta.record_state, Kotlin recordState. files — файлы папки записи (имя → размер в байтах), runs — история обработок в meta, work — файл идущей работы глазами устройства (none — работы нет, running — идёт, interrupted — оборвалась), state — состояние: unprocessed, processing, processed, no_speech, audio_only, failed. Итог — последняя обработка записи (kind нет или «process», «Составить пересказ» — kind «summary» — не в счёт) со status ok или failed; stopped решает, только когда итога до неё не было; без status — не итог. ok — processed, если есть transcript.txt или summary.txt, иначе no_speech; failed — failed; stopped — audio_only, а при тексте — processed. «Остановить обработку» дописывает stopped только обработке записи: остановленный пересказ историю не меняет. Работа идёт — processing; оборвалась у записи со звуком — unprocessed. Звук — WAV длиннее 44 байт заголовка или непустой файл другого звукового формата: .aac, .flac, .m4a, .mp3, .ogg, .opus, .wma, без учёта регистра. Без итога в истории (черновик mnema live, папка, собранная вручную): текст — processed, звук — unprocessed, без звука обрабатывать нечего — no_speech.",
   "cases": [
     {
       "name": "never processed",
@@ -16,7 +16,7 @@
         "mic.wav": 32044,
         "system.wav": 32044,
         "transcript.txt": 20,
-        "summary.md": 30
+        "summary.txt": 30
       },
       "runs": [
         {
@@ -43,7 +43,7 @@
     {
       "name": "summary without transcript",
       "files": {
-        "summary.md": 30
+        "summary.txt": 30
       },
       "runs": [
         {
@@ -166,7 +166,7 @@
       "name": "stopped after a summary without history",
       "files": {
         "mic.wav": 32044,
-        "summary.md": 30
+        "summary.txt": 30
       },
       "runs": [
         {

@@ -3,6 +3,7 @@ package dev.mnema.app.sync
 import dev.mnema.app.i18n.tr
 import dev.mnema.app.recordings.MediaIndex
 import dev.mnema.app.recordings.changeCase
+import dev.mnema.app.recordings.displayTitle
 import dev.mnema.app.recordings.freeName
 import dev.mnema.app.recordings.sameFolder
 import dev.mnema.app.server.Connection
@@ -125,9 +126,16 @@ class LibrarySync(
                 local = local.copy(complete = true)
             } else if (followServerCase(remote.values)) local = scanLocal(active)
             if (!local.complete) {
-                status.errors += tr("Some local recordings could not be read; deletions are postponed")
-                local.nested.forEach { status.errors += tr("The recording “{path}” is inside another recording", "path" to it) }
-                local.deep.forEach { status.errors += tr("The recording “{path}” is in a section subfolder", "path" to it) }
+                val explained = local.nested + local.deep + local.withoutFiles
+                if (!local.readable || explained.isEmpty()) status.errors += tr("Some local recordings could not be read; deletions are postponed")
+                local.nested.forEach {
+                    status.errors += tr("“{title}” is inside the recording “{outer}”. Move it into a section: until then sync skips both and deletes nothing on the server",
+                        "title" to shownTitle(it), "outer" to shownTitle(it.substringBeforeLast('/')))
+                }
+                local.deep.forEach {
+                    status.errors += tr("“{title}” is in a subfolder of the section “{section}”. Move it into the section itself: until then sync skips it and deletes nothing on the server",
+                        "title" to shownTitle(it), "section" to it.substringBefore('/'))
+                }
                 local.withoutFiles.forEach { status.errors += tr("The recording folder “{path}” has none of its files", "path" to it) }
             }
             val lefts = mutableMapOf<String, Record>()
@@ -187,12 +195,18 @@ class LibrarySync(
                         right != null && left == null -> download(right)
                         left != null && right != null -> merge(left, right, old)
                     }
-                } catch (e: IOException) { status.errors += message(e); selected() }
-                catch (_: IllegalArgumentException) { status.errors += tr("Could not sync the recording"); selected() }
-                catch (_: NoSuchElementException) { status.errors += tr("Could not sync the recording"); selected() }
+                } catch (e: IOException) { failed(listOfNotNull(left, old, right).first(), message(e)) }
+                catch (_: IllegalArgumentException) { failed(listOfNotNull(left, old, right).first(), tr("Could not sync the recording")) }
+                catch (_: NoSuchElementException) { failed(listOfNotNull(left, old, right).first(), tr("Could not sync the recording")) }
             }
             if (held.isEmpty() && heldOnServer.isEmpty() && local.complete) sections()
             if (local.complete) save()
+        }
+
+        /** A sync error about one recording starts with its title; a server change ends the cycle with its own message. */
+        fun failed(record: Record, reason: String) {
+            selected()
+            status.errors += tr("“{title}”: {error}", "title" to shownTitle(record.path), "error" to reason)
         }
 
         fun destination(relative: String, source: String?): File {
@@ -303,8 +317,9 @@ class LibrarySync(
         suspend fun merge(initialLeft: Record, initialRight: Record, old: Record?) {
             var left = initialLeft; var right = initialRight
             if (left.path != right.path && !samePath(left.path, right.path)) {
-                if (old == null || (!samePath(left.path, old.path) && !samePath(right.path, old.path))) throw SyncException(tr("The folder was renamed differently on each side; files are left in place"))
-                if (!samePath(left.path, old.path)) {
+                // without a previous sync (a new server, a lost checkpoint) the server's path wins
+                if (old != null && !samePath(left.path, old.path) && !samePath(right.path, old.path)) throw SyncException(tr("Renamed differently here and on the server; files are left in place"))
+                if (old != null && !samePath(left.path, old.path)) {
                     current(left)
                     right = call { client.move(left.id, serverCase(left.path), right.path) }
                 }
@@ -449,3 +464,6 @@ class LibrarySync(
         }
     }
 }
+
+/** A recording or section as the list shows it: the folder name without the date. */
+private fun shownTitle(path: String): String = path.substringAfterLast('/').let { displayTitle(it).title ?: it }

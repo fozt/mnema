@@ -145,7 +145,7 @@ class Work(StrEnum):
 
 
 UNFINISHED = frozenset({RecordState.UNPROCESSED, RecordState.FAILED})  # waiting for "Process…"
-_TEXTS = ("transcript.txt", "summary.md")
+_TEXTS = ("transcript.txt", "summary.txt")
 
 
 def _process_runs(data: Any) -> list[dict]:

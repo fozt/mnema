@@ -4,14 +4,29 @@ import java.io.File
 import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.NoSuchFileException
+import dev.mnema.app.transcript.RecordingFolder
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 
 fun loadCheckpoint(file: File): Checkpoint = try {
-    wire.decodeFromString(Checkpoint.serializer(), utf8(Files.readAllBytes(file.toPath()))).also { state ->
+    val json = wire.parseToJsonElement(utf8(Files.readAllBytes(file.toPath())))
+    wire.decodeFromJsonElement(Checkpoint.serializer(), withSummaryTxt(json)).also { state ->
         require(state.records.all { (id, record) -> id == record.id })
     }
 } catch (_: NoSuchFileException) { Checkpoint() }
 catch (_: IllegalArgumentException) { Checkpoint() }
 catch (_: java.nio.charset.CharacterCodingException) { Checkpoint() }
+
+/** summary.md of an earlier sync is summary.txt now: the scan renames the file and keeps its bytes and time, so the rename is no change on either side. */
+private fun withSummaryTxt(state: JsonElement): JsonElement {
+    val records = (state as? JsonObject)?.get("records") as? JsonObject ?: return state
+    return JsonObject(state + ("records" to JsonObject(records.mapValues { (_, element) ->
+        val record = element as? JsonObject ?: return@mapValues element
+        val files = record["files"] as? JsonObject ?: return@mapValues record
+        val legacy = files[RecordingFolder.LEGACY_SUMMARY] ?: return@mapValues record
+        JsonObject(record + ("files" to JsonObject(mapOf(FileName.SUMMARY.fileName to legacy) + files - RecordingFolder.LEGACY_SUMMARY)))
+    })))
+}
 
 fun saveCheckpoint(file: File, state: Checkpoint) {
     Files.createDirectories(file.absoluteFile.parentFile!!.toPath())

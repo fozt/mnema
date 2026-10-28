@@ -68,7 +68,7 @@
         "progress": 1.0,
         "message": "Готово",
         "result": {
-          "files": {"transcript.txt": "[0:12] mic: Обсудили выпуск.\n", "summary.md": null},
+          "files": {"transcript.txt": "[0:12] mic: Обсудили выпуск.\n", "summary.txt": null},
           "folder": "2026-10-22_Выпуск",
           "run": {"kind": "process", "status": "ok", "settings": {"node": "Сервер"}, "remarks": []}
         },
@@ -84,7 +84,7 @@
         "progress": 1.0,
         "message": "",
         "result": {
-          "files": {"summary.md": "Обсудили выпуск.\n"},
+          "files": {"summary.txt": "Обсудили выпуск.\n"},
           "folder": null,
           "run": {"kind": "summary", "status": "ok"}
         },
@@ -110,13 +110,13 @@
       "case": "имя от сервера",
       "op": "recording",
       "folder": "2026-10-23_12-30",
-      "files": {"transcript.txt": "[0:00] mic: Прежний текст.\n", "summary.md": "Прежняя суть.\n"},
+      "files": {"transcript.txt": "[0:00] mic: Прежний текст.\n", "summary.txt": "Прежняя суть.\n"},
       "result": {
-        "files": {"transcript.txt": "[0:00] mic: Новый текст.\n", "summary.md": null},
+        "files": {"transcript.txt": "[0:00] mic: Новый текст.\n", "summary.txt": null},
         "folder": "2026-10-23_Дейли",
         "run": {"kind": "process", "status": "ok"}
       },
-      "after": {"folder": "2026-10-23_Дейли", "files": {"transcript.txt": "[0:00] mic: Новый текст.\n", "summary.md": null}}
+      "after": {"folder": "2026-10-23_Дейли", "files": {"transcript.txt": "[0:00] mic: Новый текст.\n", "summary.txt": null}}
     },
     {
       "case": "имя занято — следующее свободное",
@@ -186,7 +186,7 @@
       "folder": "2026-10-23_12-30",
       "files": {},
       "result": {
-        "files": {"transcript.txt": "[0:00] mic: Hello.\n", "summary.md": null, "translation.md": "[0:00] mic: Привет.\n"},
+        "files": {"transcript.txt": "[0:00] mic: Hello.\n", "summary.txt": null, "translation.md": "[0:00] mic: Привет.\n"},
         "folder": null,
         "run": {"kind": "process", "status": "ok"}
       },
@@ -196,25 +196,25 @@
       "case": "сбой обработки оставляет прежние тексты и имя",
       "op": "recording",
       "folder": "2026-10-23_Дейли",
-      "files": {"transcript.txt": "[0:00] mic: Прежний текст.\n", "summary.md": "Прежняя суть.\n"},
+      "files": {"transcript.txt": "[0:00] mic: Прежний текст.\n", "summary.txt": "Прежняя суть.\n"},
       "result": {
         "files": {},
         "folder": null,
         "run": {"kind": "process", "status": "failed", "error": "Не удалось распознать запись на сервере"}
       },
-      "after": {"folder": "2026-10-23_Дейли", "files": {"transcript.txt": "[0:00] mic: Прежний текст.\n", "summary.md": "Прежняя суть.\n"}}
+      "after": {"folder": "2026-10-23_Дейли", "files": {"transcript.txt": "[0:00] mic: Прежний текст.\n", "summary.txt": "Прежняя суть.\n"}}
     },
     {
       "case": "пересказ",
       "op": "recording_summary",
       "folder": "2026-10-23_12-30",
-      "files": {"transcript.txt": "[0:00] mic: Прежний текст.\n", "summary.md": "Прежняя суть.\n"},
+      "files": {"transcript.txt": "[0:00] mic: Прежний текст.\n", "summary.txt": "Прежняя суть.\n"},
       "result": {
-        "files": {"summary.md": "Новая суть.\n"},
+        "files": {"summary.txt": "Новая суть.\n"},
         "folder": "2026-10-23_Дейли",
         "run": {"kind": "summary", "status": "ok"}
       },
-      "after": {"folder": "2026-10-23_Дейли", "files": {"transcript.txt": "[0:00] mic: Прежний текст.\n", "summary.md": "Новая суть.\n"}}
+      "after": {"folder": "2026-10-23_Дейли", "files": {"transcript.txt": "[0:00] mic: Прежний текст.\n", "summary.txt": "Новая суть.\n"}}
     },
     {
       "case": "неизвестный файл — отказ до записи",
@@ -246,7 +246,7 @@
       "folder": "2026-10-23_12-30",
       "files": {"transcript.txt": "[0:00] mic: Прежний текст.\n"},
       "result": {
-        "files": {"transcript.txt": "[0:00] mic: Другой текст.\n", "summary.md": "Новая суть.\n"},
+        "files": {"transcript.txt": "[0:00] mic: Другой текст.\n", "summary.txt": "Новая суть.\n"},
         "folder": null,
         "run": {"kind": "summary", "status": "ok"}
       },
@@ -256,7 +256,7 @@
   "answers": {
     "about": "Обработка записи двумя дорожками mic и system. submit и poll — ответы сервера по порядку на POST /api/jobs и GET /api/jobs/{id}; null или конец списка — обычный ответ: id новой задачи и done с результатом done. uploads — какие дорожки клиент загрузил по порядку до ручного повтора, keys — ключ каждого POST обоих запусков (одно число — один ключ), outcome — done или failed. title — своё название записи до обработки: после сбоя оно остаётся. retry — ручной повтор после failed: его ответы submit и poll и итог; после него снова один автоповтор.",
     "done": {
-      "files": {"transcript.txt": "[0:00] mic: Обсудили выпуск.\n", "summary.md": null},
+      "files": {"transcript.txt": "[0:00] mic: Обсудили выпуск.\n", "summary.txt": null},
       "folder": null,
       "run": {"kind": "process", "status": "ok"}
     },

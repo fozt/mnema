@@ -487,8 +487,23 @@ class FolderRecordingStoreTest {
         assertEquals(listOf("Старый пункт"), detail.summary!!.points)
     }
 
+    @Test fun summaryMdOfAnEarlierVersionIsRenamedWhenTheListReadsIt() {
+        val dir = folder("2026-10-20_Звонок", files = arrayOf(RecordingFolder.TRANSCRIPT to "mic: Привет", "summary.md" to "Суть звонка.\n\n- пункт\n"))
+        val both = folder("2026-10-19_Обе", files = arrayOf("summary.md" to "старая", "summary.txt" to "новая"))
+        val indexed = mutableListOf<String>()
+        MediaIndex.scanner = { files, _ -> files.mapTo(indexed) { it.name } }
+        try {
+            assertEquals("Суть звонка.", store().byName().getValue(dir.name).about)
+        } finally { MediaIndex.scanner = null }
+        assertEquals("Суть звонка.\n\n- пункт\n", File(dir, "summary.txt").readText())
+        assertFalse(File(dir, "summary.md").exists())
+        assertEquals(listOf("summary.md", "summary.txt"), indexed.filter { it.startsWith("summary") }) // the old path leaves Android's index, the new one enters it
+        assertEquals("старая", File(both, "summary.md").readText()) // summary.txt wins, nothing is lost
+        assertEquals("новая", File(both, "summary.txt").readText())
+    }
+
     @Test fun titleAndroidDidNotApplyIsShownButDoesNotOfferAnotherSummary() = runBlocking {
-        val dir = folder("Запись", files = arrayOf(RecordingFolder.TRANSCRIPT to "mic: Привет", "summary.md" to "Итог."))
+        val dir = folder("Запись", files = arrayOf(RecordingFolder.TRANSCRIPT to "mic: Привет", "summary.txt" to "Итог."))
         val remark = "Название «Дейли» не применено: Android не дал переименовать папку. Нажмите «Переименовать» в меню записи."
         Meta.appendRun(dir, Json.parseToJsonElement(
             """{"status":"ok","notes":[{"step":"title","cause":"x","code":"title_not_applied"}],"remarks":["$remark"]}""",

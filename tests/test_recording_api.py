@@ -85,7 +85,7 @@ def _inputs(base: Path, op: str) -> dict[str, Path]:
 
 
 def _state(base: Path) -> dict[str, str]:
-    names = ("transcript.txt", "summary.md", "translation.md")
+    names = ("transcript.txt", "summary.txt", "translation.md")
     return {
         name: (base / name).read_text(encoding="utf-8") for name in names if (base / name).exists()
     }

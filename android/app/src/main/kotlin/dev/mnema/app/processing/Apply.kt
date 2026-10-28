@@ -9,6 +9,7 @@ import dev.mnema.app.sync.filesLock
 import dev.mnema.app.server.RecordingResult
 import dev.mnema.app.server.validFolderName
 import dev.mnema.app.transcript.Meta
+import dev.mnema.app.transcript.RecordingFolder
 import dev.mnema.app.transcript.atomicWrite
 import java.io.File
 import java.io.IOException
@@ -53,6 +54,7 @@ fun applyResult(
         journal = ApplyJournal(job, sentName, target)
         saveJournal(dir, journal)
     }
+    RecordingFolder.migrateSummary(dir) // the new summary replaces the old file
     for ((name, content) in result.files) {
         val file = File(dir, name)
         if (Files.isSymbolicLink(file.toPath()) || file.isDirectory) throw IOException(tr("The recording file is unavailable"))

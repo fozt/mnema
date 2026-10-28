@@ -152,7 +152,7 @@ def test_summary_that_cannot_start_says_why_and_keeps_the_record(
     rt.handle(f"summarize:{folder}")
     rt.join(timeout=10)
     assert rt.state.error == error and rt.state.unreachable == {}
-    assert not (folder / PROCESSING_MARK).exists() and not (folder / "summary.md").exists()
+    assert not (folder / PROCESSING_MARK).exists() and not (folder / "summary.txt").exists()
     assert meta.last(folder) is None
 
 
@@ -181,7 +181,7 @@ def test_linux_summary_goes_to_the_server_model(monkeypatch, home) -> None:
     jobs: list[dict] = []
     result = {
         "folder": "2026-10-22_Созвон о релизе",
-        "files": {"summary.md": "Демо — к пятнице\n"},
+        "files": {"summary.txt": "Демо — к пятнице\n"},
         "run": meta.Run(kind="summary", status="ok").model_dump(mode="json"),
     }
 
@@ -214,7 +214,7 @@ def test_linux_summary_goes_to_the_server_model(monkeypatch, home) -> None:
     )
     named = home / "notes" / "2026-10-22_Созвон о релизе"
     assert app.notes[-1] == ("Пересказ готов", "Созвон о релизе · 22.10")
-    assert "Демо — к пятнице" in (named / "summary.md").read_text(encoding="utf-8")
+    assert "Демо — к пятнице" in (named / "summary.txt").read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize("standalone", [False, True], ids=["linux", "mac"])

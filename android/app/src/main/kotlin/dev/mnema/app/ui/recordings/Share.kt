@@ -22,10 +22,10 @@ data class SharedFile(val source: File, val name: String, val type: String)
 /** Something to share: a transcript with lines or a composed summary. */
 fun shareable(detail: RecordingDetail): Boolean = detail.dialog.isNotEmpty() || detail.summary != null
 
-/** Non-empty transcript.txt and summary.md of the recording; the copy's name starts with the folder name. */
+/** Non-empty transcript.txt and summary.txt of the recording; the copy's name starts with the folder name. */
 fun sharedFiles(dir: File): List<SharedFile> = listOf(
     SharedFile(File(dir, RecordingFolder.TRANSCRIPT), "${dir.name}_transcript.txt", TEXT_PLAIN),
-    SharedFile(File(dir, RecordingFolder.SUMMARY), "${dir.name}_summary.md", TEXT_MARKDOWN),
+    SharedFile(File(dir, RecordingFolder.SUMMARY), "${dir.name}_summary.txt", TEXT_PLAIN),
 ).filter { it.source.isFile && it.source.length() > 0 }
 
 /** The helper's report on the recording and the last lines of its log, if any; without a report there is nothing to share. */
@@ -86,7 +86,6 @@ private fun copies(context: Context, files: List<SharedFile>): List<Pair<Uri, St
 private const val SHARE_DIR = "share"
 private const val AUTHORITY_SUFFIX = ".share"
 private const val TEXT_PLAIN = "text/plain"
-private const val TEXT_MARKDOWN = "text/markdown"
 private const val TEXT = "text/"
 private const val TEXT_ANY = "text/*"
 private const val APPLICATION_JSON = "application/json"

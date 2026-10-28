@@ -3,11 +3,11 @@
 from collections.abc import Iterable
 from enum import StrEnum
 
-from .models import FileName
+from .models import LEGACY_SUMMARY, FileName
 
 # Files that mark a folder as a recording; unrelated files (memo.m4a, pdf) do not change the layout.
 RECORD_FILES = frozenset(
-    {"mic.wav", "system.wav", FileName.TRANSCRIPT, FileName.SUMMARY, FileName.META}
+    {"mic.wav", "system.wav", FileName.TRANSCRIPT, FileName.SUMMARY, LEGACY_SUMMARY, FileName.META}
 )
 TEXTS = frozenset({FileName.TRANSCRIPT, FileName.SUMMARY})
 

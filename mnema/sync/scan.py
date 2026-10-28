@@ -19,6 +19,7 @@ from ..library.disk import (
     LibraryError,
     inside,
     listing,
+    migrate_summary,
     nested,
     read_file,
     read_record,
@@ -46,9 +47,11 @@ class Scan(BaseModel):
     complete: bool = True
     blocked_paths: list[str] = Field(default_factory=list)
     missing_root: bool = False  # a missing path, as opposed to a read error; not saved
-    # Recordings inside a recording and in a section subfolder; their paths are shown to the user.
+    # Recordings inside a recording and in a section subfolder: the scan is incomplete, and the
+    # user is told where each one is. readable: no other folder failed to be read.
     nested: list[str] = Field(default_factory=list)
     deep: list[str] = Field(default_factory=list)
+    readable: bool = True
 
 
 def stamp(path: Path) -> Stamp | None:
@@ -169,7 +172,8 @@ def scan(
                     raise SyncError(_("The recording folder has none of its files"))
                 if moved := inner(folders):
                     result.deep.append(moved)
-                    raise SyncError(_("The recording is in a section subfolder"))
+                    result.complete = False
+                    result.blocked_paths.append(relative)
                 return  # an empty or unrelated folder in a section: no recording, no reason to wait
             if FileName.META in files:
                 raw = read_file(inside(safe_path(root, relative, base) / FileName.META, base))[0]
@@ -181,7 +185,10 @@ def scan(
                     return
             if child := inner(folders):
                 result.nested.append(child)
-                raise SyncError(_("There is another recording inside the recording"))
+                result.complete = False
+                result.blocked_paths.append(relative)
+                return
+            files = migrate_summary(folder, files)
             if files & TEXTS or FileName.META in files:
                 # Even a meta-only recording may be a download in progress; it must not be lost.
                 for name in FileName:
@@ -191,7 +198,7 @@ def scan(
             else:
                 result.blocked_paths.append(relative)  # audio without a text is not published
         except (OSError, ValueError, KeyError, TypeError, LibraryError) as error:
-            result.complete = False
+            result.complete = result.readable = False
             result.blocked_paths.append(relative)
             logger.warning("Sync postponed: could not read the folder %s: %s", relative, error)
 
@@ -202,7 +209,7 @@ def scan(
             result.complete, result.missing_root = False, True
             return result
         except OSError:
-            result.complete = False
+            result.complete = result.readable = False
             result.blocked_paths.append(".")
             return result
         try:
@@ -212,6 +219,6 @@ def scan(
                 if not hidden(folder.name) and stat.S_ISDIR(folder.stat().st_mode):
                     visit(folder, 1)
         except (OSError, LibraryError):
-            result.complete = False
+            result.complete = result.readable = False
             result.blocked_paths.append(".")
     return result

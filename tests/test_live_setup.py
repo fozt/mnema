@@ -673,7 +673,7 @@ def test_finalize_two_tracks_make_recording_mp3(monkeypatch, tmp_path) -> None:
 def test_finalize_summary_whole_text_names_folder_and_writes_summary_md(
     monkeypatch, tmp_path
 ) -> None:
-    """A summary of the WHOLE text: summary.md next to it, the folder title from the same pass
+    """A summary of the WHOLE text: summary.txt next to it, the folder title from the same pass
     (no separate title call); a title the user entered wins."""
     _patch_build(monkeypatch, {})
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
@@ -963,7 +963,7 @@ _SUMMARY = json.dumps(
 
 
 def test_summarize_folder_writes_summary_and_renames_default_folder(monkeypatch, tmp_path) -> None:
-    """Short text (below the processing threshold) still gets a summary: summary.md, the default
+    """Short text (below the processing threshold) still gets a summary: summary.txt, the default
     folder name renamed, title and summary remarks gone, the others kept; the history gets
     Run(kind="summary")."""
     from mnema.live import meta
@@ -976,7 +976,7 @@ def test_summarize_folder_writes_summary_and_renames_default_folder(monkeypatch,
     new = tmp_path / "2026-10-02_Созвон по релизу"
     assert result.base == new and moved == [new] and not base.exists()
     assert sent == ["Я: Обсудили сроки релиза."]
-    md = (new / "summary.md").read_text(encoding="utf-8")
+    md = (new / "summary.txt").read_text(encoding="utf-8")
     assert md.startswith("О сроках.\n\n- Релиз в пятницу.")
     assert [r.step for r in result.remarks] == [Step.MIX] and result.info == ["Запись обрывалась"]
     last = meta.last(new)
@@ -993,7 +993,7 @@ def test_summarize_folder_model_refused_keeps_folder_and_replaces_remark(
     base = _processed(tmp_path, "2026-10-02_13-05")
     _summary_model(monkeypatch, lambda: Money("Insufficient Balance"))
     result = setup_mod.summarize_folder(base, lang="ru")
-    assert result.base == base and not (base / "summary.md").exists()
+    assert result.base == base and not (base / "summary.txt").exists()
     assert result.summary_md is None
     assert [r.step for r in result.remarks if r.step is Step.MIX] == [Step.MIX]
     [money] = [r for r in result.remarks if r.step is not Step.MIX]
@@ -1002,12 +1002,12 @@ def test_summarize_folder_model_refused_keeps_folder_and_replaces_remark(
 
 
 def test_summary_without_points_is_a_remark_not_silence(monkeypatch, tmp_path) -> None:
-    """The model answered not in JSON, so no points could be read: no summary.md, and a remark
+    """The model answered not in JSON, so no points could be read: no summary.txt, and a remark
     says so; the summary does not vanish silently."""
     base = _processed(tmp_path, "2026-10-02_13-05")
     _summary_model(monkeypatch, lambda: "{")
     result = setup_mod.summarize_folder(base, lang="ru")
-    assert result.summary_md is None and not (result.base / "summary.md").exists()
+    assert result.summary_md is None and not (result.base / "summary.txt").exists()
     [remark] = [r for r in result.remarks if r.step is Step.SUMMARY]
     assert remark.text == (
         "Модель ответила не по формату. Пересказа нет. Нажмите «Составить пересказ» в меню записи."
@@ -1120,10 +1120,10 @@ def test_reprocessing_preserves_old_summary(monkeypatch, tmp_path):
     _write_wav(prepared)
     (prepared.base / "transcript.txt").write_text("old transcript")
     previous = "Old summary\n\n- Old decision\n"
-    (prepared.base / "summary.md").write_text(previous)
+    (prepared.base / "summary.txt").write_text(previous)
     result, full = finalize_live(prepared, _live_tracks(), retitle=False)
     assert full and result.transcript_txt.read_text() != "old transcript"
-    assert (prepared.base / "summary.md").read_text() == previous
+    assert (prepared.base / "summary.txt").read_text() == previous
     assert result.summary_md is None
     [card] = library(tmp_path).cards
     assert card.has_summary
@@ -1197,7 +1197,7 @@ def test_processed_recording_is_still_a_mnema_folder(tmp_path) -> None:
     recording; a foreign file in the folder prevents it."""
     from mnema.live.setup import is_recording_folder
 
-    for name in ("mic.wav", "transcript.txt", "summary.md", ".mnema-meta.json"):
+    for name in ("mic.wav", "transcript.txt", "summary.txt", ".mnema-meta.json"):
         (tmp_path / name).write_text("x")
     assert is_recording_folder(tmp_path)
     (tmp_path / "заметки.txt").write_text("чужое")

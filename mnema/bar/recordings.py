@@ -1,6 +1,6 @@
 """The panel's recordings list: recording folders → cards.
 
-Everything comes from the folder's files: the length from WAV, the gist from summary.md, the date
+Everything comes from the folder's files: the length from WAV, the gist from summary.txt, the date
 and history from meta. Folders without meta are read by their audio and text files. The cache
 tracks every file's changes; this walk is for display only, never for sync deletions.
 """
@@ -44,7 +44,7 @@ class RecordingCard(BaseModel):
     started: datetime
     time_known: bool = True  # False: only the date is known (from the folder name)
     seconds: float  # 0: unknown length (no WAV)
-    gist: str  # from summary.md
+    gist: str  # from summary.txt
     has_text: bool
     has_summary: bool
     remarks: list[str]  # processing remarks, full text
@@ -121,7 +121,7 @@ _CACHE: dict[Path, tuple[tuple, RecordingCard]] = {}
 
 
 def _gist(summary: str) -> str:
-    """The gist from summary.md (as the phone's parseSummaryFile, fixture summary-v1): the first
+    """The gist from summary.txt (as the phone's parseSummaryFile, fixture summary-v1): the first
     paragraph outside "- " points and their continuations."""
     body: list[str] = []
     point = False
@@ -155,7 +155,7 @@ def _languages(meta: str) -> list[str]:
 def _card(folder: Path, files: dict[str, os.stat_result]) -> RecordingCard | None:
     audio = [st for name, st in files.items() if Path(name).suffix.lower() in AUDIO_EXT]
     has_text = "transcript.txt" in files
-    has_summary = "summary.md" in files
+    has_summary = FileName.SUMMARY in files
     if not audio and not has_text and not has_summary:
         return None  # not a recording
     seconds = max(
@@ -199,7 +199,7 @@ def _card(folder: Path, files: dict[str, os.stat_result]) -> RecordingCard | Non
         started=when,
         time_known=time_known,
         seconds=seconds,
-        gist=_gist(read("summary.md")),
+        gist=_gist(read(FileName.SUMMARY)),
         has_text=has_text,
         has_summary=has_summary,
         has_audio=bool(audio),

@@ -220,7 +220,7 @@ def test_node_summary_uses_only_the_node_model(monkeypatch, tmp_path, model):
         assert calls == []
         # refused before work: no work file with a request, the recording as it was
         assert not (folder / ".mnema-processing").exists()
-        assert not (folder / "summary.md").exists() and meta.last(folder) is None
+        assert not (folder / "summary.txt").exists() and meta.last(folder) is None
         assert (folder / "transcript.txt").read_text() == RU_TEXT
         return
     result = summarize_on_node(folder, Connection(url="http://node:8123"))
@@ -260,7 +260,7 @@ def test_node_failure_keeps_transcript_without_local_model(monkeypatch, tmp_path
     with pytest.raises(expected, match=reason):
         summarize_on_node(folder, Connection(url="http://node:8123"))
     assert (folder / "transcript.txt").read_text() == RU_TEXT
-    assert not (folder / "summary.md").exists()
+    assert not (folder / "summary.txt").exists()
 
 
 def test_recording_without_summary_goes_through_node_http(monkeypatch, tmp_path):

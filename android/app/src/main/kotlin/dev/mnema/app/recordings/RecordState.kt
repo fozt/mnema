@@ -14,7 +14,7 @@ enum class RecordState { UNPROCESSED, PROCESSING, PROCESSED, NO_SPEECH, AUDIO_ON
 /** The phone's work file: work is running, was interrupted, or there is none. */
 enum class Work { NONE, RUNNING, INTERRUPTED }
 
-private val TEXTS = setOf("transcript.txt", "summary.md")
+private val TEXTS = setOf("transcript.txt", "summary.txt")
 private val OUTCOMES = setOf("ok", "failed", "stopped")
 
 private fun JsonObject.text(key: String): String? = (get(key) as? JsonPrimitive)?.takeIf { it.isString }?.content

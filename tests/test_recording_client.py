@@ -9,7 +9,7 @@ def result(*, summary=False, failed=False, folder=None):
     return {
         "files": {}
         if failed
-        else {"summary.md": "new summary", **({} if summary else {"transcript.txt": "new text"})},
+        else {"summary.txt": "new summary", **({} if summary else {"transcript.txt": "new text"})},
         "folder": folder,
         "run": meta.Run(
             kind="summary" if summary else "process",
@@ -47,7 +47,7 @@ def folder(tmp_path):
     base.mkdir()
     (base / "mic.wav").write_bytes(b"audio")
     (base / "transcript.txt").write_text("old text")
-    (base / "summary.md").write_text("old summary")
+    (base / "summary.txt").write_text("old summary")
     meta.set_started(base, "2026-10-23T12:30:00+03:00")
     return base
 
@@ -65,10 +65,21 @@ def test_failed_summary_preserves_files_and_manual_name(tmp_path):
     out = process(base, node, "recording_summary", params(base), {"text": base / "transcript.txt"})
     assert out.base == base
     assert (base / "transcript.txt").read_text() == "old text"
-    assert (base / "summary.md").read_text() == "old summary"
+    assert (base / "summary.txt").read_text() == "old summary"
     assert out.summary_md is None and base.is_dir()
     assert meta.last(base).status == "failed"
     assert meta.last(base).job == "job-1" and node.forgotten == ["job-1"]
+
+
+def test_new_summary_replaces_summary_md_of_an_earlier_version(tmp_path):
+    from mnema.live.recording_client import process
+
+    base = folder(tmp_path)
+    (base / "summary.txt").rename(base / "summary.md")
+    node = Node(result(summary=True))
+    out = process(base, node, "recording_summary", params(base), {"text": base / "transcript.txt"})
+    assert (out.base / "summary.txt").read_text() == "new summary"
+    assert not (out.base / "summary.md").exists()
 
 
 def test_disk_failure_retries_apply_without_resubmitting(tmp_path, monkeypatch):
@@ -81,7 +92,7 @@ def test_disk_failure_retries_apply_without_resubmitting(tmp_path, monkeypatch):
 
     def write(path, data):
         nonlocal failed
-        if path.name == "summary.md" and not failed:
+        if path.name == "summary.txt" and not failed:
             failed = True
             raise OSError("disk full")
         original(path, data)
@@ -89,7 +100,7 @@ def test_disk_failure_retries_apply_without_resubmitting(tmp_path, monkeypatch):
     monkeypatch.setattr(rc, "_atomic_bytes", write)
     with pytest.raises(OSError, match="disk full"):
         rc.process(base, node, "recording", params(base), {"mic": base / "mic.wav"})
-    assert node.forgotten == [] and (base / "summary.md").read_text() == "old summary"
+    assert node.forgotten == [] and (base / "summary.txt").read_text() == "old summary"
     out = rc.process(base, node, "recording", params(base), {"mic": base / "mic.wav"})
     assert (
         out.transcript_txt.read_text() == "new text" and out.summary_md.read_text() == "new summary"
@@ -153,7 +164,7 @@ def test_partial_result_of_new_recording_is_applied_once_after_disk_failure(tmp_
 
     base = folder(tmp_path)
     (base / "transcript.txt").unlink()
-    (base / "summary.md").unlink()
+    (base / "summary.txt").unlink()
     (base / "system.wav").write_bytes(b"audio")
     inputs = {"mic": base / "mic.wav", "system": base / "system.wav"}
     node = Node(partial())
@@ -221,14 +232,14 @@ def test_new_explicit_node_does_not_reuse_old_job_or_touch_manual_edits(tmp_path
     old.wait_job = lambda *a, **k: (_ for _ in ()).throw(OSError("node offline"))
     with pytest.raises(OSError):
         process(base, old, "recording", params(base), {"mic": base / "mic.wav"})
-    (base / "summary.md").write_text("my manual summary")
+    (base / "summary.txt").write_text("my manual summary")
     before = list(old.calls)
     new = Node(result(summary=True, failed=True))
     new._base_url = "http://new-selected-node"
     process(base, new, "recording_summary", params(base), {"text": base / "transcript.txt"})
     assert old.calls == before
     assert new.calls[-1][2]["key"] != old.calls[-1][2]["key"]
-    assert (base / "summary.md").read_text() == "my manual summary"
+    assert (base / "summary.txt").read_text() == "my manual summary"
 
 
 def test_metadata_write_failure_keeps_server_result_for_retry(tmp_path, monkeypatch):
@@ -270,7 +281,7 @@ def test_cancel_progress_targets_original_node_and_keeps_audio(tmp_path):
         process(base, node, "recording", params(base), {"mic": base / "mic.wav"}, on=progress)
     assert ("cancel", "job-1") in node.calls and node.forgotten == []
     assert (base / "mic.wav").read_bytes() == b"audio"
-    assert (base / "summary.md").read_text() == "old summary"
+    assert (base / "summary.txt").read_text() == "old summary"
 
 
 def test_apply_refuses_symlink_before_writing_any_result(tmp_path):
@@ -280,8 +291,8 @@ def test_apply_refuses_symlink_before_writing_any_result(tmp_path):
     base = folder(tmp_path)
     outside = tmp_path / "outside"
     outside.write_text("private")
-    (base / "summary.md").unlink()
-    (base / "summary.md").symlink_to(outside)
+    (base / "summary.txt").unlink()
+    (base / "summary.txt").symlink_to(outside)
     node = Node(result())
     with pytest.raises(MediaError, match="Нельзя заменить"):
         process(base, node, "recording", params(base), {"mic": base / "mic.wav"})
@@ -339,7 +350,7 @@ def test_previous_text_stays_readable_until_terminal_result(tmp_path):
 
     def waiting(job, **kwargs):
         assert (base / "transcript.txt").read_text() == "old text"
-        assert (base / "summary.md").read_text() == "old summary"
+        assert (base / "summary.txt").read_text() == "old summary"
         return {"status": "done", "result": node.answer}
 
     node.wait_job = waiting
@@ -616,9 +627,9 @@ def test_client_texts_render_in_english(tmp_path, monkeypatch):
         with alone(base), pytest.raises(MediaError) as busy:
             recording_client.process(base, node, "recording", params(base), {})
         assert str(busy.value) == "This recording is already being processed"
-        (base / "summary.md").unlink()
-        (base / "summary.md").symlink_to(tmp_path / "elsewhere")
+        (base / "summary.txt").unlink()
+        (base / "summary.txt").symlink_to(tmp_path / "elsewhere")
         with pytest.raises(MediaError) as unsafe:
             process(base, Node(result()), "recording", params(base), {"mic": base / "mic.wav"})
-        assert str(unsafe.value) == "Cannot replace a recording file: summary.md"
+        assert str(unsafe.value) == "Cannot replace a recording file: summary.txt"
     assert all(_english(text) for text in (*seen, str(offline.value), str(busy.value)))

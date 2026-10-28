@@ -18,7 +18,7 @@ internal val wire = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 @Serializable
 enum class FileName(val fileName: String) {
     @SerialName("transcript.txt") TRANSCRIPT("transcript.txt"),
-    @SerialName("summary.md") SUMMARY("summary.md"),
+    @SerialName("summary.txt") SUMMARY("summary.txt"),
     @SerialName(".mnema-meta.json") META(".mnema-meta.json"),
 }
 
@@ -48,7 +48,8 @@ data class Checkpoint(val server: String = "", val records: Map<String, Record> 
 data class Scan(val manifest: Manifest = Manifest(), val complete: Boolean = true, val blockedPaths: List<String> = emptyList(), val missingRoot: Boolean = false,
     val nested: List<String> = emptyList(), // recordings inside a recording; the path is shown to the user
     val deep: List<String> = emptyList(), // recordings in a subfolder of a section
-    val withoutFiles: List<String> = emptyList()) // known recordings without their files
+    val withoutFiles: List<String> = emptyList(), // known recordings without their files
+    val readable: Boolean = true) // no other folder failed to be read
 
 // bulkMissing — gone on this device, serverMissing — gone on the server; both wait for the user's choice.
 // withoutTrash — there is no trash: what vanished on the server is deleted here only forever

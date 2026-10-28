@@ -1,4 +1,4 @@
-"""Session artifacts in the folder `base`: transcript.txt (with source labels), summary.md and
+"""Session artifacts in the folder `base`: transcript.txt (with source labels), summary.txt and
 optionally translation.md. The `translate` command reads the transcript as is via
 ops._transcript_text.
 """
@@ -73,9 +73,9 @@ def write_transcript(
 
 
 def write_summary(base: Path, about: str, points: list[str]) -> Path:
-    """summary.md: the gist of the call, then the points. The recording's title is the folder
+    """summary.txt: the gist of the call, then the points. The recording's title is the folder
     name and is not in the file."""
-    path = base / "summary.md"
+    path = base / "summary.txt"
     lead = f"{about}\n\n" if about else ""
     path.write_text(lead + "\n".join(f"- {p}" for p in points) + "\n", encoding="utf-8")
     return path

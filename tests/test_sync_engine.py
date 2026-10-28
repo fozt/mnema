@@ -189,6 +189,14 @@ def test_concurrent_renames_preserve_both_paths(pair):
     assert (pair.root / "Local").is_dir() and (pair.app.state.library.root / "Remote").is_dir()
 
 
+def test_rename_conflict_names_the_recording(pair):
+    folder, id = synced(pair, "2026-10-20_Обзор состояния проекта")
+    folder.rename(pair.root / "2026-10-20_Обзор проекта")
+    server_folder(pair, id).rename(pair.app.state.library.root / "2026-10-20_Проект")
+    [error] = run(pair).errors
+    assert "Обзор проекта" in error and "2026-10-20" not in error  # the title as the feed shows it
+
+
 def test_single_delete_and_restored_folder_is_published_again(pair):
     folder, id = synced(pair)
     # Emulates the Finder Trash, outside Mnema and without the network.
@@ -645,7 +653,7 @@ def test_lost_file_delete_and_empty_text_do_not_remove_record_or_siblings(pair):
     (folder / FileName.SUMMARY).unlink()
 
     def lost(request, response):
-        if request.method == "DELETE" and request.url.path.endswith("/summary.md"):
+        if request.method == "DELETE" and request.url.path.endswith("/summary.txt"):
             raise httpx.ReadError("lost file deletion")
 
     pair.transport.hook = lost
@@ -895,13 +903,25 @@ def test_known_section_stays_a_section_after_server_switch(pair, tmp_path):
     assert manifest.records == [] and manifest.sections == ["Работа"]
 
 
-def test_record_inside_record_names_the_folder(pair):
+def test_record_inside_record_is_one_message_with_both_titles(pair):
+    outer, _ = synced(pair, "2026-10-20_Обзор состояния проекта")
+    inner, _ = synced(pair, "2026-10-21_ИИ встреча")
+    inner.rename(outer / inner.name)
+    [error] = run(pair).errors
+    assert "«ИИ встреча»" in error and "«Обзор состояния проекта»" in error
+    assert "2026-10-2" not in error  # titles as the feed shows them
+    assert len(pair.app.state.library.manifest().records) == 2 and not pair.trashed
+
+
+def test_other_unreadable_folders_keep_the_general_message(pair):
     outer, _ = synced(pair, "Звонок")
     inner, _ = synced(pair, "Внутри")
+    broken, _ = synced(pair, "Сломанная")
     inner.rename(outer / "Внутри")
-    result = run(pair)
-    assert "Запись «Звонок/Внутри» лежит внутри другой записи" in result.errors
-    assert len(pair.app.state.library.manifest().records) == 2 and not pair.trashed
+    (broken / FileName.META).write_text("broken")
+    errors = run(pair).errors
+    assert "Не все локальные записи удалось прочитать; удаления отложены" in errors
+    assert len(errors) == 2 and not pair.trashed
 
 
 def test_missing_server_library_after_restart_is_unavailable_not_empty(pair):
@@ -1062,7 +1082,8 @@ def test_record_moved_into_a_new_subfolder_deletes_nothing_anywhere(pair, tmp_pa
     before = pair.checkpoint.read_bytes()
     pair.transport.requests.clear()
     result = run(pair)
-    assert "Запись «Работа/Старые/Встреча» лежит в подпапке раздела" in result.errors
+    [error] = result.errors
+    assert "«Встреча»" in error and "«Работа»" in error
     assert not result.changed and not result.bulk_missing and not pair.trashed
     assert pair.checkpoint.read_bytes() == before
     assert all(method == "GET" for method, _ in pair.transport.requests)
@@ -1168,6 +1189,10 @@ def test_shared_sync_decisions(pair, tmp_path, case):
     if case.get("root_removed"):
         shutil.rmtree(root)
     lose_on_server(pair, *(ids[path] for path in case.get("lost", [])))
+    for old, new in case.get("server_renamed", {}).items():
+        server_folder(pair, ids[old]).rename(pair.app.state.library.root / new)
+    if case.get("checkpoint_lost"):
+        pair.checkpoint.unlink()
     pair.busy.update(ids[path] for path in case.get("busy", []))
     if case.get("server_unavailable"):
         pair.transport.inner = httpx.MockTransport(
@@ -1208,3 +1233,25 @@ def test_shared_sync_decisions(pair, tmp_path, case):
     records = pair.app.state.library.manifest().records
     assert {r.path: names.get(r.id, "new") for r in records} == case["server"]
     assert sorted(trashed) == sorted(case.get("trashed", []))
+
+
+def test_summary_md_of_an_earlier_version_becomes_summary_txt_without_changes(pair):
+    folder, _ = synced(pair, "record")
+    gone, _ = synced(pair, "gone")
+    for side in (
+        folder,
+        server_folder(pair, json.loads((folder / FileName.META).read_text())["id"]),
+    ):
+        (side / FileName.SUMMARY).rename(side / "summary.md")
+    pair.checkpoint.write_text(pair.checkpoint.read_text().replace('"summary.txt"', '"summary.md"'))
+    shutil.rmtree(gone)  # the earlier sync is still known: this is a deletion, not a new download
+    pair.transport.requests.clear()
+    assert not run(pair).errors
+    for side in (folder, pair.app.state.library.root / "record"):
+        assert (side / FileName.SUMMARY).read_text() == "пересказ"
+        assert (side / FileName.SUMMARY).stat().st_mtime_ns == 100
+        assert not (side / "summary.md").exists()
+    assert [method for method, _ in pair.transport.requests if method != "GET"] == ["DELETE"]
+    assert not gone.exists() and [r.path for r in pair.app.state.library.manifest().records] == [
+        "record"
+    ]

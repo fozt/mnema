@@ -40,17 +40,17 @@ def test_shared_fixture_roundtrip_and_lost_response_readback(node):
         assert response.headers["ETag"] == '"' + record["files"][name]["sha256"] + '"'
         assert (app.state.library.root / record["path"] / name).read_text() == body["text"]
     response = client.put(
-        f"{BASE}/files/summary.md",
+        f"{BASE}/files/summary.txt",
         content="Исправленный пересказ".encode(),
         headers={
             "Content-Type": "text/plain",
             "X-Mnema-Mtime-Ns": "123456789",
-            "If-Match": record["files"]["summary.md"]["sha256"],
+            "If-Match": record["files"]["summary.txt"]["sha256"],
         },
     )
     assert response.status_code == 200
     # The answer is lost: the next GET confirms the write, and the original time is kept.
-    found = client.get(f"{BASE}/files/summary.md")
+    found = client.get(f"{BASE}/files/summary.txt")
     assert found.text == "Исправленный пересказ"
     assert found.headers["X-Mnema-Mtime-Ns"] == "123456789"
     assert client.post("/api/library/records", json=FIXTURE["create"]).status_code == 409
@@ -60,7 +60,7 @@ def test_shared_fixture_roundtrip_and_lost_response_readback(node):
 def test_file_preconditions_and_move_delete_routes(node):
     _, client = node
     record = create(client)
-    path = f"{BASE}/files/summary.md"
+    path = f"{BASE}/files/summary.txt"
     assert (
         client.put(
             path, content=b"stale", headers={"Content-Type": "text/plain", "X-Mnema-Mtime-Ns": "8"}
@@ -78,7 +78,7 @@ def test_file_preconditions_and_move_delete_routes(node):
     assert client.delete(path, headers={"If-Match": '"wrong"'}).status_code == 409
     assert (
         client.delete(
-            path, headers={"If-Match": record["files"]["summary.md"]["sha256"]}
+            path, headers={"If-Match": record["files"]["summary.txt"]["sha256"]}
         ).status_code
         == 204
     )
@@ -138,7 +138,7 @@ def test_creation_io_failure_keeps_id_and_allows_completion(node, monkeypatch):
     assert len(partial) == 1 and partial[0]["id"] == ID
     assert list(partial[0]["files"]) == [".mnema-meta.json"]
     assert client.post("/api/library/records", json=FIXTURE["create"]).status_code == 409
-    for name in ("transcript.txt", "summary.md"):
+    for name in ("transcript.txt", "summary.txt"):
         body = FIXTURE["create"]["files"][name]
         result = client.put(
             f"{BASE}/files/{name}",
@@ -175,34 +175,34 @@ def test_invalid_creation_does_not_mutate_library(node, change):
 def test_invalid_file_time_does_not_overwrite(node, mtime):
     _, client = node
     record = create(client)
-    path = f"{BASE}/files/summary.md"
+    path = f"{BASE}/files/summary.txt"
     response = client.put(
         path,
         content=b"bad",
         headers={
             "Content-Type": "text/plain",
             "X-Mnema-Mtime-Ns": mtime,
-            "If-Match": record["files"]["summary.md"]["sha256"],
+            "If-Match": record["files"]["summary.txt"]["sha256"],
         },
     )
     assert response.status_code == 422
-    assert client.get(path).text == FIXTURE["create"]["files"]["summary.md"]["text"]
+    assert client.get(path).text == FIXTURE["create"]["files"]["summary.txt"]["text"]
 
 
 def test_empty_text_can_be_synchronized_and_bad_meta_is_rejected(node):
     _, client = node
     record = create(client)
     response = client.put(
-        f"{BASE}/files/summary.md",
+        f"{BASE}/files/summary.txt",
         content=b"",
         headers={
             "Content-Type": "text/plain",
             "X-Mnema-Mtime-Ns": "123",
-            "If-Match": record["files"]["summary.md"]["sha256"],
+            "If-Match": record["files"]["summary.txt"]["sha256"],
         },
     )
     assert response.status_code == 200
-    assert client.get(f"{BASE}/files/summary.md").content == b""
+    assert client.get(f"{BASE}/files/summary.txt").content == b""
     response = client.put(
         f"{BASE}/files/.mnema-meta.json",
         content=b"bad json",

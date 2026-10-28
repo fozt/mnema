@@ -11,7 +11,7 @@
         "text": "[00:01] Я: привет\n",
         "mtime_ns": 1792731600123456790
       },
-      "summary.md": {
+      "summary.txt": {
         "text": "# Встреча\nОбсудили выпуск.\n",
         "mtime_ns": 1792731600123456791
       }
@@ -31,12 +31,12 @@
             "sha256": "6834ea433755a066476eeff311954fd3e562f09ccfe80de0d625c3978a03bba6",
             "mtime_ns": 1792731600123456790
           },
-          "summary.md": {
+          "summary.txt": {
             "sha256": "834210f71684a47b75f477fc1d3ab76051e660d8f5dbe963b3b124098008ac52",
             "mtime_ns": 1792731600123456791
           }
         },
-        "tag": "3d6e9ef08512d98beadeabce8191fd9a2dd97462771039311b0ccb631754f5e1"
+        "tag": "1f31f929a2a60ae43c9587e19e1edda9f168a51f31478a78a9d7facb6f6bcf86"
       }
     ],
     "sections": [

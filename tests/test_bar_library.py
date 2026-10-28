@@ -163,7 +163,7 @@ def test_summary_only_record_opens_summary_and_bare_audio_sorts_with_aware_meta(
     folder, _ = record(
         tmp_path, "Синхронизировано", started="2026-10-01T23:00:00-07:00", text=False
     )
-    (folder / "summary.md").write_text("Пересказ")
+    (folder / "summary.txt").write_text("Пересказ")
     bare = tmp_path / "2026-09-30_09-15"
     bare.mkdir()
     (bare / "mic.wav").write_bytes(b"\0" * 32044)
@@ -174,6 +174,24 @@ def test_summary_only_record_opens_summary_and_bare_audio_sorts_with_aware_meta(
     assert [b.key for b in card.menu[:2]] == [
         f"record:{card.id}:summary", f"record:{card.id}:folder",
     ]  # fmt: skip
+
+
+def test_summary_md_of_an_earlier_version_is_renamed_when_the_feed_reads_it(tmp_path):
+    folder, _ = record(tmp_path, "Звонок")
+    (folder / "summary.md").write_text("Суть звонка.\n\n- пункт\n")
+    both, _ = record(tmp_path, "Обе")
+    (both / "summary.md").write_text("старая")
+    (both / "summary.txt").write_text("новая")
+    section = tmp_path / "Работа"
+    record(section, "Встреча")
+    (section / "summary.md").write_text("чужой файл")
+    card = next(c for c in library(tmp_path).cards if c.title == "Звонок")
+    assert card.gist == "Суть звонка." and card.has_summary
+    assert (folder / "summary.txt").read_text() == "Суть звонка.\n\n- пункт\n"
+    assert not (folder / "summary.md").exists()
+    assert (both / "summary.md").read_text() == "старая"  # summary.txt wins, nothing is lost
+    assert (both / "summary.txt").read_text() == "новая"
+    assert (section / "summary.md").exists()  # only a recording's summary is renamed
 
 
 def test_cleanup_uses_native_trash_only_for_processed_idle_audio(tmp_path):
