@@ -1,0 +1,75 @@
+{
+  "type": "ask",
+  "id": 8,
+  "ask": {
+    "kind": "form",
+    "title": "Модель для пересказа",
+    "message": "Сейчас: gemini/gemini-flash-latest, ключ …a1B2",
+    "fields": [
+      {
+        "id": "provider",
+        "label": "Провайдер",
+        "kind": "choice",
+        "placeholder": "",
+        "choices": [
+          {
+            "key": "gemini",
+            "title": "Gemini",
+            "detail": "",
+            "checked": true,
+            "enabled": true
+          },
+          {
+            "key": "deepseek",
+            "title": "DeepSeek",
+            "detail": "",
+            "checked": false,
+            "enabled": true
+          },
+          {
+            "key": "openai",
+            "title": "OpenAI",
+            "detail": "",
+            "checked": false,
+            "enabled": true
+          },
+          {
+            "key": "claude",
+            "title": "Claude",
+            "detail": "",
+            "checked": false,
+            "enabled": true
+          },
+          {
+            "key": "qwen",
+            "title": "Qwen",
+            "detail": "",
+            "checked": false,
+            "enabled": true
+          },
+          {
+            "key": "openrouter",
+            "title": "OpenRouter",
+            "detail": "",
+            "checked": false,
+            "enabled": true
+          },
+          {
+            "key": "groq",
+            "title": "Groq",
+            "detail": "",
+            "checked": false,
+            "enabled": true
+          }
+        ]
+      }
+    ],
+    "rev": 0,
+    "error": "",
+    "busy": "",
+    "ok": "Далее",
+    "force": "",
+    "cancel": "Отменить",
+    "clear": []
+  }
+}

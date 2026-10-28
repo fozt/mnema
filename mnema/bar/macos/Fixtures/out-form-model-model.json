@@ -1,0 +1,54 @@
+{
+  "type": "form",
+  "id": 8,
+  "ask": {
+    "kind": "form",
+    "title": "Модель для пересказа",
+    "message": "",
+    "fields": [
+      {
+        "id": "model",
+        "label": "Модель",
+        "kind": "choice",
+        "placeholder": "",
+        "choices": [
+          {
+            "key": "qwen/qwen3-235b-a22b:free",
+            "title": "qwen/qwen3-235b-a22b:free",
+            "detail": "бесплатная",
+            "checked": true,
+            "enabled": true
+          },
+          {
+            "key": "deepseek/deepseek-chat-v3.1:free",
+            "title": "deepseek/deepseek-chat-v3.1:free",
+            "detail": "бесплатная",
+            "checked": false,
+            "enabled": true
+          },
+          {
+            "key": "anthropic/claude-sonnet-5",
+            "title": "anthropic/claude-sonnet-5",
+            "detail": "",
+            "checked": false,
+            "enabled": true
+          },
+          {
+            "key": "openai/gpt-5.5",
+            "title": "openai/gpt-5.5",
+            "detail": "",
+            "checked": false,
+            "enabled": true
+          }
+        ]
+      }
+    ],
+    "rev": 3,
+    "error": "",
+    "busy": "",
+    "ok": "Проверить и сохранить",
+    "force": "",
+    "cancel": "Отменить",
+    "clear": []
+  }
+}

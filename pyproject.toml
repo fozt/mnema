@@ -1,0 +1,132 @@
+[project]
+name = "mnema"
+version = "0.3.0"
+description = "Meeting recordings: transcription, translation, summaries, merging, compression"
+requires-python = ">=3.12"
+# The core is a thin client: HTTP to the server and link downloads; the server calls the cloud
+# model. Recognition engines and the server's web stack are in the "full" extra.
+dependencies = [
+    "pydantic>=2",
+    "pydantic-settings>=2",  # typed config from the environment (ops imports llm.config)
+    "python-dotenv",
+    "rich",
+    "httpx",
+    "litellm",  # the cloud model of the machine that processes, and `mnema model`
+    # Links (YouTube, Instagram, ...) to audio/video. In the core, not in full: links are
+    # downloaded on the client even with a server (--cookies-from-browser reads local cookies).
+    # Extractors break when sites change: on a regression raise the floor and relock.
+    # [default] is yt-dlp's recommended set (brotli, mutagen, websockets, YouTube EJS).
+    "yt-dlp[default]>=2026.10.21",
+    # JS runtime for YouTube: the deno binary lands in the environment, no separate install.
+    "deno>=2.9.8",
+    # Chrome cookies on Linux: the decryption key is in the Secret Service (Keyring, KWallet).
+    "secretstorage; sys_platform == 'linux'",
+    # Microphone capture, light with wheels everywhere. In the core rather than an extra:
+    # `uv run` syncs the environment exactly and would drop an extra on every run.
+    "sounddevice>=0.5",
+]
+
+[project.optional-dependencies]
+# Recognition engines, one extra each: Engine.extra in mnema/core/backends.py names it, and
+# mnema/extras.py says which of them the Mac app ships.
+parakeet = [
+    "parakeet-mlx>=0.5.3; sys_platform == 'darwin' and platform_machine == 'arm64'",  # Ultra on the GPU
+    "transformers>=4.57",  # ParakeetEncoder on Linux; tokenizers and safetensors everywhere
+    "silero-vad",  # splits long recordings at pauses (offline, no gated models or HF_TOKEN)
+    "torch; sys_platform == 'linux'",
+]
+whisper = [
+    "mlx-whisper; sys_platform == 'darwin'",   # Whisper on Apple Silicon
+    "whisperx>=3.8.6; sys_platform == 'linux'",  # Whisper on CUDA (progress_callback ≥3.8.6)
+    "torch; sys_platform == 'linux'",
+]
+gigaam = [
+    # Russian speech, v3_e2e_rnnt with punctuation and case. 0.2.0 (v3, torch ≥2.6, numpy 2)
+    # is only on GitHub; PyPI has 0.1.0
+    "gigaam[torch] @ git+https://github.com/salute-developers/GigaAM@7447938d791c4f3e643386ee22c33777004293a5",
+    "silero-vad",
+    "torch; sys_platform == 'linux'",
+]
+# The server (and a development machine): every engine and the web API. The Mac app installs
+# its own list (mnema/extras.py), without GigaAM and the web API.
+full = [
+    "mnema[parakeet,whisper,gigaam]",
+    "fastapi",
+    "uvicorn[standard]",
+    "python-multipart",  # multipart uploads to the server API
+]
+# The mnema-bar app. macOS: Mnema.app in Swift, PyObjC gives the engine the Trash and system
+# audio; Linux: a pystray + AppIndicator tray (PyGObject; install.sh installs the system gir
+# packages). Pillow draws the icons.
+menubar = [
+    "pyobjc-framework-Cocoa; platform_system == 'Darwin'",
+    "pillow",
+    "pystray; platform_system == 'Linux'",
+    # <3.51 builds against girepository-1.0 (Ubuntu 22.04 and 24.04); newer needs 2.0
+    "PyGObject<3.51; platform_system == 'Linux'",
+]
+# Live transcription on the server (/api/live): WhisperLiveKit. pyobjc gives macOS system audio
+# (--system) through a Core Audio tap.
+live = [
+    "whisperlivekit>=0.2",
+    "websockets>=12",
+    "numpy",  # system audio PCM conversion (float32 48 kHz → int16 16 kHz)
+    # numba comes through librosa. Without a floor uv picks the newest numpy and falls back to
+    # numba 0.53.1, whose llvmlite 0.36 does not build on Python 3.12.
+    "numba>=0.60",
+    "pyobjc-framework-Cocoa; platform_system == 'Darwin'",
+]
+# MCP server (mnema-mcp): the operation registry for MCP clients. No engines of its own:
+# operations go through dispatch (full locally, otherwise the server).
+mcp = ["mcp>=1.2,<2"]  # 2.0 renamed FastMCP (mcp.server.fastmcp)
+
+[dependency-groups]
+# Development and test tools. CI installs the core and only these:
+# `uv sync --no-dev --group tools`.
+tools = [
+    "ruff", "pytest", "pytest-xdist", "ty",  # xdist: `pytest -n auto` locally
+    "numpy",  # numeric tests of the weight conversion without ASR, MLX or torch
+    # The server's HTTP stack for API tests (TestClient), so CI needs no engines
+    "fastapi", "uvicorn[standard]", "python-multipart",
+]
+# Default group: plain `uv sync` installs the core and the tools, no recognition engines.
+# Engines and the apps' extras on demand: `uv sync --all-extras`. install.sh and updates
+# install with `--no-dev`, so the tools never reach an installation, and the app gets its own
+# environment outside .venv: `uv sync` is exact, one .venv cannot serve both.
+dev = [{ include-group = "tools" }]
+
+[project.scripts]
+mnema = "mnema.cli:main"
+mnema-bar = "mnema.bar.app:main"
+mnema-mcp = "mnema.mcp.server:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+override-dependencies = [
+    # transformers 5 on macOS for ParakeetEncoder.
+    "transformers>=5.0.0; sys_platform == 'darwin'",
+    # WhisperX on Linux needs huggingface-hub <1, which transformers 5 does not support.
+    "transformers>=4.57,<5; sys_platform == 'linux'",
+]
+
+[tool.hatch.metadata]
+allow-direct-references = true  # gigaam from GitHub
+
+[tool.hatch.build.targets.wheel]
+packages = ["mnema"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+# E/W style, F errors, I imports, UP syntax upgrades, B bug traps
+select = ["E", "W", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# a third-party deprecation in the starlette TestClient
+filterwarnings = ["ignore:Using .httpx. with .starlette.testclient.:Warning"]

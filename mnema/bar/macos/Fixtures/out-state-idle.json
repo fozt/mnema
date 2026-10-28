@@ -1,0 +1,994 @@
+{
+  "type": "state",
+  "panel": {
+    "version": 1,
+    "screen": "idle",
+    "status": {
+      "icon": "idle",
+      "text": "",
+      "tooltip": "Mnema"
+    },
+    "header": "Mnema",
+    "where": "Дом",
+    "where_state": "ok",
+    "notices": [
+      {
+        "text": "Доступно обновление: Mnema 0.3.0",
+        "buttons": [
+          {
+            "key": "update",
+            "title": "Обновить",
+            "role": "normal",
+            "enabled": true,
+            "symbol": "",
+            "checked": null,
+            "compact": false,
+            "divider": false,
+            "children": []
+          }
+        ],
+        "kind": "info"
+      }
+    ],
+    "idle": {
+      "start": {
+        "key": "start",
+        "title": "Начать запись",
+        "role": "primary",
+        "enabled": true,
+        "symbol": "record.circle",
+        "checked": null,
+        "compact": false,
+        "divider": false,
+        "children": []
+      },
+      "sources": [
+        {
+          "label": "mic",
+          "title": "Микрофон",
+          "symbol": "mic.fill",
+          "symbol_off": "mic.slash.fill",
+          "on": true,
+          "key": "toggle_mic",
+          "enabled": true,
+          "levels": [],
+          "status": ""
+        },
+        {
+          "label": "system",
+          "title": "Системный звук",
+          "symbol": "speaker.wave.2.fill",
+          "symbol_off": "speaker.slash.fill",
+          "on": true,
+          "key": "toggle_system",
+          "enabled": true,
+          "levels": [],
+          "status": ""
+        }
+      ],
+      "section": {
+        "kind": "choice",
+        "title": "Раздел",
+        "key": null,
+        "checked": false,
+        "enabled": true,
+        "value": "Работа",
+        "detail": "",
+        "placeholder": "",
+        "error": "",
+        "role": "normal",
+        "choices": [
+          {
+            "key": "record_section:",
+            "title": "Без раздела",
+            "detail": "",
+            "checked": false,
+            "enabled": true
+          },
+          {
+            "key": "record_section:Работа",
+            "title": "Работа",
+            "detail": "",
+            "checked": true,
+            "enabled": true
+          }
+        ],
+        "tone": "none"
+      }
+    },
+    "recording": null,
+    "empty": "Записей пока нет",
+    "cards": [
+      {
+        "id": "00000000-0000-4000-8000-000000000001",
+        "section": "Работа",
+        "title": "Weekly team sync",
+        "subtitle": "Сегодня, 9:15 · 14 мин",
+        "gist": "Обсудили сроки задач спринта: договорились сначала закончить тесты, а рефакторинг перенести на следующую неделю.",
+        "status": "",
+        "warn": false,
+        "remarks": [],
+        "open_key": "record:00000000-0000-4000-8000-000000000001:folder",
+        "buttons": [],
+        "menu": [
+          {
+            "key": "record:00000000-0000-4000-8000-000000000001:summary",
+            "title": "Открыть пересказ",
+            "role": "normal",
+            "enabled": true,
+            "symbol": "",
+            "checked": null,
+            "compact": false,
+            "divider": false,
+            "children": []
+          },
+          {
+            "key": "record:00000000-0000-4000-8000-000000000001:transcript",
+            "title": "Открыть расшифровку",
+            "role": "normal",
+            "enabled": true,
+            "symbol": "",
+            "checked": null,
+            "compact": false,
+            "divider": false,
+            "children": []
+          },
+          {
+            "key": "record:00000000-0000-4000-8000-000000000001:folder",
+            "title": "Открыть папку",
+            "role": "normal",
+            "enabled": true,
+            "symbol": "",
+            "checked": null,
+            "compact": false,
+            "divider": false,
+            "children": []
+          },
+          {
+            "key": "record:00000000-0000-4000-8000-000000000001:rename",
+            "title": "Переименовать…",
+            "role": "normal",
+            "enabled": true,
+            "symbol": "",
+            "checked": null,
+            "compact": false,
+            "divider": true,
+            "children": []
+          },
+          {
+            "key": "record:00000000-0000-4000-8000-000000000001:move",
+            "title": "Переместить в раздел",
+            "role": "normal",
+            "enabled": true,
+            "symbol": "",
+            "checked": null,
+            "compact": false,
+            "divider": false,
+            "children": [
+              {
+                "key": "record:00000000-0000-4000-8000-000000000001:move:",
+                "title": "Без раздела",
+                "role": "normal",
+                "enabled": true,
+                "symbol": "",
+                "checked": false,
+                "compact": false,
+                "divider": false,
+                "children": []
+              },
+              {
+                "key": "record:00000000-0000-4000-8000-000000000001:move:Работа",
+                "title": "Работа",
+                "role": "normal",
+                "enabled": true,
+                "symbol": "",
+                "checked": true,
+                "compact": false,
+                "divider": false,
+                "children": []
+              },
+              {
+                "key": "record:00000000-0000-4000-8000-000000000001:new_section",
+                "title": "Новый раздел…",
+                "role": "normal",
+                "enabled": true,
+                "symbol": "",
+                "checked": null,
+                "compact": false,
+                "divider": true,
+                "children": []
+              }
+            ]
+          },
+          {
+            "key": "record:00000000-0000-4000-8000-000000000001:process",
+            "title": "Обработать заново…",
+            "role": "normal",
+            "enabled": true,
+            "symbol": "",
+            "checked": null,
+            "compact": false,
+            "divider": false,
+            "children": []
+          },
+          {
+            "key": "record:00000000-0000-4000-8000-000000000001:trash",
+            "title": "Удалить запись",
+            "role": "destructive",
+            "enabled": true,
+            "symbol": "",
+            "checked": null,
+            "compact": false,
+            "divider": true,
+            "children": []
+          }
+        ],
+        "detail": "Обсудили сроки задач спринта: договорились сначала закончить тесты, а рефакторинг перенести на следующую неделю.",
+        "detail_warn": false,
+        "tooltip": "Обсудили сроки задач спринта: договорились сначала закончить тесты, а рефакторинг перенести на следующую неделю.\nЯзык: русский",
+        "busy": false,
+        "progress": null
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000000002",
+        "section": "",
+        "title": "Вчера, 13:05",
+        "subtitle": "3 ч 58 мин",
+        "gist": "",
+        "status": "",
+        "warn": true,
+        "remarks": [
+          "Дневной лимит модели",
+          "Без названия, без пересказа"
+        ],
+        "open_key": "record:00000000-0000-4000-8000-000000000002:folder",
+        "buttons": [],
+        "menu": [
+          {
+            "key": "record:00000000-0000-4000-8000-000000000002:transcript",
+            "title": "Открыть расшифровку",
+            "role": "normal",
+            "enabled": true,
+            "symbol": "",
+            "checked": null,
+            "compact": false,
+            "divider": false,
+            "children": []
+          },
+          {
+            "key": "record:00000000-0000-4000-8000-000000000002:folder",
+            "title": "Открыть папку",
+            "role": "normal",
+            "enabled": true,
+            "symbol": "",
+            "checked": null,
+            "compact": false,
+            "divider": false,
+            "children": []
+          },
+          {
+            "key": "record:00000000-0000-4000-8000-000000000002:rename",
+            "title": "Переименовать…",
+            "role": "normal",
+            "enabled": true,
+            "symbol": "",
+            "checked": null,
+            "compact": false,
+            "divider": true,
+            "children": []
+          },
+          {
+            "key": "record:00000000-0000-4000-8000-000000000002:move",
+            "title": "Переместить в раздел",
+            "role": "normal",
+            "enabled": true,
+            "symbol": "",
+            "checked": null,
+            "compact": false,
+            "divider": false,
+            "children": [
+              {
+                "key": "record:00000000-0000-4000-8000-000000000002:move:",
+                "title": "Без раздела",
+                "role": "normal",
+                "enabled": true,
+                "symbol": "",
+                "checked": true,
+                "compact": false,
+                "divider": false,
+                "children": []
+              },
+              {
+                "key": "record:00000000-0000-4000-8000-000000000002:move:Работа",
+                "title": "Работа",
+                "role": "normal",
+                "enabled": true,
+                "symbol": "",
+                "checked": false,
+                "compact": false,
+                "divider": false,
+                "children": []
+              },
+              {
+                "key": "record:00000000-0000-4000-8000-000000000002:new_section",
+                "title": "Новый раздел…",
+                "role": "normal",
+                "enabled": true,
+                "symbol": "",
+                "checked": null,
+                "compact": false,
+                "divider": true,
+                "children": []
+              }
+            ]
+          },
+          {
+            "key": "record:00000000-0000-4000-8000-000000000002:summarize",
+            "title": "Составить пересказ",
+            "role": "normal",
+            "enabled": true,
+            "symbol": "",
+            "checked": null,
+            "compact": false,
+            "divider": false,
+            "children": []
+          },
+          {
+            "key": "record:00000000-0000-4000-8000-000000000002:process",
+            "title": "Обработать заново…",
+            "role": "normal",
+            "enabled": true,
+            "symbol": "",
+            "checked": null,
+            "compact": false,
+            "divider": false,
+            "children": []
+          },
+          {
+            "key": "record:00000000-0000-4000-8000-000000000002:trash",
+            "title": "Удалить запись",
+            "role": "destructive",
+            "enabled": true,
+            "symbol": "",
+            "checked": null,
+            "compact": false,
+            "divider": true,
+            "children": []
+          }
+        ],
+        "detail": "Без пересказа",
+        "detail_warn": true,
+        "tooltip": "Дневной лимит модели\nБез названия, без пересказа\nЯзык: русский",
+        "busy": false,
+        "progress": null
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000000003",
+        "section": "",
+        "title": "Release planning 2.0",
+        "subtitle": "Вчера, 9:00 · 16 мин",
+        "gist": "Agreed to ship 2.0 at the end of November and to fix the open bugs first.",
+        "status": "",
+        "warn": true,
+        "remarks": [
+          "Модель не ответила"
+        ],
+        "open_key": "record:00000000-0000-4000-8000-000000000003:folder",
+        "buttons": [],
+        "menu": [
+          {
+            "key": "record:00000000-0000-4000-8000-000000000003:summary",
+            "title": "Открыть пересказ",
+            "role": "normal",
+            "enabled": true,
+            "symbol": "",
+            "checked": null,
+            "compact": false,
+            "divider": false,
+            "children": []
+          },
+          {
+            "key": "record:00000000-0000-4000-8000-000000000003:transcript",
+            "title": "Открыть расшифровку",
+            "role": "normal",
+            "enabled": true,
+            "symbol": "",
+            "checked": null,
+            "compact": false,
+            "divider": false,
+            "children": []
+          },
+          {
+            "key": "record:00000000-0000-4000-8000-000000000003:folder",
+            "title": "Открыть папку",
+            "role": "normal",
+            "enabled": true,
+            "symbol": "",
+            "checked": null,
+            "compact": false,
+            "divider": false,
+            "children": []
+          },
+          {
+            "key": "record:00000000-0000-4000-8000-000000000003:rename",
+            "title": "Переименовать…",
+            "role": "normal",
+            "enabled": true,
+            "symbol": "",
+            "checked": null,
+            "compact": false,
+            "divider": true,
+            "children": []
+          },
+          {
+            "key": "record:00000000-0000-4000-8000-000000000003:move",
+            "title": "Переместить в раздел",
+            "role": "normal",
+            "enabled": true,
+            "symbol": "",
+            "checked": null,
+            "compact": false,
+            "divider": false,
+            "children": [
+              {
+                "key": "record:00000000-0000-4000-8000-000000000003:move:",
+                "title": "Без раздела",
+                "role": "normal",
+                "enabled": true,
+                "symbol": "",
+                "checked": true,
+                "compact": false,
+                "divider": false,
+                "children": []
+              },
+              {
+                "key": "record:00000000-0000-4000-8000-000000000003:move:Работа",
+                "title": "Работа",
+                "role": "normal",
+                "enabled": true,
+                "symbol": "",
+                "checked": false,
+                "compact": false,
+                "divider": false,
+                "children": []
+              },
+              {
+                "key": "record:00000000-0000-4000-8000-000000000003:new_section",
+                "title": "Новый раздел…",
+                "role": "normal",
+                "enabled": true,
+                "symbol": "",
+                "checked": null,
+                "compact": false,
+                "divider": true,
+                "children": []
+              }
+            ]
+          },
+          {
+            "key": "record:00000000-0000-4000-8000-000000000003:trash",
+            "title": "Удалить запись",
+            "role": "destructive",
+            "enabled": true,
+            "symbol": "",
+            "checked": null,
+            "compact": false,
+            "divider": true,
+            "children": []
+          }
+        ],
+        "detail": "Agreed to ship 2.0 at the end of November and to fix the open bugs first.",
+        "detail_warn": false,
+        "tooltip": "Agreed to ship 2.0 at the end of November and to fix the open bugs first.\nМодель не ответила\nЯзык: английский",
+        "busy": false,
+        "progress": null
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000000004",
+        "section": "",
+        "title": "28 сент., 14:05",
+        "subtitle": "47 мин",
+        "gist": "",
+        "status": "Не обработана",
+        "warn": false,
+        "remarks": [],
+        "open_key": "record:00000000-0000-4000-8000-000000000004:folder",
+        "buttons": [
+          {
+            "key": "record:00000000-0000-4000-8000-000000000004:process",
+            "title": "Обработать…",
+            "role": "normal",
+            "enabled": true,
+            "symbol": "",
+            "checked": null,
+            "compact": false,
+            "divider": false,
+            "children": []
+          }
+        ],
+        "menu": [
+          {
+            "key": "record:00000000-0000-4000-8000-000000000004:folder",
+            "title": "Открыть папку",
+            "role": "normal",
+            "enabled": true,
+            "symbol": "",
+            "checked": null,
+            "compact": false,
+            "divider": false,
+            "children": []
+          },
+          {
+            "key": "record:00000000-0000-4000-8000-000000000004:process",
+            "title": "Обработать…",
+            "role": "normal",
+            "enabled": true,
+            "symbol": "",
+            "checked": null,
+            "compact": false,
+            "divider": true,
+            "children": []
+          },
+          {
+            "key": "record:00000000-0000-4000-8000-000000000004:rename",
+            "title": "Переименовать…",
+            "role": "normal",
+            "enabled": true,
+            "symbol": "",
+            "checked": null,
+            "compact": false,
+            "divider": false,
+            "children": []
+          },
+          {
+            "key": "record:00000000-0000-4000-8000-000000000004:move",
+            "title": "Переместить в раздел",
+            "role": "normal",
+            "enabled": true,
+            "symbol": "",
+            "checked": null,
+            "compact": false,
+            "divider": false,
+            "children": [
+              {
+                "key": "record:00000000-0000-4000-8000-000000000004:move:",
+                "title": "Без раздела",
+                "role": "normal",
+                "enabled": true,
+                "symbol": "",
+                "checked": true,
+                "compact": false,
+                "divider": false,
+                "children": []
+              },
+              {
+                "key": "record:00000000-0000-4000-8000-000000000004:move:Работа",
+                "title": "Работа",
+                "role": "normal",
+                "enabled": true,
+                "symbol": "",
+                "checked": false,
+                "compact": false,
+                "divider": false,
+                "children": []
+              },
+              {
+                "key": "record:00000000-0000-4000-8000-000000000004:new_section",
+                "title": "Новый раздел…",
+                "role": "normal",
+                "enabled": true,
+                "symbol": "",
+                "checked": null,
+                "compact": false,
+                "divider": true,
+                "children": []
+              }
+            ]
+          },
+          {
+            "key": "record:00000000-0000-4000-8000-000000000004:trash",
+            "title": "Удалить запись",
+            "role": "destructive",
+            "enabled": true,
+            "symbol": "",
+            "checked": null,
+            "compact": false,
+            "divider": true,
+            "children": []
+          }
+        ],
+        "detail": "Не обработана",
+        "detail_warn": true,
+        "tooltip": "",
+        "busy": false,
+        "progress": null
+      }
+    ],
+    "sections": [
+      "Работа"
+    ],
+    "cleanup": {
+      "key": "cleanup_audio",
+      "title": "Удалить звук обработанных записей…",
+      "role": "normal",
+      "enabled": true,
+      "symbol": "waveform",
+      "checked": null,
+      "compact": false,
+      "divider": false,
+      "children": []
+    },
+    "footer": [
+      {
+        "key": "open_folder",
+        "title": "Открыть папку записей",
+        "role": "normal",
+        "enabled": true,
+        "symbol": "folder",
+        "checked": null,
+        "compact": false,
+        "divider": false,
+        "children": []
+      },
+      {
+        "key": "process_folder",
+        "title": "Обработать запись…",
+        "role": "normal",
+        "enabled": true,
+        "symbol": "waveform.badge.plus",
+        "checked": null,
+        "compact": false,
+        "divider": false,
+        "children": []
+      },
+      {
+        "key": "quit",
+        "title": "Завершить Mnema",
+        "role": "normal",
+        "enabled": true,
+        "symbol": "power",
+        "checked": null,
+        "compact": false,
+        "divider": true,
+        "children": []
+      }
+    ],
+    "settings": {
+      "title": "Настройки",
+      "tabs": [
+        {
+          "id": "record",
+          "title": "Запись",
+          "symbol": "mic",
+          "sections": [
+            {
+              "title": "Источники звука",
+              "fields": [
+                {
+                  "kind": "toggle",
+                  "title": "Микрофон",
+                  "key": "toggle_mic",
+                  "checked": true,
+                  "enabled": true,
+                  "value": "",
+                  "detail": "",
+                  "placeholder": "",
+                  "error": "",
+                  "role": "normal",
+                  "choices": [],
+                  "tone": "none"
+                },
+                {
+                  "kind": "toggle",
+                  "title": "Системный звук",
+                  "key": "toggle_system",
+                  "checked": true,
+                  "enabled": true,
+                  "value": "",
+                  "detail": "",
+                  "placeholder": "",
+                  "error": "",
+                  "role": "normal",
+                  "choices": [],
+                  "tone": "none"
+                }
+              ]
+            },
+            {
+              "title": "Обработка",
+              "fields": [
+                {
+                  "kind": "choice",
+                  "title": "Где обрабатывать",
+                  "key": null,
+                  "checked": false,
+                  "enabled": true,
+                  "value": "на этом Mac",
+                  "detail": "",
+                  "placeholder": "",
+                  "error": "",
+                  "role": "normal",
+                  "choices": [
+                    {
+                      "key": "where:mac",
+                      "title": "На этом Mac",
+                      "detail": "",
+                      "checked": true,
+                      "enabled": true
+                    },
+                    {
+                      "key": "where:server",
+                      "title": "На сервере",
+                      "detail": "",
+                      "checked": false,
+                      "enabled": true
+                    }
+                  ],
+                  "tone": "none"
+                },
+                {
+                  "kind": "choice",
+                  "title": "Распознавание",
+                  "key": null,
+                  "checked": false,
+                  "enabled": true,
+                  "value": "Автоматически",
+                  "detail": "",
+                  "placeholder": "",
+                  "error": "",
+                  "role": "normal",
+                  "choices": [
+                    {
+                      "key": "asr:auto",
+                      "title": "Автоматически",
+                      "detail": "",
+                      "checked": true,
+                      "enabled": true
+                    },
+                    {
+                      "key": "asr:parakeet",
+                      "title": "Parakeet",
+                      "detail": "",
+                      "checked": false,
+                      "enabled": true
+                    },
+                    {
+                      "key": "asr:gigaam",
+                      "title": "GigaAM",
+                      "detail": "",
+                      "checked": false,
+                      "enabled": true
+                    },
+                    {
+                      "key": "asr:whisper",
+                      "title": "Whisper",
+                      "detail": "",
+                      "checked": false,
+                      "enabled": true
+                    }
+                  ],
+                  "tone": "none"
+                },
+                {
+                  "kind": "status",
+                  "title": "Модель",
+                  "key": null,
+                  "checked": false,
+                  "enabled": true,
+                  "value": "gemini/gemini-flash-latest",
+                  "detail": "",
+                  "placeholder": "",
+                  "error": "",
+                  "role": "normal",
+                  "choices": [],
+                  "tone": "ok"
+                },
+                {
+                  "kind": "button",
+                  "title": "Выбрать модель…",
+                  "key": "model_setup",
+                  "checked": false,
+                  "enabled": true,
+                  "value": "",
+                  "detail": "",
+                  "placeholder": "",
+                  "error": "",
+                  "role": "normal",
+                  "choices": [],
+                  "tone": "none"
+                },
+                {
+                  "kind": "toggle",
+                  "title": "Составлять пересказ",
+                  "key": "summary",
+                  "checked": true,
+                  "enabled": true,
+                  "value": "",
+                  "detail": "",
+                  "placeholder": "",
+                  "error": "",
+                  "role": "normal",
+                  "choices": [],
+                  "tone": "none"
+                },
+                {
+                  "kind": "choice",
+                  "title": "Язык пересказа",
+                  "key": null,
+                  "checked": false,
+                  "enabled": true,
+                  "value": "как в разговоре",
+                  "detail": "",
+                  "placeholder": "",
+                  "error": "",
+                  "role": "normal",
+                  "choices": [
+                    {
+                      "key": "summary_lang:auto",
+                      "title": "Как в разговоре",
+                      "detail": "",
+                      "checked": true,
+                      "enabled": true
+                    },
+                    {
+                      "key": "summary_lang:ru",
+                      "title": "Русский",
+                      "detail": "",
+                      "checked": false,
+                      "enabled": true
+                    },
+                    {
+                      "key": "summary_lang:en",
+                      "title": "Английский",
+                      "detail": "",
+                      "checked": false,
+                      "enabled": true
+                    }
+                  ],
+                  "tone": "none"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "server",
+          "title": "Сервер",
+          "symbol": "server.rack",
+          "sections": [
+            {
+              "title": "Подключение",
+              "fields": [
+                {
+                  "kind": "status",
+                  "title": "Дом",
+                  "key": null,
+                  "checked": false,
+                  "enabled": true,
+                  "value": "Подключён",
+                  "detail": "srv:8123",
+                  "placeholder": "",
+                  "error": "",
+                  "role": "normal",
+                  "choices": [],
+                  "tone": "ok"
+                },
+                {
+                  "kind": "status",
+                  "title": "Записей на сервере",
+                  "key": null,
+                  "checked": false,
+                  "enabled": true,
+                  "value": "128",
+                  "detail": "",
+                  "placeholder": "",
+                  "error": "",
+                  "role": "normal",
+                  "choices": [],
+                  "tone": "none"
+                },
+                {
+                  "kind": "button",
+                  "title": "Подключить другой…",
+                  "key": "server_setup",
+                  "checked": false,
+                  "enabled": true,
+                  "value": "",
+                  "detail": "",
+                  "placeholder": "",
+                  "error": "",
+                  "role": "normal",
+                  "choices": [],
+                  "tone": "none"
+                },
+                {
+                  "kind": "button",
+                  "title": "Отключить",
+                  "key": "server_off",
+                  "checked": false,
+                  "enabled": true,
+                  "value": "",
+                  "detail": "",
+                  "placeholder": "",
+                  "error": "",
+                  "role": "destructive",
+                  "choices": [],
+                  "tone": "none"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "general",
+          "title": "Общие",
+          "symbol": "gearshape",
+          "sections": [
+            {
+              "title": "",
+              "fields": [
+                {
+                  "kind": "hotkey",
+                  "title": "Начать или остановить запись",
+                  "key": "hotkey",
+                  "checked": false,
+                  "enabled": true,
+                  "value": "ctrl+opt+R",
+                  "detail": "",
+                  "placeholder": "Нажмите сочетание",
+                  "error": "",
+                  "role": "normal",
+                  "choices": [],
+                  "tone": "none"
+                },
+                {
+                  "kind": "toggle",
+                  "title": "Скрывать запись в строке меню",
+                  "key": "discreet",
+                  "checked": false,
+                  "enabled": true,
+                  "value": "",
+                  "detail": "",
+                  "placeholder": "",
+                  "error": "",
+                  "role": "normal",
+                  "choices": [],
+                  "tone": "none"
+                },
+                {
+                  "kind": "toggle",
+                  "title": "Открывать при входе в систему",
+                  "key": "autostart",
+                  "checked": true,
+                  "enabled": true,
+                  "value": "",
+                  "detail": "",
+                  "placeholder": "",
+                  "error": "",
+                  "role": "normal",
+                  "choices": [],
+                  "tone": "none"
+                },
+                {
+                  "kind": "button",
+                  "title": "Завершить Mnema",
+                  "key": "quit",
+                  "checked": false,
+                  "enabled": true,
+                  "value": "",
+                  "detail": "",
+                  "placeholder": "",
+                  "error": "",
+                  "role": "normal",
+                  "choices": [],
+                  "tone": "none"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "hotkey": "ctrl+opt+R"
+  }
+}

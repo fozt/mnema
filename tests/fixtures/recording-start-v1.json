@@ -1,0 +1,30 @@
+{
+  "about": "Начало записи (naming.recording_start на ПК и сервере, его порт на телефоне): имя по времени — дата и время из него; иначе meta started (время в поясе, где писали), без него — по файлам: самая длинная WAV-дорожка — её mtime минус её длина (lengths), нет WAV — самый ранний звук (core.base.AUDIO_EXT, на телефоне AUDIO_EXTENSIONS: .aac, .flac, .m4a, .mp3, .ogg, .opus, .wav, .wma), нет звука — самый ранний файл (служебные «.…» не в счёт), mtime папки — никогда; дата в начале имени главнее, если день расходится. start — местное время без пояса (файлы — в поясе zone), known false — известна только дата (без start — не известно ничего, начало — сейчас). stored false — в meta started не записывается: угаданное время не сохраняем (started_iso). lengths — длина WAV-дорожки (naming.wav_seconds; по ней же длина в карточке): по заголовку PCM WAV — частота, каналы и размер звука в чанке data; длина звука в нём не дописана (меньше остатка файла и за звуком нет чанка RIFF или больше остатка) — звук до конца файла; не WAV — (размер − 44) / 32000 с, не меньше 0. size — файл без заголовка (нули); wav — файл PCM 16 бит: rate, channels (по умолчанию 1), frames — кадров звука (нули), declared — размер звука в заголовке (по умолчанию настоящий), before — чанк LIST из стольких байт между fmt и data, after — такой же чанк после звука.",
+  "zone": "UTC",
+  "cases": [
+    {"folder": "2026-10-21_09-00", "meta": "2026-10-21T08:35:00+03:00", "start": "2026-10-21T09:00:00", "known": true},
+    {"folder": "2026-10-21_Дейли", "meta": "2026-10-21T08:35:00+03:00", "start": "2026-10-21T08:35:00", "known": true},
+    {"folder": "2026-10-20_Дейли", "meta": "2026-10-21T08:35:00+03:00", "start": "2026-10-20T08:35:00", "known": true},
+    {"folder": "Звонок маме", "meta": "2026-10-22T19:05:00+03:00", "start": "2026-10-22T19:05:00", "known": true},
+    {"folder": "Звонок маме", "meta": "вчера", "files": [{"name": "transcript.txt", "size": 10, "mtime": "2026-10-22T10:00:00Z"}], "start": "2026-10-22T10:00:00", "known": true},
+    {"folder": "Звонок маме", "files": [{"name": "mic.wav", "size": 19200044, "mtime": "2026-10-22T19:15:00Z"}], "start": "2026-10-22T19:05:00", "known": true},
+    {"folder": "Звонок маме", "files": [{"name": "mic.wav", "size": 19200044, "mtime": "2026-10-22T19:15:00Z"}, {"name": "system.wav", "size": 9600044, "mtime": "2026-10-22T19:16:00Z"}, {"name": "transcript.txt", "size": 10, "mtime": "2026-10-22T08:00:00Z"}], "start": "2026-10-22T19:05:00", "known": true},
+    {"folder": "2026-10-20_Дейли", "files": [{"name": "mic.wav", "size": 19200044, "mtime": "2026-10-21T08:45:00Z"}], "start": "2026-10-20T08:35:00", "known": true},
+    {"folder": "Созвон", "files": [{"name": "transcript.txt", "size": 10, "mtime": "2026-10-22T10:00:00Z"}, {"name": "call.m4a", "size": 1000, "mtime": "2026-10-22T09:00:00Z"}, {"name": "notes.m4a", "size": 1000, "mtime": "2026-10-22T09:30:00Z"}], "start": "2026-10-22T09:00:00", "known": true},
+    {"folder": "Голосовое", "files": [{"name": "transcript.txt", "size": 10, "mtime": "2026-10-22T08:00:00Z"}, {"name": "old.wma", "size": 1000, "mtime": "2026-10-22T09:00:00Z"}], "start": "2026-10-22T09:00:00", "known": true},
+    {"folder": "Заметка", "files": [{"name": ".DS_Store", "size": 10, "mtime": "2026-10-01T00:00:00Z"}, {"name": "summary.md", "size": 10, "mtime": "2026-10-22T11:00:00Z"}, {"name": "transcript.txt", "size": 10, "mtime": "2026-10-22T10:00:00Z"}], "start": "2026-10-22T10:00:00", "known": true},
+    {"folder": "2026-10-21_Дейли", "start": "2026-10-21T00:00:00", "known": false, "stored": false},
+    {"folder": "Звонок маме", "known": false, "stored": false}
+  ],
+  "lengths": [
+    {"size": 19200044, "seconds": 600.0},
+    {"size": 48044, "seconds": 1.5},
+    {"size": 30, "seconds": 0.0},
+    {"wav": {"rate": 48000, "channels": 2, "frames": 48000}, "seconds": 1.0},
+    {"wav": {"rate": 16000, "frames": 24000, "declared": 0}, "seconds": 1.5},
+    {"wav": {"rate": 16000, "frames": 32000, "declared": 16000}, "seconds": 2.0},
+    {"wav": {"rate": 16000, "frames": 16000, "declared": 4294967295}, "seconds": 1.0},
+    {"wav": {"rate": 44100, "frames": 22050, "before": 26}, "seconds": 0.5},
+    {"wav": {"rate": 16000, "frames": 16000, "after": 34}, "seconds": 1.0}
+  ]
+}

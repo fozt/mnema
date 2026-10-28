@@ -1,0 +1,45 @@
+{
+  "about": "Нет звука на дорожке «Системный звук» (телефон): секунды записи из отчёта помощника (.mnema-helper-report.json, seconds) → причина в параметрах задачи (silent_reason, Pipeline.otherSideSilence) → замечание сервера (remarks.track_silent) → предупреждение записи на телефоне (otherSideWarning по code, текст — short). Причина есть, только когда у собеседника не было звука ни секунды: blocked — шёл сотовый звонок или звонок мессенджера, none — звонка не было, входящий вызов разговором не считается.",
+  "cases": [
+    {
+      "name": "сотовый звонок, звук не пришёл",
+      "seconds": {"total": 95, "call_sound": 0, "mic_sound": 93, "cellular": 88, "messenger": 0, "ringing": 4},
+      "reason": "blocked",
+      "cause": "На дорожке «Системный звук» нет звука: телефон не отдал звук звонка",
+      "short": "Нет звука на дорожке «Системный звук»",
+      "code": "other_side_silent"
+    },
+    {
+      "name": "звонок мессенджера, звук не пришёл",
+      "seconds": {"total": 40, "call_sound": 0, "mic_sound": 40, "cellular": 0, "messenger": 37, "ringing": 0},
+      "reason": "blocked",
+      "cause": "На дорожке «Системный звук» нет звука: телефон не отдал звук звонка",
+      "short": "Нет звука на дорожке «Системный звук»",
+      "code": "other_side_silent"
+    },
+    {
+      "name": "звонка не было",
+      "seconds": {"total": 60, "call_sound": 0, "mic_sound": 58, "cellular": 0, "messenger": 0, "ringing": 0},
+      "reason": "none",
+      "cause": "На дорожке «Системный звук» нет звука: звонка не было",
+      "short": "Нет звука на дорожке «Системный звук»",
+      "code": "other_side_silent"
+    },
+    {
+      "name": "только входящий вызов",
+      "seconds": {"total": 30, "call_sound": 0, "mic_sound": 30, "cellular": 0, "messenger": 0, "ringing": 12},
+      "reason": "none",
+      "cause": "На дорожке «Системный звук» нет звука: звонка не было",
+      "short": "Нет звука на дорожке «Системный звук»",
+      "code": "other_side_silent"
+    },
+    {
+      "name": "звук собеседника был",
+      "seconds": {"total": 95, "call_sound": 2, "mic_sound": 93, "cellular": 88, "messenger": 0, "ringing": 4},
+      "reason": null,
+      "cause": null,
+      "short": null,
+      "code": null
+    }
+  ]
+}

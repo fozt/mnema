@@ -1,0 +1,11 @@
+.gradle/
+.kotlin/
+build/
+local.properties
+*.iml
+.idea/
+captures/
+.cxx/
+
+# the root .gitignore excludes any recordings/ folder; here these are packages
+!/app/src/**/recordings/

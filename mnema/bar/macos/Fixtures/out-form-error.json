@@ -1,0 +1,25 @@
+{
+  "type": "form",
+  "id": 7,
+  "ask": {
+    "kind": "form",
+    "title": "Подключение к серверу",
+    "message": "",
+    "fields": [
+      {
+        "id": "connection",
+        "label": "Приглашение",
+        "kind": "secret",
+        "placeholder": "http://srv:8000",
+        "choices": []
+      }
+    ],
+    "rev": 3,
+    "error": "Сервер не отвечает",
+    "busy": "",
+    "ok": "Проверить и сохранить",
+    "force": "Сохранить всё равно",
+    "cancel": "Отменить",
+    "clear": []
+  }
+}

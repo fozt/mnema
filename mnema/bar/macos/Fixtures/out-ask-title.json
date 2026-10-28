@@ -1,0 +1,14 @@
+{
+  "type": "ask",
+  "id": 1,
+  "ask": {
+    "kind": "title",
+    "title": "Название записи",
+    "value": "Дейли",
+    "placeholder": "Название записи",
+    "ok": "Сохранить",
+    "cancel": "Пропустить",
+    "label": "",
+    "required": false
+  }
+}

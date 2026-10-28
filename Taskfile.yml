@@ -1,0 +1,92 @@
+# Development tasks of mnema (go-task: https://taskfile.dev).
+# Run `task <name>`; `task` or `task --list` lists them.
+version: '3'
+
+vars:
+  VENV: .venv/bin
+
+tasks:
+  default:
+    desc: List the tasks
+    cmds:
+      - task --list
+    silent: true
+
+  install:
+    desc: Install the app from this checkout
+    cmds:
+      - ./install.sh client
+
+  update:
+    desc: Install the published version of the Mnema app
+    cmds:
+      # The app installed by ./install.sh client lives in its own environment, not in .venv
+      - "${XDG_DATA_HOME:-$HOME/.local/share}/mnema/app/.venv/bin/python -m mnema.update"
+
+  serve:
+    desc: Run a Mnema server (runner) on this computer
+    cmds:
+      - "{{.VENV}}/mnema serve"
+
+  format:
+    desc: Format the code (ruff format)
+    cmds:
+      - "{{.VENV}}/ruff format mnema tests scripts"
+
+  lint:
+    desc: Lint and check formatting (ruff)
+    cmds:
+      - "{{.VENV}}/ruff check mnema tests scripts"
+      - "{{.VENV}}/ruff format --check mnema tests scripts"
+
+  typecheck:
+    desc: Type check (ty)
+    cmds:
+      - "{{.VENV}}/ty check mnema"
+
+  test:
+    desc: Unit tests
+    cmds:
+      - "{{.VENV}}/python -m pytest -q"
+
+  check:
+    desc: The full gate before a commit (lint, typecheck, test)
+    cmds:
+      - task: lint
+      - task: typecheck
+      - task: test
+
+  mac:ffmpeg:
+    desc: Build the LGPL ffmpeg and ffprobe of the Mac app into dist/ffmpeg
+    status:
+      - test -x dist/ffmpeg/bin/ffmpeg -a -x dist/ffmpeg/bin/ffprobe
+    cmds:
+      - ./scripts/build_ffmpeg.sh dist/ffmpeg
+
+  mac:app:
+    desc: Build the self-contained Mnema.app, its zip and DMG into dist/mac and check them
+    cmds:
+      - task: mac:ffmpeg
+      - uv run --no-project --python 3.12 python -m scripts.build_mac_app --out dist/mac --ffmpeg dist/ffmpeg --smoke
+
+  android:build:
+    desc: Build the release APK of the Android app
+    dir: android
+    cmds:
+      - ./gradlew --console=plain assembleRelease
+
+  android:test:
+    desc: Unit tests, lint and helper dependencies of the Android app
+    dir: android
+    cmds:
+      - ./gradlew --console=plain testDebugUnitTest lintDebug
+      - python3 scripts/check-helper-deps.py
+
+  android:install:
+    desc: Build the release APK and install it on the connected phone with adb
+    dir: android
+    cmds:
+      - cmd: 'echo "A build signed with the debug key will not install over the CI version: remove the app from the phone first"'
+        silent: true
+      - ./gradlew --console=plain assembleRelease
+      - adb install -r app/build/outputs/apk/release/app-release.apk

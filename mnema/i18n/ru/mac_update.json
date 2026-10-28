@@ -1,0 +1,11 @@
+{
+  "This Mnema version has no Mac app": "В этой версии Mnema нет приложения для Mac",
+  "Move Mnema to the Applications folder to update it. The new version is on the release page: {url}": "Чтобы обновить Mnema, перенесите её в папку «Программы». Новая версия есть на странице выпуска: {url}",
+  "Mnema {version} needs macOS {macos} or later": "Mnema {version} работает на macOS {macos} и новее",
+  "Mnema can't replace itself in this folder. Download the new version from the release page: {url}": "Mnema не может заменить себя в этой папке. Скачайте новую версию на странице выпуска: {url}",
+  "Checking the new version…": "Проверяю новую версию…",
+  "The update package isn't the Mnema app": "В пакете обновления не приложение Mnema",
+  "The update package holds another Mnema version": "В пакете обновления другая версия Mnema",
+  "The new Mnema version isn't signed correctly": "Подпись новой версии Mnema не прошла проверку",
+  "Mnema is running. Quit it and update again, or update from the app: Settings → General → Check for updates": "Mnema запущена. Выйдите из неё и обновите ещё раз или обновите из приложения: «Настройки → Общие → Проверить обновления»"
+}

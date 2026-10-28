@@ -1,0 +1,27 @@
+{
+  "server": "http://node",
+  "records": {
+    "167619ea-d702-4d4f-95f9-339ebc86873e": {
+      "id": "167619ea-d702-4d4f-95f9-339ebc86873e",
+      "path": "Работа/Встреча",
+      "files": {
+        ".mnema-meta.json": {
+          "sha256": "f7ba0e1d29fe9acc1774cf3d7c2e833cd87c089837a76f76dbaa460128209226",
+          "mtime_ns": 1792731600123456789
+        },
+        "transcript.txt": {
+          "sha256": "6834ea433755a066476eeff311954fd3e562f09ccfe80de0d625c3978a03bba6",
+          "mtime_ns": 1792731600123456790
+        },
+        "summary.md": {
+          "sha256": "834210f71684a47b75f477fc1d3ab76051e660d8f5dbe963b3b124098008ac52",
+          "mtime_ns": 1792731600123456791
+        }
+      },
+      "tag": "3d6e9ef08512d98beadeabce8191fd9a2dd97462771039311b0ccb631754f5e1"
+    }
+  },
+  "sections": [
+    "Работа"
+  ]
+}

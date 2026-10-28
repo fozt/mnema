@@ -1,0 +1,14 @@
+{
+  "type": "ask",
+  "id": 9,
+  "ask": {
+    "kind": "title",
+    "title": "Новый раздел",
+    "value": "",
+    "placeholder": "",
+    "ok": "Создать",
+    "cancel": "Отменить",
+    "label": "Название",
+    "required": true
+  }
+}

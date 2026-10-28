@@ -1,0 +1,297 @@
+{
+  "about": "«Удалить звук обработанных»: звук записи уходит в штатную корзину, только если запись обработана (последняя обработка в runs meta без kind или с kind «process» — status ok, остановленная повторная обработка тоже в счёт: звук остаётся; «Составить пересказ», kind «summary», не в счёт) и у неё есть текст. Сервер выбран — ещё и тексты подтверждены последней сверкой с ним: тот же sha256 transcript.txt и summary.md (нет файла — нет и в sync.json) у записи с этим id в sync.json, server которого — выбранный сервер. Сервер не выбран — сверка не нужна, тексты остаются только на этом устройстве. Звук — .aac, .flac, .m4a, .mp3, .ogg, .opus, .wav и .wma без учёта регистра; тексты, видео и прочее остаются. Идущая обработка (.mnema-processing) не очищается. Случай: files — файлы папки записи с содержимым, runs — история обработок в meta, synced — тексты записи при последней сверке (null — записи нет в sync.json), server — сервер последней сверки («selected» — выбранный сейчас), selected — выбран ли сервер сейчас (нет поля — выбран, null — не выбран), removed — файлы, которые уйдут в корзину.",
+  "cases": [
+    {
+      "name": "processed and confirmed",
+      "files": {
+        "mic.wav": "звук",
+        "system.wav": "звук",
+        "transcript.txt": "Я: привет",
+        "summary.md": "Итог",
+        "notes.pdf": "x"
+      },
+      "runs": [
+        {
+          "status": "ok"
+        }
+      ],
+      "synced": {
+        "transcript.txt": "Я: привет",
+        "summary.md": "Итог"
+      },
+      "server": "selected",
+      "removed": [
+        "mic.wav",
+        "system.wav"
+      ]
+    },
+    {
+      "name": "every audio format, video stays",
+      "files": {
+        "mic.wav": "звук",
+        "memo.m4a": "звук",
+        "call.MP3": "звук",
+        "voice.opus": "звук",
+        "old.wma": "звук",
+        "a.aac": "звук",
+        "b.flac": "звук",
+        "c.ogg": "звук",
+        "clip.mp4": "видео",
+        "transcript.txt": "Я: привет"
+      },
+      "runs": [
+        {
+          "status": "ok"
+        }
+      ],
+      "synced": {
+        "transcript.txt": "Я: привет"
+      },
+      "server": "selected",
+      "removed": [
+        "a.aac",
+        "b.flac",
+        "c.ogg",
+        "call.MP3",
+        "memo.m4a",
+        "mic.wav",
+        "old.wma",
+        "voice.opus"
+      ]
+    },
+    {
+      "name": "never synced",
+      "files": {
+        "mic.wav": "звук",
+        "transcript.txt": "Я: привет"
+      },
+      "runs": [
+        {
+          "status": "ok"
+        }
+      ],
+      "synced": null,
+      "server": "selected",
+      "removed": []
+    },
+    {
+      "name": "transcript edited after sync",
+      "files": {
+        "mic.wav": "звук",
+        "transcript.txt": "Я: привет, поправлено"
+      },
+      "runs": [
+        {
+          "status": "ok"
+        }
+      ],
+      "synced": {
+        "transcript.txt": "Я: привет"
+      },
+      "server": "selected",
+      "removed": []
+    },
+    {
+      "name": "summary written after sync",
+      "files": {
+        "mic.wav": "звук",
+        "transcript.txt": "Я: привет",
+        "summary.md": "Итог"
+      },
+      "runs": [
+        {
+          "status": "ok"
+        }
+      ],
+      "synced": {
+        "transcript.txt": "Я: привет"
+      },
+      "server": "selected",
+      "removed": []
+    },
+    {
+      "name": "synced with another server",
+      "files": {
+        "mic.wav": "звук",
+        "transcript.txt": "Я: привет"
+      },
+      "runs": [
+        {
+          "status": "ok"
+        }
+      ],
+      "synced": {
+        "transcript.txt": "Я: привет"
+      },
+      "server": "http://other:8000",
+      "removed": []
+    },
+    {
+      "name": "last processing failed",
+      "files": {
+        "mic.wav": "звук",
+        "transcript.txt": "Я: привет"
+      },
+      "runs": [
+        {
+          "status": "ok"
+        },
+        {
+          "status": "failed"
+        }
+      ],
+      "synced": {
+        "transcript.txt": "Я: привет"
+      },
+      "server": "selected",
+      "removed": []
+    },
+    {
+      "name": "reprocessing stopped",
+      "files": {
+        "mic.wav": "звук",
+        "transcript.txt": "Я: привет"
+      },
+      "runs": [
+        {
+          "status": "ok"
+        },
+        {
+          "status": "stopped"
+        }
+      ],
+      "synced": {
+        "transcript.txt": "Я: привет"
+      },
+      "server": "selected",
+      "removed": []
+    },
+    {
+      "name": "processing stopped, summary made later",
+      "files": {
+        "mic.wav": "звук",
+        "transcript.txt": "Я: привет"
+      },
+      "runs": [
+        {
+          "status": "stopped"
+        },
+        {
+          "kind": "summary",
+          "status": "ok"
+        }
+      ],
+      "synced": {
+        "transcript.txt": "Я: привет"
+      },
+      "server": "selected",
+      "removed": []
+    },
+    {
+      "name": "processed, later summary failed",
+      "files": {
+        "mic.wav": "звук",
+        "transcript.txt": "Я: привет"
+      },
+      "runs": [
+        {
+          "kind": "process",
+          "status": "ok"
+        },
+        {
+          "kind": "summary",
+          "status": "failed"
+        }
+      ],
+      "synced": {
+        "transcript.txt": "Я: привет"
+      },
+      "server": "selected",
+      "removed": [
+        "mic.wav"
+      ]
+    },
+    {
+      "name": "no processing in meta",
+      "files": {
+        "mic.wav": "звук",
+        "transcript.txt": "Я: привет"
+      },
+      "runs": [],
+      "synced": {
+        "transcript.txt": "Я: привет"
+      },
+      "server": "selected",
+      "removed": []
+    },
+    {
+      "name": "processed without speech",
+      "files": {
+        "mic.wav": "звук"
+      },
+      "runs": [
+        {
+          "status": "ok"
+        }
+      ],
+      "synced": {},
+      "server": "selected",
+      "removed": []
+    },
+    {
+      "name": "processing in progress",
+      "files": {
+        "mic.wav": "звук",
+        "transcript.txt": "Я: привет",
+        ".mnema-processing": ""
+      },
+      "runs": [
+        {
+          "status": "ok"
+        }
+      ],
+      "synced": {
+        "transcript.txt": "Я: привет"
+      },
+      "server": "selected",
+      "removed": []
+    },
+    {
+      "name": "no server selected",
+      "files": {
+        "mic.wav": "звук",
+        "transcript.txt": "Я: привет"
+      },
+      "runs": [
+        {
+          "status": "ok"
+        }
+      ],
+      "synced": null,
+      "server": "http://other:8000",
+      "selected": null,
+      "removed": [
+        "mic.wav"
+      ]
+    },
+    {
+      "name": "no server selected, last processing failed",
+      "files": {
+        "mic.wav": "звук",
+        "transcript.txt": "Я: привет"
+      },
+      "runs": [
+        {
+          "status": "ok"
+        },
+        {
+          "status": "failed"
+        }
+      ],
+      "synced": null,
+      "server": "http://other:8000",
+      "selected": null,
+      "removed": []
+    }
+  ]
+}

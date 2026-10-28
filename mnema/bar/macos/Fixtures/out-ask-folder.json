@@ -1,0 +1,10 @@
+{
+  "type": "ask",
+  "id": 3,
+  "ask": {
+    "kind": "folder",
+    "start": "/Users/me/mnema",
+    "message": "Выберите папку с записью",
+    "ok": "Выбрать"
+  }
+}

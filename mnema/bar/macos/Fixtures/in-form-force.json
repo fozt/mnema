@@ -1,0 +1,9 @@
+{
+  "type": "form_event",
+  "id": 7,
+  "rev": 4,
+  "op": "force",
+  "values": {
+    "connection": "http://srv:8000#invite=test-invite"
+  }
+}

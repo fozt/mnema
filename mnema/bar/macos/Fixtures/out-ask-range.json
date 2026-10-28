@@ -1,0 +1,96 @@
+{
+  "type": "ask",
+  "id": 4,
+  "ask": {
+    "kind": "range",
+    "title": "Обработать запись",
+    "subtitle": "Дейли · 27.09 · 1:32:40",
+    "length": 5560.8,
+    "name": "Дейли",
+    "replace": true,
+    "can_replace": true,
+    "start_label": "Начало",
+    "end_label": "Конец",
+    "name_label": "Название",
+    "placeholder": "Название записи",
+    "replace_label": "Переместить полную запись в Корзину",
+    "whole_caption": "Выбрана вся запись",
+    "part_caption": "Выбрано {}",
+    "lang_label": "Язык",
+    "lang": "auto",
+    "langs": [
+      {
+        "key": "auto",
+        "title": "Автоматически",
+        "detail": "",
+        "checked": false,
+        "enabled": true
+      },
+      {
+        "key": "ru",
+        "title": "Русский",
+        "detail": "",
+        "checked": false,
+        "enabled": true
+      },
+      {
+        "key": "en",
+        "title": "Английский",
+        "detail": "",
+        "checked": false,
+        "enabled": true
+      }
+    ],
+    "asr_label": "Распознавание",
+    "asr": "whisper",
+    "asrs": [
+      {
+        "key": "auto",
+        "title": "Автоматически",
+        "detail": "",
+        "checked": false,
+        "enabled": true
+      },
+      {
+        "key": "gigaam",
+        "title": "GigaAM",
+        "detail": "",
+        "checked": false,
+        "enabled": true
+      },
+      {
+        "key": "whisper",
+        "title": "Whisper",
+        "detail": "",
+        "checked": false,
+        "enabled": true
+      },
+      {
+        "key": "groq/whisper-large-v3-turbo",
+        "title": "Groq · whisper-large-v3-turbo",
+        "detail": "",
+        "checked": false,
+        "enabled": true
+      }
+    ],
+    "sources_label": "Источники",
+    "sources": [
+      {
+        "key": "mic",
+        "title": "Микрофон",
+        "detail": "",
+        "checked": true,
+        "enabled": true
+      },
+      {
+        "key": "system",
+        "title": "Системный звук",
+        "detail": "",
+        "checked": false,
+        "enabled": true
+      }
+    ],
+    "ok": "Обработать",
+    "cancel": "Отменить"
+  }
+}

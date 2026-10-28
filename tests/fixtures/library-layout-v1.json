@@ -1,0 +1,180 @@
+{
+  "about": "Раздел или запись: одно правило для сервера, сверки и ленты на всех платформах. records — папки, в которые тест кладёт .mnema-meta.json с новым id и transcript.txt, а при record_files — эти файлы вместо текстов (звук любого формата; запись видна в списке на обеих сторонах); tree — посторонние файлы, путь с / в конце — пустой каталог. known_sections и known_records — разделы и пути записей прошлой сверки из sync.json (история клиента: сервер такие случаи не проверяет). complete (по умолчанию true): обход полный, без ошибок и без новых meta вне records; false — обход неполный, удалений нет (сервер отвечает 503).",
+  "cases": [
+    {
+      "name": "stray files in a section",
+      "records": [
+        "Работа/Встреча"
+      ],
+      "tree": [
+        "Работа/memo.m4a",
+        "Работа/mic.wav",
+        "Работа/transcript.txt",
+        "Работа/summary.md",
+        "Работа/notes.pdf"
+      ],
+      "sections": [
+        "Работа"
+      ]
+    },
+    {
+      "name": "hidden folders",
+      "records": [
+        "Работа/Встреча",
+        "Звонок"
+      ],
+      "tree": [
+        ".obsidian/app.json",
+        ".obsidian/plugins/x/main.js",
+        ".git/objects/ab/cdef",
+        ".stfolder/",
+        ".Trash-1000/files/old/transcript.txt",
+        ".mnema-sync-1/transcript.txt",
+        "Работа/.obsidian/workspace.json",
+        "Работа/.git/objects/ab/cdef",
+        "Работа/.Trash/old/summary.md"
+      ],
+      "sections": [
+        "Работа"
+      ]
+    },
+    {
+      "name": "empty and foreign folders",
+      "records": [
+        "Работа/Встреча"
+      ],
+      "tree": [
+        "Работа/Пустая/",
+        "Работа/Материалы/doc.pdf",
+        "Работа/Материалы/.DS_Store",
+        "Работа/Только скрытое/.DS_Store",
+        "Пустой/",
+        "Документы/a.pdf",
+        "Музыка/memo.m4a",
+        "notes.txt"
+      ],
+      "sections": [
+        "Документы",
+        "Музыка",
+        "Пустой",
+        "Работа"
+      ]
+    },
+    {
+      "name": "folders inside a record",
+      "records": [
+        "Звонок"
+      ],
+      "tree": [
+        "Звонок/Вложения/doc.pdf",
+        "Звонок/.git/HEAD",
+        "Звонок/Пустая/"
+      ],
+      "sections": []
+    },
+    {
+      "name": "record inside a record",
+      "records": [
+        "Звонок",
+        "Звонок/Внутри"
+      ],
+      "tree": [],
+      "sections": [],
+      "complete": false
+    },
+    {
+      "name": "record files in a known empty section",
+      "known_sections": [
+        "Работа"
+      ],
+      "records": [],
+      "tree": [
+        "Работа/mic.wav",
+        "Работа/system.wav",
+        "Работа/transcript.txt",
+        "Работа/summary.md"
+      ],
+      "sections": [
+        "Работа"
+      ]
+    },
+    {
+      "name": "known section replaced by a record",
+      "known_sections": [
+        "Работа"
+      ],
+      "records": [
+        "Работа"
+      ],
+      "tree": [],
+      "sections": []
+    },
+    {
+      "name": "known record without record files",
+      "known_records": [
+        "Работа/Встреча"
+      ],
+      "records": [
+        "Работа/Другая"
+      ],
+      "tree": [
+        "Работа/Встреча/Старое/doc.pdf"
+      ],
+      "sections": [
+        "Работа"
+      ],
+      "complete": false
+    },
+    {
+      "name": "known record moved into a new subfolder",
+      "known_records": [
+        "Работа/Встреча"
+      ],
+      "records": [
+        "Работа/Старые/Встреча"
+      ],
+      "tree": [],
+      "sections": [
+        "Работа"
+      ],
+      "complete": false
+    },
+    {
+      "name": "foreign folder with a subfolder",
+      "records": [
+        "Работа/Другая"
+      ],
+      "tree": [
+        "Работа/Встреча/Старое/doc.pdf"
+      ],
+      "sections": [
+        "Работа"
+      ]
+    },
+    {
+      "name": "records with sound in another format only",
+      "records": [
+        "Звонок",
+        "Работа/Встреча"
+      ],
+      "record_files": [
+        "memo.m4a"
+      ],
+      "tree": [],
+      "sections": [
+        "Работа"
+      ]
+    },
+    {
+      "name": "records with the mixed recording only",
+      "records": [
+        "Звонок"
+      ],
+      "record_files": [
+        "recording.mp3"
+      ],
+      "tree": [],
+      "sections": []
+    }
+  ]
+}

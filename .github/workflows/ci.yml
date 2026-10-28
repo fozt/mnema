@@ -1,0 +1,84 @@
+# Checks of every push and pull request. ty is a local gate (`task check`): the Linux runner has no
+# mlx, whisperx or torch, so it cannot resolve their imports.
+name: CI
+
+on:
+  push:
+    branches: ["**"]  # a tag runs these checks inside the release workflow
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      # setup-uv publishes no major tags since v8, so the release is pinned exactly.
+      - uses: astral-sh/setup-uv@v10.3.0
+        with:
+          enable-cache: true
+      # The core and the tools (the default group), Python from .python-version; the tests don't
+      # import the recognition engines.
+      - run: uv sync --frozen
+      - run: .venv/bin/ruff format --check mnema tests scripts
+      - run: .venv/bin/ruff check mnema tests scripts
+      - run: .venv/bin/python -m pytest -q -p no:cacheprovider
+
+  swift:
+    runs-on: macos-15
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: mnema/bar/macos
+    steps:
+      - uses: actions/checkout@v7
+      - run: swift build
+      - run: swift test
+
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+      # The runner image has the Android SDK in ANDROID_HOME; add the platform the app builds with.
+      - name: Android SDK
+        run: |
+          sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          (yes || true) | "$sdkmanager" --licenses > /dev/null
+          "$sdkmanager" "platforms;android-37.0" "build-tools;37.0.0" > /dev/null
+      - run: ./gradlew --console=plain testDebugUnitTest lintDebug
+      # The helper check compiles the release Java classes itself.
+      - run: python3 scripts/check-helper-deps.py
+
+  # The release workflow builds ffmpeg only when this cache is missing: a tag can read the caches
+  # of main, not those of another tag.
+  ffmpeg:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - id: cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/ffmpeg-prefix
+          key: ffmpeg-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/build_ffmpeg.sh') }}
+          lookup-only: true
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: ./scripts/build_ffmpeg.sh "$RUNNER_TEMP/ffmpeg-prefix"

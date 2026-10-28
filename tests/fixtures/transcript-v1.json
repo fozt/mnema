@@ -1,0 +1,203 @@
+{
+  "about": "transcript.txt — его пишет только persist.write_transcript: Transcript.with_speakers(timed=True) — и его разбор в карточке телефона (parseDialog). language и segments — распознанное, text — файл, который пишут ПК и сервер, dialog — абзацы, которые показывает телефон: speaker — mic, system или пусто (дорожка не подписана: «Спикер ?», «Speaker ?» или абзац без подписи), at — секунды метки, text — текст абзаца. Абзац — по паузе от 1 с и смене дорожки; абзац без подписи не приклеивается к предыдущему.",
+  "cases": [
+    {
+      "name": "two tracks",
+      "language": "ru",
+      "segments": [
+        {
+          "start": 0,
+          "end": 2,
+          "text": "Привет.",
+          "speaker": "mic"
+        },
+        {
+          "start": 3.5,
+          "end": 5,
+          "text": "Здравствуй.",
+          "speaker": "system"
+        },
+        {
+          "start": 5.2,
+          "end": 6,
+          "text": "Как дела?",
+          "speaker": "system"
+        }
+      ],
+      "text": "[0:00] mic: Привет.\n\n[0:03] system: Здравствуй. Как дела?",
+      "dialog": [
+        {
+          "speaker": "mic",
+          "at": 0,
+          "text": "Привет."
+        },
+        {
+          "speaker": "system",
+          "at": 3,
+          "text": "Здравствуй. Как дела?"
+        }
+      ]
+    },
+    {
+      "name": "a pause splits one track",
+      "language": "ru",
+      "segments": [
+        {
+          "start": 0,
+          "end": 1,
+          "text": "Раз.",
+          "speaker": "mic"
+        },
+        {
+          "start": 2.5,
+          "end": 3,
+          "text": "Два.",
+          "speaker": "mic"
+        },
+        {
+          "start": 3.4,
+          "end": 4,
+          "text": "Три.",
+          "speaker": "mic"
+        }
+      ],
+      "text": "[0:00] mic: Раз.\n\n[0:02] mic: Два. Три.",
+      "dialog": [
+        {
+          "speaker": "mic",
+          "at": 0,
+          "text": "Раз."
+        },
+        {
+          "speaker": "mic",
+          "at": 2,
+          "text": "Два. Три."
+        }
+      ]
+    },
+    {
+      "name": "a paragraph without a track",
+      "language": "ru",
+      "segments": [
+        {
+          "start": 0,
+          "end": 1,
+          "text": "Раз.",
+          "speaker": "mic"
+        },
+        {
+          "start": 1.2,
+          "end": 2,
+          "text": "Два.",
+          "speaker": null
+        },
+        {
+          "start": 4,
+          "end": 5,
+          "text": "Три.",
+          "speaker": "system"
+        }
+      ],
+      "text": "[0:00] mic: Раз.\n\n[0:01] Спикер ?: Два.\n\n[0:04] system: Три.",
+      "dialog": [
+        {
+          "speaker": "mic",
+          "at": 0,
+          "text": "Раз."
+        },
+        {
+          "speaker": "",
+          "at": 1,
+          "text": "Два."
+        },
+        {
+          "speaker": "system",
+          "at": 4,
+          "text": "Три."
+        }
+      ]
+    },
+    {
+      "name": "a paragraph without a track in English",
+      "language": "en",
+      "segments": [
+        {
+          "start": 0,
+          "end": 1,
+          "text": "One.",
+          "speaker": "system"
+        },
+        {
+          "start": 1.5,
+          "end": 2,
+          "text": "Two.",
+          "speaker": null
+        }
+      ],
+      "text": "[0:00] system: One.\n\n[0:01] Speaker ?: Two.",
+      "dialog": [
+        {
+          "speaker": "system",
+          "at": 0,
+          "text": "One."
+        },
+        {
+          "speaker": "",
+          "at": 1,
+          "text": "Two."
+        }
+      ]
+    },
+    {
+      "name": "no tracks at all",
+      "language": "ru",
+      "segments": [
+        {
+          "start": 0,
+          "end": 1,
+          "text": "Только текст.",
+          "speaker": null
+        },
+        {
+          "start": 3,
+          "end": 4,
+          "text": "Ещё абзац.",
+          "speaker": null
+        }
+      ],
+      "text": "[0:00] Только текст.\n\n[0:03] Ещё абзац.",
+      "dialog": [
+        {
+          "speaker": "",
+          "at": 0,
+          "text": "Только текст."
+        },
+        {
+          "speaker": "",
+          "at": 3,
+          "text": "Ещё абзац."
+        }
+      ]
+    },
+    {
+      "name": "hours in the stamp",
+      "language": "ru",
+      "segments": [
+        {
+          "start": 3723.4,
+          "end": 3725,
+          "text": "Позже.",
+          "speaker": "mic"
+        }
+      ],
+      "text": "[1:02:03] mic: Позже.",
+      "dialog": [
+        {
+          "speaker": "mic",
+          "at": 3723,
+          "text": "Позже."
+        }
+      ]
+    }
+  ]
+}

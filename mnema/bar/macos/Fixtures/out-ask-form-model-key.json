@@ -1,0 +1,25 @@
+{
+  "type": "ask",
+  "id": 8,
+  "ask": {
+    "kind": "form",
+    "title": "Модель для пересказа",
+    "message": "Где взять ключ Gemini: aistudio.google.com/apikey",
+    "fields": [
+      {
+        "id": "key",
+        "label": "Ключ API",
+        "kind": "secret",
+        "placeholder": "Оставить …a1B2",
+        "choices": []
+      }
+    ],
+    "rev": 0,
+    "error": "",
+    "busy": "",
+    "ok": "Далее",
+    "force": "",
+    "cancel": "Отменить",
+    "clear": []
+  }
+}

@@ -1,0 +1,353 @@
+{
+  "about": "Решения сверки об удалениях, копиях и занятых записях: одно правило для mnema/sync/engine.py и android/.../sync/LibrarySync.kt, оба движка проходят все случаи. Случай: synced — записи (пути), которые сначала сверены на обеих сторонах (checkpoint знает их). Потом на устройстве, по порядку: copied — копия папки {копия: исходная}, renamed — переименование {было: стало}, removed — удалённые папки (запись или раздел), broken — meta не читается, root_removed — удалена вся папка Mnema, root_unreadable — папка Mnema есть, но не читается; на сервере: lost — пропавшие записи, server_unavailable — библиотека сервера не отвечает (503); busy — записи, занятые записью или обработкой (их id в занятых). Затем одна сверка. Ждём: held — записи, которые ждут выбора «Удалить везде / Вернуть», held_on — где они пропали: device или server (пропажи с обеих сторон спрашиваются по очереди, сначала — на устройстве); local — папки записей на устройстве после сверки; server — записи на сервере {путь: запись из synced, чей id у неё, new — новый id}; trashed — папки, ушедшие в корзину устройства; errors — сверка сообщила об ошибке. Одна пропажа передаётся сама, две и больше с одной стороны ждут выбора; занятая запись в счёт не идёт; неполный обход, нечитаемая папка Mnema и недоступный сервер откладывают все удаления.",
+  "cases": [
+    {
+      "name": "one record deleted here is deleted everywhere",
+      "synced": [
+        "a",
+        "b"
+      ],
+      "removed": [
+        "a"
+      ],
+      "local": [
+        "b"
+      ],
+      "server": {
+        "b": "b"
+      }
+    },
+    {
+      "name": "two records deleted here wait for a choice",
+      "synced": [
+        "a",
+        "b",
+        "c"
+      ],
+      "removed": [
+        "a",
+        "b"
+      ],
+      "held": [
+        "a",
+        "b"
+      ],
+      "held_on": "device",
+      "local": [
+        "c"
+      ],
+      "server": {
+        "a": "a",
+        "b": "b",
+        "c": "c"
+      }
+    },
+    {
+      "name": "a deleted section with two records waits for a choice",
+      "synced": [
+        "Работа/a",
+        "Работа/b",
+        "c"
+      ],
+      "removed": [
+        "Работа"
+      ],
+      "held": [
+        "Работа/a",
+        "Работа/b"
+      ],
+      "held_on": "device",
+      "local": [
+        "c"
+      ],
+      "server": {
+        "Работа/a": "Работа/a",
+        "Работа/b": "Работа/b",
+        "c": "c"
+      }
+    },
+    {
+      "name": "one record lost on the server goes to the trash here",
+      "synced": [
+        "a",
+        "b"
+      ],
+      "lost": [
+        "a"
+      ],
+      "local": [
+        "b"
+      ],
+      "server": {
+        "b": "b"
+      },
+      "trashed": [
+        "a"
+      ]
+    },
+    {
+      "name": "two records lost on the server wait for a choice",
+      "synced": [
+        "a",
+        "b",
+        "c"
+      ],
+      "lost": [
+        "a",
+        "b"
+      ],
+      "held": [
+        "a",
+        "b"
+      ],
+      "held_on": "server",
+      "local": [
+        "a",
+        "b",
+        "c"
+      ],
+      "server": {
+        "c": "c"
+      }
+    },
+    {
+      "name": "losses on both sides: this device is asked first",
+      "synced": [
+        "a",
+        "b",
+        "c",
+        "d"
+      ],
+      "removed": [
+        "a",
+        "b"
+      ],
+      "lost": [
+        "c",
+        "d"
+      ],
+      "held": [
+        "a",
+        "b"
+      ],
+      "held_on": "device",
+      "local": [
+        "c",
+        "d"
+      ],
+      "server": {
+        "a": "a",
+        "b": "b"
+      }
+    },
+    {
+      "name": "one deletion here goes on while server losses wait",
+      "synced": [
+        "a",
+        "b",
+        "c",
+        "d"
+      ],
+      "removed": [
+        "a"
+      ],
+      "lost": [
+        "b",
+        "c"
+      ],
+      "held": [
+        "b",
+        "c"
+      ],
+      "held_on": "server",
+      "local": [
+        "b",
+        "c",
+        "d"
+      ],
+      "server": {
+        "d": "d"
+      }
+    },
+    {
+      "name": "a busy record is not counted among the deleted",
+      "synced": [
+        "a",
+        "b",
+        "c"
+      ],
+      "removed": [
+        "a",
+        "b"
+      ],
+      "busy": [
+        "b"
+      ],
+      "local": [
+        "c"
+      ],
+      "server": {
+        "b": "b",
+        "c": "c"
+      }
+    },
+    {
+      "name": "a busy record lost on the server stays here",
+      "synced": [
+        "a",
+        "b"
+      ],
+      "lost": [
+        "a",
+        "b"
+      ],
+      "busy": [
+        "b"
+      ],
+      "local": [
+        "b"
+      ],
+      "server": {},
+      "trashed": [
+        "a"
+      ]
+    },
+    {
+      "name": "a copy of a record becomes a new record",
+      "synced": [
+        "a"
+      ],
+      "copied": {
+        "a copy": "a"
+      },
+      "local": [
+        "a",
+        "a copy"
+      ],
+      "server": {
+        "a": "a",
+        "a copy": "new"
+      }
+    },
+    {
+      "name": "a copy whose original was deleted is a move",
+      "synced": [
+        "a",
+        "b"
+      ],
+      "copied": {
+        "a copy": "a"
+      },
+      "removed": [
+        "a"
+      ],
+      "local": [
+        "a copy",
+        "b"
+      ],
+      "server": {
+        "a copy": "a",
+        "b": "b"
+      }
+    },
+    {
+      "name": "a renamed record is a move, not a deletion",
+      "synced": [
+        "a",
+        "b"
+      ],
+      "renamed": {
+        "a": "Работа/a"
+      },
+      "local": [
+        "b",
+        "Работа/a"
+      ],
+      "server": {
+        "b": "b",
+        "Работа/a": "a"
+      }
+    },
+    {
+      "name": "an unreadable record holds every deletion",
+      "synced": [
+        "a",
+        "b"
+      ],
+      "removed": [
+        "a"
+      ],
+      "broken": [
+        "b"
+      ],
+      "local": [
+        "b"
+      ],
+      "server": {
+        "a": "a",
+        "b": "b"
+      },
+      "errors": true
+    },
+    {
+      "name": "a removed library with two records waits for a choice",
+      "synced": [
+        "a",
+        "b"
+      ],
+      "root_removed": true,
+      "held": [
+        "a",
+        "b"
+      ],
+      "held_on": "device",
+      "local": [],
+      "server": {
+        "a": "a",
+        "b": "b"
+      }
+    },
+    {
+      "name": "a removed library with one record is deleted everywhere",
+      "synced": [
+        "a"
+      ],
+      "root_removed": true,
+      "local": [],
+      "server": {}
+    },
+    {
+      "name": "an unreadable library is an error, not a deletion",
+      "synced": [
+        "a"
+      ],
+      "root_unreadable": true,
+      "local": [
+        "a"
+      ],
+      "server": {
+        "a": "a"
+      },
+      "errors": true
+    },
+    {
+      "name": "an unavailable server library holds every deletion",
+      "synced": [
+        "a",
+        "b"
+      ],
+      "removed": [
+        "a"
+      ],
+      "server_unavailable": true,
+      "local": [
+        "b"
+      ],
+      "server": {
+        "a": "a",
+        "b": "b"
+      },
+      "errors": true
+    }
+  ]
+}

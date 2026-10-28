@@ -1,0 +1,98 @@
+{
+  "about": "Обработка, о которой говорят замечания карточки и «Подробности» и которую «Составить пересказ» отправляет прежней (past): последняя запись runs в meta, кроме остановленной (status «stopped»), — о ней сказать нечего; kind не важен. Python live/meta.last, Kotlin Meta.lastRun. runs — история обработок, shown — номер показанной обработки в runs с нуля, null — показывать нечего.",
+  "cases": [
+    {
+      "name": "one run",
+      "runs": [
+        {
+          "job": "a",
+          "status": "ok"
+        }
+      ],
+      "shown": 0
+    },
+    {
+      "name": "stopped after a result",
+      "runs": [
+        {
+          "job": "a",
+          "status": "ok"
+        },
+        {
+          "status": "stopped"
+        }
+      ],
+      "shown": 0
+    },
+    {
+      "name": "stopped summary after a result",
+      "runs": [
+        {
+          "job": "a",
+          "status": "ok"
+        },
+        {
+          "kind": "summary",
+          "status": "stopped"
+        }
+      ],
+      "shown": 0
+    },
+    {
+      "name": "summary after processing",
+      "runs": [
+        {
+          "job": "a",
+          "status": "ok"
+        },
+        {
+          "job": "b",
+          "kind": "summary",
+          "status": "ok"
+        }
+      ],
+      "shown": 1
+    },
+    {
+      "name": "failure after a result",
+      "runs": [
+        {
+          "job": "a",
+          "status": "ok"
+        },
+        {
+          "job": "b",
+          "status": "failed"
+        }
+      ],
+      "shown": 1
+    },
+    {
+      "name": "run without status",
+      "runs": [
+        {
+          "job": "a",
+          "status": "ok"
+        },
+        {
+          "job": "b"
+        }
+      ],
+      "shown": 1
+    },
+    {
+      "name": "only stopped",
+      "runs": [
+        {
+          "status": "stopped"
+        }
+      ],
+      "shown": null
+    },
+    {
+      "name": "no runs",
+      "runs": [],
+      "shown": null
+    }
+  ]
+}

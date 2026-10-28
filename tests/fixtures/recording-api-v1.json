@@ -1,0 +1,363 @@
+{
+  "about": "Контракт задачи записи: запрос клиента (все включённые дорожки, тишину решает сервер; silent_reason — почему у собеседника не было звука, пусто — причины нет), ответ GET /api/jobs/{id}, папка после применения результата и что клиент делает на ответы сервера. Читают tests/test_recording_api.py и Kotlin NodeRecordingClientTest, ApplyTest, PipelineTest.",
+  "requests": [
+    {
+      "op": "recording",
+      "key": "record-id-5f0c",
+      "tracks": {"mic": "uploads/0f3a/mic.m4a", "system": "uploads/0f3b/system.m4a"},
+      "params": {
+        "started": "2026-10-22T16:01:07+03:00",
+        "name": "2026-10-22_16-01 (0.10–1.35)",
+        "user_title": "Планёрка",
+        "lang": "ru",
+        "asr": "groq/whisper-large-v3-turbo",
+        "summary": true,
+        "summary_lang": "en",
+        "part": {"start": 10.0, "end": 95.0},
+        "silent_reason": {"system": "blocked"},
+        "recording_error": "java.io.IOException: Mic AudioRecord.read error -3",
+        "retitle": true,
+        "partial": false
+      }
+    },
+    {
+      "op": "recording",
+      "key": "record-id-77aa",
+      "tracks": {"mic": "uploads/1b2c/mic.m4a", "system": "uploads/3d4e/system.m4a"},
+      "params": {
+        "started": "2026-10-22T16:01:07+03:00",
+        "name": "2026-10-22_16-01",
+        "user_title": null,
+        "lang": null,
+        "asr": "auto",
+        "summary": true,
+        "summary_lang": null,
+        "part": null,
+        "silent_reason": {},
+        "recording_error": null,
+        "retitle": null,
+        "partial": true
+      }
+    },
+    {
+      "op": "recording_summary",
+      "key": "record-id-9e01",
+      "path": "uploads/5f60/transcript.txt",
+      "params": {
+        "started": "2026-10-22T16:01:07+03:00",
+        "name": "2026-10-22_Дейли",
+        "summary_lang": "ru",
+        "past": {"kind": "process", "status": "ok", "remarks": ["Без названия"]}
+      }
+    }
+  ],
+  "jobs": [
+    {
+      "op": "recording",
+      "body": {"id": "0f3a", "status": "pending", "progress": null, "message": "В очереди", "result": null, "error": null, "error_kind": null}
+    },
+    {
+      "op": "recording",
+      "body": {"id": "0f3a", "status": "running", "progress": 0.4, "message": "Распознаю речь…", "result": null, "error": null, "error_kind": null}
+    },
+    {
+      "op": "recording",
+      "body": {
+        "id": "0f3a",
+        "status": "done",
+        "progress": 1.0,
+        "message": "Готово",
+        "result": {
+          "files": {"transcript.txt": "[0:12] mic: Обсудили выпуск.\n", "summary.md": null},
+          "folder": "2026-10-22_Выпуск",
+          "run": {"kind": "process", "status": "ok", "settings": {"node": "Сервер"}, "remarks": []}
+        },
+        "error": null,
+        "error_kind": null
+      }
+    },
+    {
+      "op": "recording_summary",
+      "body": {
+        "id": "9e01",
+        "status": "done",
+        "progress": 1.0,
+        "message": "",
+        "result": {
+          "files": {"summary.md": "Обсудили выпуск.\n"},
+          "folder": null,
+          "run": {"kind": "summary", "status": "ok"}
+        },
+        "error": null,
+        "error_kind": null
+      }
+    },
+    {
+      "op": "recording",
+      "body": {"id": "0f3a", "status": "error", "progress": null, "message": "", "result": null, "error": "Раннер перезапустился во время задачи — повторите запуск.", "error_kind": "restarted"}
+    },
+    {
+      "op": "recording",
+      "body": {"id": "0f3a", "status": "error", "progress": null, "message": "", "result": null, "error": "Задача отменена", "error_kind": "cancelled"}
+    },
+    {
+      "op": "recording",
+      "body": {"id": "0f3a", "status": "error", "progress": null, "message": "", "result": null, "error": "Нет места на сервере", "error_kind": "failed"}
+    }
+  ],
+  "apply": [
+    {
+      "case": "имя от сервера",
+      "op": "recording",
+      "folder": "2026-10-23_12-30",
+      "files": {"transcript.txt": "[0:00] mic: Прежний текст.\n", "summary.md": "Прежняя суть.\n"},
+      "result": {
+        "files": {"transcript.txt": "[0:00] mic: Новый текст.\n", "summary.md": null},
+        "folder": "2026-10-23_Дейли",
+        "run": {"kind": "process", "status": "ok"}
+      },
+      "after": {"folder": "2026-10-23_Дейли", "files": {"transcript.txt": "[0:00] mic: Новый текст.\n", "summary.md": null}}
+    },
+    {
+      "case": "имя занято — следующее свободное",
+      "op": "recording",
+      "folder": "2026-10-23_12-30",
+      "taken": ["2026-10-23_Дейли", "2026-10-23_Дейли (2)"],
+      "files": {},
+      "result": {
+        "files": {"transcript.txt": "[0:00] mic: Новый текст.\n"},
+        "folder": "2026-10-23_Дейли",
+        "run": {"kind": "process", "status": "ok"}
+      },
+      "after": {"folder": "2026-10-23_Дейли (3)", "files": {"transcript.txt": "[0:00] mic: Новый текст.\n"}}
+    },
+    {
+      "case": "неверное имя не переименовывает, тексты применяются",
+      "op": "recording",
+      "folder": "2026-10-23_12-30",
+      "files": {},
+      "result": {
+        "files": {"transcript.txt": "[0:00] mic: Новый текст.\n"},
+        "folder": "../2026-10-23_Дейли",
+        "run": {"kind": "process", "status": "ok"}
+      },
+      "after": {"folder": "2026-10-23_12-30", "files": {"transcript.txt": "[0:00] mic: Новый текст.\n"}}
+    },
+    {
+      "case": "имя со служебным знаком не переименовывает",
+      "op": "recording",
+      "folder": "2026-10-23_12-30",
+      "files": {},
+      "result": {
+        "files": {"transcript.txt": "[0:00] mic: Новый текст.\n"},
+        "folder": "2026-10-23_Дейли вторая строка",
+        "run": {"kind": "process", "status": "ok"}
+      },
+      "after": {"folder": "2026-10-23_12-30", "files": {"transcript.txt": "[0:00] mic: Новый текст.\n"}}
+    },
+    {
+      "case": "имя длиннее 255 байт не переименовывает",
+      "op": "recording",
+      "folder": "2026-10-23_12-30",
+      "files": {},
+      "result": {
+        "files": {"transcript.txt": "[0:00] mic: Новый текст.\n"},
+        "folder": "2026-10-23_яяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяя",
+        "run": {"kind": "process", "status": "ok"}
+      },
+      "after": {"folder": "2026-10-23_12-30", "files": {"transcript.txt": "[0:00] mic: Новый текст.\n"}}
+    },
+    {
+      "case": "папку переименовали — имя пользователя остаётся",
+      "op": "recording",
+      "folder": "Моя встреча",
+      "sent": "2026-10-23_12-30",
+      "files": {},
+      "result": {
+        "files": {"transcript.txt": "[0:00] mic: Новый текст.\n"},
+        "folder": "2026-10-23_Дейли",
+        "run": {"kind": "process", "status": "ok"}
+      },
+      "after": {"folder": "Моя встреча", "files": {"transcript.txt": "[0:00] mic: Новый текст.\n"}}
+    },
+    {
+      "case": "перевод",
+      "op": "recording",
+      "folder": "2026-10-23_12-30",
+      "files": {},
+      "result": {
+        "files": {"transcript.txt": "[0:00] mic: Hello.\n", "summary.md": null, "translation.md": "[0:00] mic: Привет.\n"},
+        "folder": null,
+        "run": {"kind": "process", "status": "ok"}
+      },
+      "after": {"folder": "2026-10-23_12-30", "files": {"transcript.txt": "[0:00] mic: Hello.\n", "translation.md": "[0:00] mic: Привет.\n"}}
+    },
+    {
+      "case": "сбой обработки оставляет прежние тексты и имя",
+      "op": "recording",
+      "folder": "2026-10-23_Дейли",
+      "files": {"transcript.txt": "[0:00] mic: Прежний текст.\n", "summary.md": "Прежняя суть.\n"},
+      "result": {
+        "files": {},
+        "folder": null,
+        "run": {"kind": "process", "status": "failed", "error": "Не удалось распознать запись на сервере"}
+      },
+      "after": {"folder": "2026-10-23_Дейли", "files": {"transcript.txt": "[0:00] mic: Прежний текст.\n", "summary.md": "Прежняя суть.\n"}}
+    },
+    {
+      "case": "пересказ",
+      "op": "recording_summary",
+      "folder": "2026-10-23_12-30",
+      "files": {"transcript.txt": "[0:00] mic: Прежний текст.\n", "summary.md": "Прежняя суть.\n"},
+      "result": {
+        "files": {"summary.md": "Новая суть.\n"},
+        "folder": "2026-10-23_Дейли",
+        "run": {"kind": "summary", "status": "ok"}
+      },
+      "after": {"folder": "2026-10-23_Дейли", "files": {"transcript.txt": "[0:00] mic: Прежний текст.\n", "summary.md": "Новая суть.\n"}}
+    },
+    {
+      "case": "неизвестный файл — отказ до записи",
+      "op": "recording",
+      "folder": "2026-10-23_12-30",
+      "files": {"transcript.txt": "[0:00] mic: Прежний текст.\n"},
+      "result": {
+        "files": {"transcript.txt": "[0:00] mic: Новый текст.\n", "mic.wav": "не звук"},
+        "folder": "2026-10-23_Дейли",
+        "run": {"kind": "process", "status": "ok"}
+      },
+      "refused": true
+    },
+    {
+      "case": "путь вместо имени файла — отказ до записи",
+      "op": "recording",
+      "folder": "2026-10-23_12-30",
+      "files": {"transcript.txt": "[0:00] mic: Прежний текст.\n"},
+      "result": {
+        "files": {"transcript.txt": "[0:00] mic: Новый текст.\n", "../outside": "чужой файл"},
+        "folder": null,
+        "run": {"kind": "process", "status": "ok"}
+      },
+      "refused": true
+    },
+    {
+      "case": "пересказ не меняет расшифровку",
+      "op": "recording_summary",
+      "folder": "2026-10-23_12-30",
+      "files": {"transcript.txt": "[0:00] mic: Прежний текст.\n"},
+      "result": {
+        "files": {"transcript.txt": "[0:00] mic: Другой текст.\n", "summary.md": "Новая суть.\n"},
+        "folder": null,
+        "run": {"kind": "summary", "status": "ok"}
+      },
+      "refused": true
+    }
+  ],
+  "answers": {
+    "about": "Обработка записи двумя дорожками mic и system. submit и poll — ответы сервера по порядку на POST /api/jobs и GET /api/jobs/{id}; null или конец списка — обычный ответ: id новой задачи и done с результатом done. uploads — какие дорожки клиент загрузил по порядку до ручного повтора, keys — ключ каждого POST обоих запусков (одно число — один ключ), outcome — done или failed. title — своё название записи до обработки: после сбоя оно остаётся. retry — ручной повтор после failed: его ответы submit и poll и итог; после него снова один автоповтор.",
+    "done": {
+      "files": {"transcript.txt": "[0:00] mic: Обсудили выпуск.\n", "summary.md": null},
+      "folder": null,
+      "run": {"kind": "process", "status": "ok"}
+    },
+    "cases": [
+      {
+        "case": "сервер перезапустился — задача заново с теми же загрузками",
+        "poll": [{"status": 200, "body": {"id": "j1", "status": "error", "error": "Раннер перезапустился во время задачи — повторите запуск.", "error_kind": "restarted"}}],
+        "uploads": ["mic", "system"],
+        "keys": [0, 1],
+        "outcome": "done"
+      },
+      {
+        "case": "второй перезапуск — ручной повтор, в нём снова один автоповтор",
+        "poll": [
+          {"status": 200, "body": {"id": "j1", "status": "error", "error": "Раннер перезапустился во время задачи — повторите запуск.", "error_kind": "restarted"}},
+          {"status": 200, "body": {"id": "j2", "status": "error", "error": "Раннер перезапустился во время задачи — повторите запуск.", "error_kind": "restarted"}}
+        ],
+        "uploads": ["mic", "system"],
+        "keys": [0, 1, 2, 3],
+        "outcome": "failed",
+        "retry": {
+          "poll": [{"status": 200, "body": {"id": "j3", "status": "error", "error": "Раннер перезапустился во время задачи — повторите запуск.", "error_kind": "restarted"}}],
+          "outcome": "done"
+        }
+      },
+      {
+        "case": "сбой связи после автоповтора — ручной повтор снова с одним автоповтором",
+        "poll": [
+          {"status": 200, "body": {"id": "j1", "status": "error", "error": "Раннер перезапустился во время задачи — повторите запуск.", "error_kind": "restarted"}},
+          {"status": 500, "body": {"detail": "Internal Server Error"}}
+        ],
+        "uploads": ["mic", "system"],
+        "keys": [0, 1, 2],
+        "outcome": "failed",
+        "retry": {
+          "poll": [{"status": 200, "body": {"id": "j2", "status": "error", "error": "Раннер перезапустился во время задачи — повторите запуск.", "error_kind": "restarted"}}],
+          "outcome": "done"
+        }
+      },
+      {
+        "case": "ключ занят задачей другого устройства — новый ключ без новой загрузки",
+        "submit": [{"status": 409, "body": {"detail": "Ключ повтора занят другой задачей", "reason": "key_taken"}}],
+        "uploads": ["mic", "system"],
+        "keys": [0, 1],
+        "outcome": "done"
+      },
+      {
+        "case": "загрузки нет — заново только её дорожка",
+        "submit": [{"status": 404, "body": {"detail": "Загруженный файл уже удалён; загрузите файл заново.", "track": "system"}}],
+        "uploads": ["mic", "system", "system"],
+        "keys": [0, 0],
+        "outcome": "done"
+      },
+      {
+        "case": "загрузку держит другая задача — заново только её дорожка",
+        "submit": [{"status": 409, "body": {"detail": "Загрузка уже используется другой задачей; загрузите файл заново.", "track": "mic"}}],
+        "uploads": ["mic", "system", "mic"],
+        "keys": [0, 0],
+        "outcome": "done"
+      },
+      {
+        "case": "загрузка пропадает раз за разом — заново не больше раз, чем дорожек",
+        "submit": [
+          {"status": 404, "body": {"detail": "Загруженный файл уже удалён; загрузите файл заново.", "track": "system"}},
+          {"status": 404, "body": {"detail": "Загруженный файл уже удалён; загрузите файл заново.", "track": "system"}},
+          {"status": 404, "body": {"detail": "Загруженный файл уже удалён; загрузите файл заново.", "track": "system"}}
+        ],
+        "uploads": ["mic", "system", "system", "system"],
+        "keys": [0, 0, 0],
+        "outcome": "failed"
+      },
+      {
+        "case": "пропала загрузка не этой обработки — сбой без новой загрузки",
+        "submit": [{"status": 404, "body": {"detail": "Загруженный файл уже удалён; загрузите файл заново.", "track": "screen"}}],
+        "uploads": ["mic", "system"],
+        "keys": [0],
+        "outcome": "failed"
+      },
+      {
+        "case": "задачи на сервере нет — новый ключ с теми же загрузками",
+        "poll": [{"status": 404, "body": {"detail": "Задача не найдена"}}],
+        "uploads": ["mic", "system"],
+        "keys": [0, 1],
+        "outcome": "done"
+      },
+      {
+        "case": "задачи нет и её загрузка удалена — заново только эта дорожка",
+        "submit": [null, {"status": 404, "body": {"detail": "Загруженный файл уже удалён; загрузите файл заново.", "track": "mic"}}],
+        "poll": [{"status": 404, "body": {"detail": "Задача не найдена"}}],
+        "uploads": ["mic", "system", "mic"],
+        "keys": [0, 1, 1],
+        "outcome": "done"
+      },
+      {
+        "case": "сбой задачи — ручной повтор",
+        "poll": [{"status": 200, "body": {"id": "j1", "status": "error", "error": "Нет места на сервере", "error_kind": "failed"}}],
+        "title": "Планёрка",
+        "uploads": ["mic", "system"],
+        "keys": [0],
+        "outcome": "failed"
+      }
+    ]
+  }
+}

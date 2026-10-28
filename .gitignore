@@ -1,0 +1,49 @@
+# Recordings and transcription outputs live outside the repo
+*.mov
+*.mp4
+*.mkv
+*.m4v
+*.avi
+*.webm
+*.mpg
+*.mpeg
+*.mp3
+*.wav
+*.m4a
+*.aac
+*.flac
+*.ogg
+*.opus
+
+# Generated outputs
+*.txt
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Secrets
+.env
+.env.*
+
+# macOS and editors
+.DS_Store
+.idea
+.mnema
+
+# Local agent notes and Claude Code worktrees
+CLAUDE.md
+.claude/
+.work/
+
+# CLI recordings without MNEMA_LIVE_DIR
+recordings/
+
+# Swift build of the macOS app (mnema/bar/macos)
+mnema/bar/macos/.build/
+.swiftpm/
+
+# Release output: app bundle, DMG, zip, APK and manifests
+dist/
