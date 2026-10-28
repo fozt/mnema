@@ -1250,22 +1250,22 @@ def cmd_serve(args) -> None:
 
     from ..config import Settings
     from ..core.base import MediaError
-    from ..install_setup import serve_port, server_token
+    from ..install_setup import DEFAULT_PORT, server_token
 
     try:
         import fastapi  # noqa: F401 - the Mac app has uvicorn (through mcp) but no fastapi
         import uvicorn
     except ImportError:
-        die(_("The server needs the full extra: ./install.sh server or uv sync --extra full"))
+        die(_("The server needs the full extra: uv sync --extra full"))
     from ..server import create_app, require_safe_bind
 
     token = server_token()
     # The guard lives in server.py for every caller of create_app; here it becomes a CLI error.
     try:
         require_safe_bind(args.host, token)
-        port = serve_port(args.port, saved=args.saved_port)
-    except (MediaError, ValueError) as e:
+    except MediaError as e:
         die(str(e))
+    port = args.port or DEFAULT_PORT
     if not token:
         # A proxy may publish a loopback bind without its own auth, which the guard cannot
         # see: always warn, but loopback without a token is the usual dev setup.
@@ -1302,24 +1302,23 @@ def cmd_serve(args) -> None:
 
 
 def _node_root(args) -> Path:
-    """The server folder (serve --dir): it must hold .mnema, otherwise the server never sees
-    the invite."""
+    """The server folder: it must hold .mnema, otherwise the server never sees the invite."""
     from ..install_setup import server_root
 
-    root = Path(args.dir).expanduser() if args.dir else server_root()
+    root = Path(args.dir).expanduser() if getattr(args, "dir", None) else server_root()
     if not (root / ".mnema").is_dir():
-        die(_("No server in the folder {root}: give --dir as for mnema serve", root=root))
+        die(_("No server in the folder {root}", root=root))
     return root
 
 
 def cmd_invite(args) -> None:
     """An invite for one device, on the server machine itself without HTTP. The address is --url
-    (remembered for this computer's server), otherwise node.node_url. server.json describes only
-    this computer's server (install_setup.server_root): another folder (--dir) needs --url."""
+    (remembered for this server), otherwise node.node_url; another folder (--dir, a development
+    server) needs --url and remembers nothing."""
     import time
 
     from ..devices import issue_invite
-    from ..install_setup import save_url, server_port, server_root
+    from ..install_setup import DEFAULT_PORT, save_url, server_root
     from ..node import node_url
 
     root = _node_root(args)
@@ -1328,8 +1327,8 @@ def cmd_invite(args) -> None:
     try:
         if url and own:
             url = save_url(url)
-        elif own and (port := server_port()):
-            url = node_url(port)
+        elif own:
+            url = node_url(DEFAULT_PORT)
         if not url:
             die(_("Give --url: the address the clients reach the server at"))
             return
@@ -1375,4 +1374,4 @@ def cmd_devices(args) -> None:
 def cmd_update(args) -> None:
     from ..update import main
 
-    main(server=args.server)
+    main()

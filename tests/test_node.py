@@ -1,5 +1,5 @@
-"""This computer's server address for invitations (mnema/node.py), its port and token
-(install_setup.server_identity), and processing a recording on the server over HTTP.
+"""This computer's server address for invitations (mnema/node.py), its token
+(install_setup.ensure_server_token), and processing a recording on the server over HTTP.
 
 External boundaries: network interfaces (a stub list), the server's HTTP (ASGITransport or
 httpx.MockTransport), litellm.
@@ -16,7 +16,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from mnema.install_setup import server_identity
+from mnema.install_setup import ensure_server_token
 from mnema.live import meta
 from mnema.node import node_address, parse_interfaces
 
@@ -25,7 +25,7 @@ TAILSCALE = [("tailscale0", "100.64.0.7")]
 
 @pytest.fixture(autouse=True)
 def _home(monkeypatch, tmp_path) -> Path:
-    """~/.config/mnema (server.json, server.env) in the test's tmp."""
+    """~/.config/mnema (server.env) in the test's tmp."""
     monkeypatch.setenv("HOME", str(tmp_path))
     return tmp_path
 
@@ -94,41 +94,25 @@ def test_node_address_prefers_tailscale_then_public_then_lan(found, address) -> 
     assert node_address(found) == address
 
 
-def test_identity_creates_private_port_and_token_once(_home) -> None:
-    """Without server.json and server.env: a free port and a new token, files for the owner
-    only; afterwards the same port and token (the phone's connection string stays valid)."""
-    port, token = server_identity()
+def test_identity_creates_a_private_token_once(_home) -> None:
+    """Without server.env: a new token in a file for the owner only; afterwards the same token
+    (the devices' connections stay valid)."""
+    token = ensure_server_token()
     config = _home / ".config/mnema"
-    assert json.loads((config / "server.json").read_text()) == {"port": port}
     assert (config / "server.env").read_text() == f'MNEMA_TOKEN="{token}"\n'
     assert len(token) >= 32
-    for name in ("server.json", "server.env"):
-        assert oct((config / name).stat().st_mode & 0o777) == "0o600"
+    assert oct((config / "server.env").stat().st_mode & 0o777) == "0o600"
     assert oct(config.stat().st_mode & 0o777) == "0o700"
-    assert server_identity() == (port, token)
+    assert ensure_server_token() == token
 
 
-def test_identity_reuses_install_server_files(_home) -> None:
-    """The port and token of `./install.sh server` are shared with the app's node; a broken
-    port is an error, not silently another port."""
-    config = _home / ".config/mnema"
-    config.mkdir(parents=True)
-    (config / "server.json").write_text('{"port": 8123}\n')
-    (config / "server.env").write_text('MNEMA_TOKEN="tok-abc"\n')
-    assert server_identity() == (8123, "tok-abc")
-    (config / "server.json").write_text('{"port": "8123"}\n')
-    with pytest.raises(ValueError, match="server.json"):
-        server_identity()
-
-
-def test_server_identity_does_not_take_the_client_token(_home) -> None:
+def test_ensure_server_token_does_not_take_the_client_token(_home) -> None:
     """The client's ~/.config/mnema/.env holds another server's token: this computer's server
-    does not take it (the server installer does take a previous install's token, test_install)."""
+    does not take it."""
     config = _home / ".config/mnema"
     config.mkdir(parents=True)
     (config / ".env").write_text('MNEMA_TOKEN="remote-token"\n')
-    _port, token = server_identity()
-    assert token != "remote-token"
+    assert ensure_server_token() != "remote-token"
 
 
 RU_TEXT = "mic: обсудили релиз, сроки и кто готовит демо.\nsystem: я беру демо к пятнице.\n" * 10

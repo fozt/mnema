@@ -313,34 +313,34 @@ def build_parser() -> argparse.ArgumentParser:
     )
     from ..install_setup import DEFAULT_PORT
 
-    port = sp.add_mutually_exclusive_group()
-    port.add_argument("--port", type=int, help=_("port ({port} by default)", port=DEFAULT_PORT))
-    port.add_argument(
-        "--saved-port",
-        action="store_true",
-        help=_("the port of this computer's server from ~/.config/mnema/server.json (service)"),
-    )
+    sp.add_argument("--port", type=int, help=_("port ({port} by default)", port=DEFAULT_PORT))
     sp.set_defaults(func=cmd_serve)
 
-    # invites and devices only on the server machine: straight from devices.db, no HTTP
-    node_dir = _("server folder, like --dir of serve (from the server install by default)")
+    # invites and devices only on the server machine: straight from devices.db, no HTTP; the
+    # server folder is the image's own (--dir only for a development server)
     sp = sub.add_parser("invite", help=_("an invitation for one device"))
     sp.add_argument(
-        "--hours", type=float, default=6.0, help=_("how many hours it is valid, up to 72")
+        "--hours",
+        type=float,
+        default=6.0,
+        help=_("how long the invitation works, in hours: 6 by default, up to 72"),
     )
-    sp.add_argument("--dir", help=node_dir)
+    sp.add_argument("--dir", help=argparse.SUPPRESS)
     sp.add_argument(
         "--url",
-        help=_("server address for the devices, remembered; the network address without it"),
+        help=_(
+            "the address devices use to reach this server, e.g. http://203.0.113.5:38837; "
+            "remembered for later invitations. Without it, this machine's network address"
+        ),
     )
     sp.set_defaults(func=cmd_invite)
 
     sp = sub.add_parser("devices", help=_("devices connected to the server"))
-    sp.add_argument("--dir", help=node_dir)
+    sp.add_argument("--dir", help=argparse.SUPPRESS)
     actions = sp.add_subparsers(dest="action")
     revoke = actions.add_parser("revoke", help=_("revoke a device"))
     revoke.add_argument("id", help=_("id from the mnema devices list"))
-    revoke.add_argument("--dir", default=argparse.SUPPRESS, help=node_dir)
+    revoke.add_argument("--dir", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
     sp.set_defaults(func=cmd_devices)
     sp = sub.add_parser("model", help=_("the server model for titles and summaries"))
     g = sp.add_mutually_exclusive_group()
@@ -350,8 +350,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sp.set_defaults(func=cmd_model)
 
-    sp = sub.add_parser("update", help=_("update the installed app or server"))
-    sp.add_argument("--server", action="store_true", help=_("update the server service"))
+    sp = sub.add_parser("update", help=_("update the installed app"))
     sp.set_defaults(func=cmd_update)
 
     return p

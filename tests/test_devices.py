@@ -246,28 +246,23 @@ def test_invite_command_prints_a_string_the_client_accepts(tmp_path, capsys):
 
 
 def test_invite_leads_to_the_address_the_server_has_now(tmp_path, monkeypatch, capsys):
-    """Without --url: this computer's current network address and its server's port, so after
-    a network change the invitation leads to the new address, not the one found at install;
-    no address needs --url, and an explicit address leads the next invitations too."""
-    from mnema import config, node
+    """A server outside the image, without --url: this computer's current network address and
+    the server port, so after a network change the invitation leads to the new address; no
+    address needs --url, and an explicit address leads the next invitations too."""
+    from mnema import node
 
-    monkeypatch.setenv("HOME", str(tmp_path))
-    settings = config.user_env_file().parent
-    settings.mkdir(parents=True)
-    installed = {"port": 43117}
-    (settings / "server.json").write_text(json.dumps(installed))
     root = _node_dir(tmp_path / "mnema-server")
     network = [("eth0", "192.168.1.5")]
     monkeypatch.setattr(node, "interfaces", lambda: network)
     _cli("invite")
     parsed = parse_connection(_printed_invite(capsys.readouterr().out))
-    assert parsed.url == "http://192.168.1.5:43117"
+    assert parsed.url == "http://192.168.1.5:8000"
     assert _store(root).claim(parsed.invite, "ПК", now=time.time()) is not None
 
     network[:] = [("eth0", "192.168.7.20"), ("tailscale0", "100.64.0.7")]
     _cli("invite")
     assert (
-        parse_connection(_printed_invite(capsys.readouterr().out)).url == "http://100.64.0.7:43117"
+        parse_connection(_printed_invite(capsys.readouterr().out)).url == "http://100.64.0.7:8000"
     )
 
     network.clear()
@@ -285,18 +280,13 @@ def test_invite_leads_to_the_address_the_server_has_now(tmp_path, monkeypatch, c
 
 
 def test_invite_for_a_server_in_another_folder_needs_its_own_address(tmp_path, monkeypatch, capsys):
-    """A server in another folder (--dir) is not this computer's server: the port and address
-    from its server.json do not apply, --url is needed, and it does not become this computer's
-    server address."""
-    from mnema import config, node
+    """A server in another folder (--dir) is not this computer's server: its address is not
+    known, --url is needed, and it does not become this computer's server address."""
+    from mnema import node
 
-    monkeypatch.setenv("HOME", str(tmp_path))
-    settings = config.user_env_file().parent
-    settings.mkdir(parents=True)
-    (settings / "server.json").write_text(json.dumps({"port": 43117}))
     _node_dir(tmp_path / "mnema-server")
     data = _node_dir(tmp_path / "data")
-    monkeypatch.setattr(node, "interfaces", lambda: [("eth0", "164.90.200.11")])
+    monkeypatch.setattr(node, "interfaces", lambda: [("eth0", "203.0.113.11")])
     with pytest.raises(SystemExit):
         _cli("invite", "--dir", str(data))
     _cli("invite", "--dir", str(data), "--url", "http://gpu.example:8000")
@@ -305,7 +295,7 @@ def test_invite_for_a_server_in_another_folder_needs_its_own_address(tmp_path, m
     assert _store(data).claim(parsed.invite, "ПК", now=time.time()) is not None
     _cli("invite")
     assert parse_connection(_printed_invite(capsys.readouterr().out)).url == (
-        "http://164.90.200.11:43117"
+        "http://203.0.113.11:8000"
     )
 
 

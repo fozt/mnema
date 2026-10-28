@@ -53,7 +53,7 @@
   "GigaAM recognizes only Russian ({lang} requested).": "GigaAM распознаёт только русский (запрошен {lang}).",
   "Parakeet does not support the language {lang} — choose Whisper.": "Parakeet не распознаёт язык {lang} — выберите Whisper.",
   "Unknown backend: {name} ({allowed})": "Неизвестный backend: {name} ({allowed})",
-  "No transcription engine is installed: install the full extra (./install.sh client or ./install.sh server) or set a runner (--runner/MNEMA_RUNNER).": "Нет установленного движка транскрибации: поставьте extra full (./install.sh client или ./install.sh server) или задайте раннер (--runner/MNEMA_RUNNER).",
+  "No transcription engine is installed: install the full extra (uv sync --extra full) or set a runner (--runner/MNEMA_RUNNER).": "Нет установленного движка транскрибации: поставьте extra full (uv sync --extra full) или задайте раннер (--runner/MNEMA_RUNNER).",
   "huggingface_hub is missing — reinstall Mnema (./install.sh client or ./install.sh server).": "Нет huggingface_hub — переустановите Mnema (./install.sh client или ./install.sh server).",
   "The Parakeet weights do not match the encoder: {name} is missing": "Веса Parakeet не подходят к энкодеру: нет {name}",
   "The MLX engine does not support this Parakeet configuration": "Конфигурация Parakeet не поддерживается MLX-движком",

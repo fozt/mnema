@@ -1,8 +1,8 @@
 """Where to process recordings, and this computer's server address for invitations.
 
 A Mac processes itself or on the connected server, as chosen in settings; other systems use
-the MNEMA_RUNNER server. The address for clients is node_url, one rule for the server
-installer and mnema invite.
+the MNEMA_RUNNER server. The address for clients is node_url, one rule for the server image and
+mnema invite.
 """
 
 from __future__ import annotations
@@ -117,12 +117,17 @@ def node_address(found: Iterable[tuple[str, str]] | None = None) -> str | None:
 
 
 def node_url(port: int, address: Callable[[], str | None] = node_address) -> str | None:
-    """This computer's server address in an invitation, one rule for the installer and mnema
-    invite: the explicit --url (install_setup.saved_url), else the current network address
-    (address — node_address) and port; None when there is none."""
+    """This server's address in an invitation: the one given with `mnema invite --url`
+    (install_setup.saved_url), else MNEMA_URL (the server image's environment), else this
+    computer's network address (address — node_address) and port, never inside a container,
+    whose network is its own; None when there is none."""
+    from .config import Settings
     from .install_setup import saved_url
 
-    if (url := saved_url()) is not None:
+    settings = Settings()
+    if url := saved_url() or settings.public_url:
         return url
+    if settings.container:
+        return None
     found = address()
     return f"http://{found}:{port}" if found else None
