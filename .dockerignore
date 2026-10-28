@@ -1,0 +1,7 @@
+# Only what the image installs: the project, its lock and the package
+*
+!pyproject.toml
+!uv.lock
+!mnema/
+mnema/bar/macos/
+**/__pycache__/

@@ -149,8 +149,16 @@ class Settings(RuntimeSettings):
     runner: str | None = Field(default=None, validation_alias="MNEMA_RUNNER")  # runner URL
     # own CA root for a TLS proxy in front of the server
     ca: str | None = Field(default=None, validation_alias="MNEMA_CA")
-    # recording library: enabled only by the server installer (server.env)
+    # recording library: on in the server image (Dockerfile)
     library: bool = Field(default=False, validation_alias="MNEMA_LIBRARY")
+    # the server image (Dockerfile): no network address of its own for invitations, updated
+    # with a new image
+    container: bool = Field(default=False, validation_alias="MNEMA_CONTAINER")
+    # the server folder of invite and devices (install_setup.server_root): /data in the image
+    server_dir: str | None = Field(default=None, validation_alias="MNEMA_SERVER_DIR")
+    # the address devices reach the server at, for invitations (node.node_url): the installer
+    # puts it into the container's environment
+    public_url: str | None = Field(default=None, validation_alias="MNEMA_URL")
     job_workers: int = Field(default=1, ge=1, validation_alias="MNEMA_JOB_WORKERS")
     job_queue_size: int = Field(default=16, ge=0, validation_alias="MNEMA_JOB_QUEUE_SIZE")
     live_connections: int = Field(default=2, ge=1, validation_alias="MNEMA_LIVE_CONNECTIONS")

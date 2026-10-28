@@ -853,8 +853,8 @@ def _variant(name: str, model: str | None) -> TranscriptionBackend:
 
 def _no_engine() -> str:
     return _(
-        "No transcription engine is installed: install the full extra (./install.sh client "
-        "or ./install.sh server) or set a runner (--runner/MNEMA_RUNNER)."
+        "No transcription engine is installed: install the full extra (uv sync --extra full) "
+        "or set a runner (--runner/MNEMA_RUNNER)."
     )
 
 

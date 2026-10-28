@@ -52,6 +52,23 @@ panel model, once in English and once in Russian, draws it with the Mac app's pr
 `docs/images/panel-{light,dark}.ru.png` (Russian, for README.ru.md). Run it after changing how the
 panel looks.
 
+The server image (what `./install.sh server` runs) builds from the checkout with Docker:
+
+```bash
+docker build -t mnema-server:dev .
+```
+
+It installs the server's locked set from `uv.lock` (the extras in `mnema/extras.py`) with CPU
+builds of torch, torchaudio and torchvision from the PyTorch CPU index in place of the CUDA
+wheels, for linux/amd64 and linux/arm64 (there without torchcodec, which has no aarch64 wheel;
+pyannote's decoding, unused). To try the installer against that image without touching your own
+server, give it another home, image and container name:
+
+```bash
+HOME=$(mktemp -d) MNEMA_IMAGE=mnema-server:dev MNEMA_NAME=mnema-try \
+  ./install.sh server --url http://127.0.0.1:38837
+```
+
 ## How the code is organized
 
 One Python package runs everywhere: the Mac app, the Linux client, the command line and the
@@ -131,17 +148,22 @@ Pushing the tag runs [the release workflow](.github/workflows/release.yml). It r
 checks as CI (nothing is published if one fails), checks that the tag matches the version and
 builds, each in its own job:
 
-- the reproducible source archive `mnema-X.Y.Z.tar.gz` (Linux app and server updates);
+- the reproducible source archive `mnema-X.Y.Z.tar.gz` (Linux app updates);
 - the LGPL ffmpeg (CI on `main` caches it until `scripts/build_ffmpeg.sh` changes; a tag reads
   that cache and never writes one);
 - `Mnema-X.Y.Z-mac.zip` (Mac app updates) and `Mnema-X.Y.Z.dmg` (installs), checked by the smoke,
   and the sdists of the (L)GPL Python packages inside the app;
-- the signed `mnema-X.Y.Z.apk`.
+- the signed `mnema-X.Y.Z.apk`;
+- the server image `ghcr.io/fozt/mnema:X.Y.Z` for linux/amd64 and linux/arm64, each built and
+  started on its own runner, which checks the healthcheck and an invite.
 
 Then it writes the manifests `mnema-release.json` (with the `mac` block) and `mnema-android.json`
 with `scripts/build_release.py`, uploads everything with the ffmpeg and lame source tarballs,
-the package sdists and the licenses to a draft release, checks the asset list and publishes the release as the latest. The
-apps read the manifests from `https://github.com/fozt/mnema/releases/latest/download/`.
+the package sdists and the licenses to a draft release, checks the asset list, tags the image `latest` and publishes the release as the latest. The
+apps read the manifests from `https://github.com/fozt/mnema/releases/latest/download/`, the
+server installer pulls `ghcr.io/fozt/mnema:latest`. GitHub creates the image package private on
+its first push: make it public once in the package settings, otherwise the release stops before
+it is published.
 
 The APK needs four repository secrets: `ANDROID_KEYSTORE_BASE64` (`base64 -i key.jks`),
 `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD`. Without them the
@@ -150,5 +172,5 @@ release stops before anything is uploaded.
 ## Reporting issues
 
 Include what you did, what you expected and what happened, your platform (macOS version, Linux
-distribution, phone model) and the log (`~/.cache/mnema/bar.log` or `journalctl -u mnema`). For
+distribution, phone model) and the log (`~/.cache/mnema/bar.log` or `docker logs mnema`). For
 recognition quality issues attach a short sample if you can.

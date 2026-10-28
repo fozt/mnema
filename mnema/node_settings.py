@@ -61,7 +61,7 @@ def name() -> str:
     Read on every call: the node gives a new name without a restart."""
     from .config import Settings
 
-    # only the server installer turns the recordings library on (server.env)
+    # only the server image turns the recordings library on (MNEMA_LIBRARY in the Dockerfile)
     return given_name() or (SERVER_NAME if Settings().library else machine_name())
 
 

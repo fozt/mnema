@@ -78,29 +78,40 @@ everything inside the app are in `Mnema.app/Contents/Resources/licenses`.
 
 ### Server (Linux)
 
-Needed for Linux desktops and the phone. Works on Debian and Ubuntu, with or without an NVIDIA
-GPU; give it at least 6 GB of memory (or add swap with `--swap-size`).
+Needed for Linux desktops and the phone. The server runs in Docker on a Linux machine (x86_64 or
+arm64), at home or on a VPS, and recognizes speech on the CPU. Install
+[Docker Engine with the Compose plugin](https://docs.docker.com/engine/install/) first and give
+the machine at least 6 GB of memory (or add swap with `--swap-size 4G`).
 
 ```bash
 git clone https://github.com/fozt/mnema.git && cd mnema
 ./install.sh server
-mnema model              # choose the model for titles and summaries
 ```
 
-The installer sets up the `mnema` systemd service and prints an invite: a link like
-`http://host:port#invite=…` that connects one device and expires in 6 hours. Open the port from
-the invite in your firewall.
+The installer starts the `mnema` container from the published image, asks for the model for
+titles and summaries, and prints an invite: a link like `http://host:port#invite=…` that connects
+one device and expires in 6 hours.
 
 The invite carries the server's address, which the installer finds on its own (Tailscale, a public
 IP or the home network). If devices reach the server another way, for example by a domain name or
 through port forwarding on a router, give that address with `--url http://my.host:port`.
 
+Open the port from the invite in your firewall. Docker publishes it past `ufw`, so `ufw` rules do
+not close it: use your provider's firewall for that.
+
+Everything lives in `~/mnema-server`: `compose.yaml` with its `.env`, and the data (settings,
+recordings, devices, model weights) in `data/`. On the server the `mnema` command runs in the
+container:
+
 | Command | What it does |
 |---|---|
+| `mnema model` | Choose the model for titles and summaries |
 | `mnema invite` | A new invite (`--hours` up to 72) |
 | `mnema devices` | Connected devices; `mnema devices revoke <id>` disconnects one |
-| `mnema update --server` | Install the latest release |
-| `journalctl -u mnema -f` | Server log |
+| `mnema update` | Pull the latest image and restart the server with it |
+| `docker logs -f mnema` | Server log |
+
+`./install.sh server --build` builds the image from the checkout instead of pulling it.
 
 The server speaks plain HTTP and requires a token from every device. If the network between your
 devices and the server is not trusted, put a TLS proxy in front of it.
@@ -217,7 +228,7 @@ claude mcp add mnema -- "$(dirname "$(readlink ~/.local/bin/mnema)")/mnema-mcp"
 
 ## Troubleshooting
 
-- **Log:** `~/.cache/mnema/bar.log` on a computer, `journalctl -u mnema` on the server.
+- **Log:** `~/.cache/mnema/bar.log` on a computer, `docker logs mnema` on the server.
 - **No notifications on a Mac:** allow Mnema in *System Settings → Notifications*.
 - **No microphone or call audio:** allow Mnema in *System Settings → Privacy & Security →
   Microphone* and *Screen & System Audio Recording*.

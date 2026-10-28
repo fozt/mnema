@@ -2,8 +2,8 @@
 lock file, under data_dir()/releases/<version>-*/.venv.
 
 Neither a developer's checkout nor the running version's environment is touched. The new
-version becomes the app (or the service) only after it is installed and checked; the previous
-one stays on disk.
+version becomes the app only after it is installed and checked; the previous one stays on disk.
+The server is a Docker image and is updated with a new one on its host (`mnema update` there).
 
 The self-contained Mac app (Mnema.app from the DMG) is replaced as a whole bundle from the
 manifest's `mac` block instead: the new bundle is checked next to the old one and swapped in.
@@ -24,11 +24,9 @@ import subprocess
 import sys
 import tarfile
 import tempfile
-import time
 import tomllib
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
 import httpx
@@ -40,9 +38,6 @@ from .core import base
 from .core.base import MediaError
 from .i18n import _
 
-if TYPE_CHECKING:
-    from .install_setup import InstalledServer
-
 TRANSPORT: httpx.BaseTransport | None = None
 logger = logging.getLogger(__name__)
 _VERSION = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
@@ -52,7 +47,6 @@ _MACOS = re.compile(r"^[0-9]+(\.[0-9]+){0,2}$")
 RELEASES_PAGE = "https://github.com/fozt/mnema/releases/latest"
 PREVIOUS_BUNDLE = ".Mnema-previous.app"
 _ATTEMPT = ".mnema-update-"
-_SERVER_READY_TIMEOUT = 15.0
 
 
 def _version(value: str) -> tuple[int, ...]:
@@ -267,32 +261,16 @@ def _unpack(archive: Path, destination: Path, version: str) -> None:
 
 
 def _app_installed() -> bool:
-    """An update installs the app; a server or a bare CLI has none."""
+    """An update installs the app; a bare CLI has none."""
     return any(importlib.util.find_spec(m) for m in ("pystray", "AppKit"))
 
 
 _UNFINISHED = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-")
 
 
-def _protected_releases() -> set[Path] | None:
-    """Both roles may share a user, so the running service's release is protected too."""
-    from .install_setup import installed_server
-
-    try:
-        server = installed_server()
-    except (OSError, ValueError):
-        return None  # an unknown service target: better not clean up now
-    keep = {Path(sys.prefix).parent.resolve()}
-    if server is not None:
-        keep.add(server.repo.resolve())
-    return keep
-
-
 def _drop_unfinished(root: Path) -> None:
     """Remove folders of interrupted attempts: no installed marker and not in use."""
-    keep = _protected_releases()
-    if keep is None:
-        return
+    keep = {Path(sys.prefix).parent.resolve()}
     for path in root.iterdir():
         if (
             path.is_dir()
@@ -304,22 +282,14 @@ def _drop_unfinished(root: Path) -> None:
             shutil.rmtree(path, ignore_errors=True)
 
 
-def _extras(*, server: bool = False) -> list[str]:
+def _extras() -> list[str]:
     # The app as ./install.sh client installs it: a Mac processes itself, a Linux client sends
-    # recordings to the server; the server keeps its own set
-    if not server:
-        return list(roles.MAC if base.STANDALONE else roles.LINUX_CLIENT)
-    extras = list(roles.SERVER)
-    if importlib.util.find_spec("mcp"):
-        extras.append("mcp")
-    return extras
+    # recordings to the server
+    return list(roles.MAC if base.STANDALONE else roles.LINUX_CLIENT)
 
 
-def _prune_releases(root: Path, active: Path, previous_server: Path | None = None) -> None:
+def _prune_releases(root: Path, active: Path) -> None:
     """Keep the new and the previous release; never remove the running Python's."""
-    protected = _protected_releases()
-    if protected is None:
-        return
     previous = Path(sys.prefix).parent.resolve()
     candidates = sorted(
         (
@@ -332,12 +302,10 @@ def _prune_releases(root: Path, active: Path, previous_server: Path | None = Non
         key=lambda path: path.stat().st_mtime,
         reverse=True,
     )
-    keep = {active.resolve(), previous, *protected}
-    if previous_server is not None:
-        keep.add(previous_server.resolve())
+    keep = {active.resolve(), previous}
     if previous not in {path.resolve() for path in candidates}:
-        # Running from outside the releases (the app env of ./install.sh client, a server
-        # checkout): one previous release is enough.
+        # Running from outside the releases (the app env of ./install.sh client): one previous
+        # release is enough.
         keep.update([path.resolve() for path in candidates if path != active][:1])
     for path in candidates:
         if path.resolve() not in keep:
@@ -491,90 +459,8 @@ def drop_previous_bundle() -> None:
         logger.info("previous app bundle not removed", exc_info=True)
 
 
-class _ActivationUncertain(MediaError):
-    """The service may point at the new release: after a failed rollback it must stay."""
-
-
-def _server_installation() -> tuple[InstalledServer, str]:
-    from .config import config_dir
-    from .install_setup import installed_server, server_port
-
-    if sys.platform != "linux":
-        raise MediaError(_("Server updates are for the installed Linux service"))
-    import pwd
-
-    try:
-        server = installed_server()
-        if server is None:
-            raise MediaError(_("The installed Mnema service wasn't found"))
-        if pwd.getpwnam(server.user).pw_uid != os.geteuid():
-            raise MediaError(_("Run the update as the service user: {user}", user=server.user))
-        if server_port() is None:
-            raise ValueError("no server.json")
-        if not (config_dir() / "server.env").is_file():
-            raise ValueError("no server.env")
-        server.retarget(server.repo)  # check the whole supported unit before downloading
-        server.connection()
-        project = tomllib.loads((server.repo / "pyproject.toml").read_text())
-        version = project["project"]["version"]
-        _version(version)
-        return server, version
-    except (OSError, ValueError, KeyError, TypeError) as exc:
-        raise MediaError(_("Couldn't read the installed Mnema server; the files are kept")) from exc
-
-
-def _wait_server_ready(server: InstalledServer) -> None:
-    from .connection import Answer, answer_of
-
-    connection = server.connection()
-    headers = {"Authorization": f"Bearer {connection.token}"} if connection.token else {}
-    deadline = time.monotonic() + _SERVER_READY_TIMEOUT
-    with httpx.Client(
-        base_url=connection.url, headers=headers, trust_env=False, transport=TRANSPORT
-    ) as client:
-        while (remaining := deadline - time.monotonic()) > 0:
-            try:
-                response = client.get("/api/capabilities", timeout=min(2.0, remaining))
-                if answer_of(response.status_code, response.content)[0] is Answer.MNEMA:
-                    return
-            except (httpx.HTTPError, ValueError):
-                pass
-            time.sleep(min(0.25, max(0, deadline - time.monotonic())))
-    raise MediaError(_("The new service didn't answer as Mnema"))
-
-
-def _activate_server(server: InstalledServer, destination: Path) -> None:
-    from .install_setup import LAUNCHER, _service
-
-    if not (destination / LAUNCHER).is_file():  # the service starts it
-        raise MediaError(_("The new Mnema version failed the start check"))
-    if server.path.read_text() != server.content:
-        raise MediaError(_("The service settings changed during the update; run it again"))
-    try:
-        _service("mnema", server.retarget(destination), server.path.parent)
-        _wait_server_ready(server)
-    except BaseException as exc:
-        try:
-            _service("mnema", server.content, server.path.parent)
-            _wait_server_ready(server)
-        except BaseException as rollback:
-            raise _ActivationUncertain(
-                _(
-                    "Couldn't start the new service or restore the previous one. Both versions "
-                    "are kept; check the Mnema service."
-                )
-            ) from rollback
-        if not isinstance(exc, Exception):
-            raise
-        raise MediaError(
-            _("The new service didn't start; the previous version is restored")
-        ) from exc
-
-
-def apply(
-    on: Callable[[str], None] = lambda _m: None, *, server: bool = False, terminal: bool = False
-) -> Result:
-    """Prepare one locked release and switch the app or the installed service to it.
+def apply(on: Callable[[str], None] = lambda _m: None, *, terminal: bool = False) -> Result:
+    """Prepare one locked release and switch the app to it.
     terminal: a command runs the update, so a refusal may name the command that helps; otherwise
     it is an app notice without commands, and the command goes to the log."""
     import fcntl
@@ -586,8 +472,8 @@ def apply(
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as exc:
             raise MediaError(_("A Mnema update is already running")) from exc
-        installation, current = _server_installation() if server else (None, __version__)
-        bundle = None if server else app_bundle()
+        current = __version__
+        bundle = app_bundle()
         if bundle is not None:
             found = check(current=current)
             if not found.any or found.release is None:
@@ -600,11 +486,11 @@ def apply(
                 raise MediaError(
                     _("Couldn't update Mnema. The previous version is in place")
                 ) from exc
-        if not server and not _app_installed():
+        if not _app_installed():
             raise MediaError(
                 _(
-                    "The update installs the Mnema app, and there is none here. An installed "
-                    "server is updated with mnema update --server"
+                    "The update installs the Mnema app, and there is none here. The server is "
+                    "updated on its machine: mnema update"
                 )
             )
         _drop_unfinished(root)
@@ -612,7 +498,7 @@ def apply(
         if not found.any or found.release is None:
             return Result(version=current)
         release = found.release
-        if installation is None and sys.platform == "darwin":
+        if sys.platform == "darwin":
             from .bar.install import NO_BUILD_TOOLS, UPDATE_NO_BUILD_TOOLS, has_build_tools
 
             if not has_build_tools():  # swift builds Mnema.app: say so before downloading
@@ -633,34 +519,26 @@ def apply(
                 _download(release, archive)
                 _unpack(archive, destination, release.version)
             on(_("Preparing the new version…"))
-            extras = [arg for extra in _extras(server=server) for arg in ("--extra", extra)]
+            extras = [arg for extra in _extras() for arg in ("--extra", extra)]
             _run(uv, "sync", "--locked", "--no-dev", "--python", "3.12", *extras,
                  cwd=destination, what=_("Couldn't prepare the new Mnema version"))  # fmt: skip
             python = str(destination / ".venv/bin/python")
-            smoke = (
-                "import mnema.server"
-                if server
-                else "import mnema.bar.runtime; import mnema.bar.protocol"
-            )
+            smoke = "import mnema.bar.runtime; import mnema.bar.protocol"
             failed = _("The new Mnema version failed the start check")
             _run(python, "-c", smoke, cwd=destination, what=failed)
             (destination / ".mnema-installed.json").write_text(
                 json.dumps({"version": release.version})
             )
-            if installation is not None:
-                on(_("Restarting the Mnema service…"))
-                _activate_server(installation, destination)
-            else:
-                on(_("Installing the app…"))
-                _run(
-                    python,
-                    "-c",
-                    "from mnema.bar.install import install_release; "
-                    f"install_release(terminal={terminal})",
-                    cwd=destination,
-                    what=_("Couldn't install the new app version"),
-                    said=True,
-                )
+            on(_("Installing the app…"))
+            _run(
+                python,
+                "-c",
+                "from mnema.bar.install import install_release; "
+                f"install_release(terminal={terminal})",
+                cwd=destination,
+                what=_("Couldn't install the new app version"),
+                said=True,
+            )
             from .install_setup import link_cli
 
             # The command link and the cleanup never undo a switched installation.
@@ -669,40 +547,31 @@ def apply(
             except OSError:
                 pass
             try:
-                _prune_releases(root, destination, installation.repo if installation else None)
+                _prune_releases(root, destination)
             except OSError:
                 pass
             return Result(version=release.version, python=python)
         except BaseException as exc:  # Ctrl-C too: no half-made folder is left
-            if not isinstance(exc, _ActivationUncertain):
-                shutil.rmtree(destination, ignore_errors=True)
+            shutil.rmtree(destination, ignore_errors=True)
             if isinstance(exc, MediaError) or not isinstance(exc, Exception):
                 raise
             raise MediaError(_("Couldn't update Mnema. The previous version is in place")) from exc
 
 
-def main(*, server: bool = False) -> None:
+def main() -> None:
     from .config import load_env
 
     load_env()
     try:
-        result = apply(on=lambda message: print(message, flush=True), server=server, terminal=True)
+        result = apply(on=lambda message: print(message, flush=True), terminal=True)
     except MediaError as exc:
         print(str(exc) or _("Couldn't update Mnema"), file=sys.stderr)
         raise SystemExit(1) from None
     if result.changed:
-        print(
-            _("Mnema server updated to {version}.", version=result.version)
-            if server
-            else _("Mnema {version} installed. Restart the app.", version=result.version)
-        )
+        print(_("Mnema {version} installed. Restart the app.", version=result.version))
     else:
         print(_("Mnema {version}: no new versions", version=result.version))
 
 
 if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--server", action="store_true")
-    main(server=parser.parse_args().server)
+    main()

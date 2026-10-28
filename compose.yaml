@@ -1,0 +1,20 @@
+# The Mnema server. ./install.sh server copies this file to ~/mnema-server and writes the
+# values below to ~/mnema-server/.env; the data lives in ~/mnema-server/data. Run it with the
+# mnema command the installer adds: mnema model, mnema invite, mnema devices, mnema update.
+name: ${MNEMA_NAME:-mnema}
+services:
+  mnema:
+    image: ${MNEMA_IMAGE:-ghcr.io/fozt/mnema:latest}
+    # always: every `up` (mnema update) brings the newest image; never: an image built here
+    pull_policy: ${MNEMA_PULL:-always}
+    container_name: ${MNEMA_NAME:-mnema}
+    restart: unless-stopped
+    # the owner of the data folder
+    user: "${MNEMA_UID:-1000}:${MNEMA_GID:-1000}"
+    ports:
+      - "${MNEMA_PORT:-8000}:8000"
+    environment:
+      # the address devices reach the server at, for invitations
+      MNEMA_URL: ${MNEMA_URL:-}
+    volumes:
+      - ./data:/data

@@ -693,21 +693,6 @@ def test_translate_remote_runs_whole_operation_on_node(tmp_path: Path, monkeypat
     assert "translated text" in out.read_text(encoding="utf-8")
 
 
-# ─────────────────────── serve: service arguments ──────────────────────────────
-
-
-def test_serve_parses_service_args():
-    """The server service command (install_setup, update) parses: host, its port and folder."""
-    from mnema.cli import build_parser
-
-    args = build_parser().parse_args(
-        ["serve", "--host", "0.0.0.0", "--saved-port", "--dir", "/srv/mnema"]
-    )
-    assert args.host == "0.0.0.0"
-    assert args.saved_port is True
-    assert args.dir == "/srv/mnema"
-
-
 # ─────────────────────── serve: token guard on a public bind ────────────────
 
 
@@ -781,14 +766,9 @@ def test_serve_does_not_load_speech_engines_at_start(monkeypatch, tmp_path):
                 handler.close()
 
 
-@pytest.mark.parametrize("service", [False, True], ids=["by-hand", "service"])
-def test_serve_takes_this_computers_server_token_not_the_client_token(
-    tmp_path, monkeypatch, service
-):
+def test_serve_takes_this_computers_server_token_not_the_client_token(tmp_path, monkeypatch):
     """`mnema serve` on a PC connected to a VPS: the MNEMA_TOKEN line of ~/.config/mnema/.env is
-    this device's token at the VPS; its own server admits by its own token (server.env). Only the
-    service (--saved-port) takes this computer's server port (server.json): `task serve` in the
-    repository does not take the app server's port."""
+    this device's token at the VPS; its own server admits by its own token (server.env)."""
     from fastapi.testclient import TestClient
 
     from mnema import config
@@ -798,15 +778,12 @@ def test_serve_takes_this_computers_server_token_not_the_client_token(
     settings.mkdir(parents=True)
     (settings / ".env").write_text("MNEMA_RUNNER=http://vps:8000\nMNEMA_TOKEN=vps-token\n")
     (settings / "server.env").write_text('MNEMA_TOKEN="own-token"\n')
-    (settings / "server.json").write_text('{"port": 45001}\n')
     monkeypatch.delenv("MNEMA_TOKEN")
     monkeypatch.delenv("MNEMA_RUNNER")
     config.load_env()  # like any console command
-    args = _serve_args("0.0.0.0", port=None, dir_=str(tmp_path / "serve"))
-    args.saved_port = service
     with patch("uvicorn.run") as run:
-        cmd_serve(args)
-    assert (run.call_args.kwargs["port"] == 45001) is service
+        cmd_serve(_serve_args("0.0.0.0", port=None, dir_=str(tmp_path / "serve")))
+    assert run.call_args.kwargs["port"] == 8000
     client = TestClient(run.call_args.args[0])
 
     def status(token: str) -> int:
@@ -815,19 +792,6 @@ def test_serve_takes_this_computers_server_token_not_the_client_token(
         ).status_code
 
     assert (status("own-token"), status("vps-token")) == (200, 401)
-
-
-def test_service_without_its_port_file_does_not_start_on_another_port(monkeypatch):
-    """The server service without ~/.config/mnema/server.json does not silently take another
-    port the clients do not know: a clear error instead of a start."""
-    monkeypatch.delenv("MNEMA_TOKEN", raising=False)
-    args = _serve_args("127.0.0.1", port=None)
-    args.saved_port = True
-    with patch("uvicorn.run") as run, pytest.raises(SystemExit):
-        from mnema.cli.commands import cmd_serve
-
-        cmd_serve(args)
-    run.assert_not_called()
 
 
 def test_serve_without_token_warns_even_on_loopback(monkeypatch, capsys):

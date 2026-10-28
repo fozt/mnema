@@ -32,9 +32,7 @@ def _isolated_user_settings(monkeypatch, tmp_path):
 def _isolated_server_root(monkeypatch, tmp_path):
     """This computer's server folder (jobs, devices) is in the test's tmp: tests never touch the
     owner's ~/mnema-server."""
-    from mnema import install_setup
-
-    monkeypatch.setattr(install_setup, "server_root", lambda: tmp_path / "mnema-server")
+    monkeypatch.setenv("MNEMA_SERVER_DIR", str(tmp_path / "mnema-server"))
 
 
 @pytest.fixture(autouse=True)

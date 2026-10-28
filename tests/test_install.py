@@ -9,7 +9,6 @@ import socket
 import subprocess
 import sys
 import threading
-import time
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -17,7 +16,6 @@ import httpx
 import pytest
 from dotenv import dotenv_values
 
-from mnema.connection import parse_connection
 from mnema.devices import DeviceStore
 from mnema.sync.state import checkpoint_path
 
@@ -89,6 +87,38 @@ elif name == "swapoff":
     state.write_text("")
 elif name == "mv":
     shutil.move(args[-2], args[-1])
+elif name == "chown":
+    pass
+elif name == "docker":
+    project = pathlib.Path(args[2]).parent if args[:2] == ["compose", "-f"] else None
+    pulled = pathlib.Path(os.environ["FAKE_BIN"]).parent / "pulled"
+    rest = args[3:] if project else args
+    def settings():
+        lines = (project / ".env").read_text().splitlines()
+        return dict(line.split("=", 1) for line in lines)
+    if args[:2] == ["compose", "version"]:
+        sys.exit(int("compose" in os.environ.get("FAKE_DOCKER_MISSING", "")))
+    elif args[:1] == ["info"]:
+        sys.exit(int("daemon" in os.environ.get("FAKE_DOCKER_MISSING", "")))
+    elif args[:2] == ["image", "inspect"]:  # the image id: a pull brings a new one
+        print("sha256:" + ("new" if pulled.exists() else "old"))
+    elif args[:1] == ["run"]:  # the image on the host's network
+        assert args[1:4] == ["--rm", "--network", "host"]
+        assert args[-2:] == ["mnema.install_setup", "host"]
+        print(os.environ.get("FAKE_HOST", "43117 203.0.113.7"))
+    elif rest[:1] == ["config"]:
+        print(settings()["MNEMA_IMAGE"])
+    elif rest[:1] == ["up"]:
+        assert settings()["MNEMA_PORT"] and (project / "data").is_dir()
+        if settings()["MNEMA_PULL"] == "always":  # compose.yaml: pull_policy
+            pulled.touch()
+    elif rest[:1] == ["exec"]:
+        command = [a for a in rest[1:] if a != "-T"]
+        assert command[:2] == ["mnema", "mnema"], command
+        if command[2:4] == ["invite", "--url"]:
+            print(command[4] + "#invite=one-time-code")
+        elif command[2:] == ["--version"]:
+            print("mnema 9.9.9")
 elif name in ("ip", "ifconfig"):
     print("1: lo    inet 127.0.0.1/8 scope host lo")
     print("2: eth0    inet 203.0.113.7/24 brd 203.0.113.255 scope global eth0")
@@ -119,6 +149,10 @@ def system(tmp_path):
         "touch",
         "cat",
         "install",
+        "ln",
+        "head",
+        "find",
+        "sort",
     ):
         (bindir / name).symlink_to(shutil.which(name))
     command = tmp_path / "fake-command"
@@ -142,7 +176,8 @@ def system(tmp_path):
         "df",
         "dd",
         "mv",
-        "systemctl",
+        "docker",
+        "chown",
         "ip",
         "ifconfig",
         "xcode-select",
@@ -170,32 +205,16 @@ def system(tmp_path):
         "WAYLAND_DISPLAY",
         "XDG_DATA_HOME",
         "UV_PROJECT_ENVIRONMENT",
+        "MNEMA_IMAGE",
+        "MNEMA_NAME",
     ):
         env.pop(name, None)
-    units = tmp_path / "systemd"
-    units.mkdir()
-    env["MNEMA_SYSTEMD_DIR"] = str(units)
     template = tmp_path / "venv-template/bin"  # what the fake uv sync creates
     template.mkdir(parents=True)
     (template / "python").write_text(f'#!/bin/sh\nexec {shlex.quote(sys.executable)} "$@"\n')
     (template / "python").chmod(0o755)
     (template / "mnema-bar").symlink_to(command)
     env["FAKE_VENV"] = str(template.parent)
-    boundary = tmp_path / "boundary"
-    boundary.mkdir()
-    (boundary / "sitecustomize.py").write_text("""
-import json, os, socket
-class Listener:
-    def __enter__(self): return self
-    def __exit__(self, *args): pass
-    def getsockname(self): return ("0.0.0.0", int(os.environ.get("FAKE_PORT", "43117")))
-def create_server(address):
-    with open(os.environ["FAKE_LOG"], "a") as log:
-        log.write(json.dumps(["bind", *address]) + "\\n")
-    return Listener()
-socket.create_server = create_server
-""")
-    env["PYTHONPATH"] = str(boundary)
     return tmp_path, env
 
 
@@ -207,10 +226,16 @@ def calls(system):
 def installer(system, *args):
     root, env = system
     shutil.copy(REPO / "install.sh", root / "install.sh")
+    shutil.copy(REPO / "compose.yaml", root / "compose.yaml")
     skip = shutil.ignore_patterns("__pycache__", "macos")
     shutil.copytree(REPO / "mnema", root / "mnema", ignore=skip, dirs_exist_ok=True)
+    shutil.copytree(REPO / "scripts", root / "scripts", ignore=skip, dirs_exist_ok=True)
     return subprocess.run(
-        ["bash", str(root / "install.sh"), *args], env=env, capture_output=True, text=True
+        ["bash", str(root / "install.sh"), *args],
+        env=env,
+        capture_output=True,
+        text=True,
+        stdin=subprocess.DEVNULL,
     )
 
 
@@ -286,52 +311,195 @@ def node_devices(home: Path) -> DeviceStore:
     return DeviceStore(home / "mnema-server/.mnema/devices.db")
 
 
-def test_server_creates_token_once_and_runs_as_a_service(system):
-    """./install.sh server: engines without a desktop, a token made once and kept on reinstall,
-    the mnema service listening with it; at the end an invitation for one device, never the
-    node token."""
-    first = installer(system, "server")
-    assert first.returncode == 0, first.stderr
-    commands = calls(system)
-    assert ["uv", "sync", "--locked", "--python", "3.12", "--no-dev",
-            "--extra", "full", "--extra", "live"] in commands  # fmt: skip
-    config = env_file(system).parent
-    # the library flag is in the service's environment, not the shared .env
-    assert "MNEMA_LIBRARY" not in dotenv_values(config / ".env")
-    assert "MNEMA_ASR_THREADS" not in dotenv_values(config / ".env")  # no --threads: the default
-    server_env = config / "server.env"
-    token = dotenv_values(server_env)["MNEMA_TOKEN"]
-    assert dotenv_values(server_env)["MNEMA_LIBRARY"] == "true"
-    assert token is not None and len(token) >= 40 and server_env.stat().st_mode & 0o777 == 0o600
-    unit = (system[0] / "systemd/mnema.service").read_text()
-    assert '"serve" "--host" "0.0.0.0"' in unit
-    assert "Restart=on-failure" in unit and token not in unit
-    assert f"EnvironmentFile={server_env}\n" in unit
-    assert "User=1000\n" in unit
-    assert f"WorkingDirectory={system[0]}\n" in unit
-    assert ["systemctl", "enable", "mnema"] in commands
-    assert token not in first.stdout and "#token=" not in first.stdout
-    first_invite = printed_invite(first.stdout)
-    assert first_invite.startswith("http://203.0.113.7:43117#invite=")
-    assert "Приглашение для одного устройства, действует до " in first.stdout
-    assert not any("menubar" in c or "libportaudio2" in c for c in commands)
-    system[1]["FAKE_PORT"] = "45000"
-    again = installer(system, "server")
-    assert again.returncode == 0 and token not in again.stdout
-    second_invite = printed_invite(again.stdout)
-    assert second_invite.startswith("http://203.0.113.7:43117#invite=")
-    assert second_invite != first_invite
-    assert dotenv_values(server_env)["MNEMA_TOKEN"] == token
-    assert server_env.read_text().count("MNEMA_TOKEN=") == 1
-    assert server_env.read_text().count("MNEMA_LIBRARY=") == 1
-    assert len([c for c in calls(system) if c[0] == "bind"]) == 1
-    assert (config / "server.json").stat().st_mode & 0o777 == 0o600
+def server_dir(system) -> Path:
+    return Path(system[1]["HOME"]) / "mnema-server"
 
 
-def test_server_swap_only_when_asked(system):
-    done = installer(system, "server", "--swap-size", "8G")
+def docker(system) -> list[list[str]]:
+    return [c[1:] for c in calls(system) if c[0] == "docker"]
+
+
+def compose(system, *args: str) -> list[str]:
+    return ["compose", "-f", str(server_dir(system) / "compose.yaml"), *args]
+
+
+def compose_env(system) -> dict[str, str]:
+    lines = (server_dir(system) / ".env").read_text().splitlines()
+    return dict(line.split("=", 1) for line in lines)
+
+
+def files_under(path: Path) -> set[str]:
+    return {str(p.relative_to(path)) for p in path.rglob("*")}
+
+
+def test_server_runs_in_docker_and_writes_only_its_folder_and_command(system):
+    """./install.sh server: the published image, a free port of the host and its address, the
+    container from compose.yaml in ~/mnema-server, the mnema command; no packages, no
+    environment, nothing else in the home folder. At the end an invitation from the container."""
+    root, env = system
+    done = installer(system, "server")
     assert done.returncode == 0, done.stderr
-    assert any(c[:2] == ["sudo", "bash"] and c[-1] == "8" for c in calls(system))
+    image = "ghcr.io/fozt/mnema:latest"
+    assert docker(system) == [
+        ["compose", "version"],
+        ["info"],
+        ["pull", image],
+        ["run", "--rm", "--network", "host", image, "python", "-m", "mnema.install_setup", "host"],
+        compose(system, "up", "-d", "--wait"),
+        compose(system, "exec", "-T", "mnema", "mnema", "model", "--show"),
+        compose(system, "exec", "-T", "mnema", "mnema", "invite", "--url",
+                "http://203.0.113.7:43117"),
+    ]  # fmt: skip
+    assert not [c for c in calls(system) if c[0] in ("uv", "apt-get", "sudo", "chown")]
+    folder = server_dir(system)
+    assert compose_env(system) == {
+        "MNEMA_NAME": "mnema",
+        "MNEMA_IMAGE": image,
+        "MNEMA_PULL": "always",
+        "MNEMA_PORT": "43117",
+        "MNEMA_URL": "http://203.0.113.7:43117",
+        "MNEMA_UID": "1000",
+        "MNEMA_GID": "1000",
+    }
+    assert (folder / "compose.yaml").read_text() == (REPO / "compose.yaml").read_text()
+    assert oct(folder.stat().st_mode & 0o777) == oct((folder / "data").stat().st_mode & 0o777)
+    assert folder.stat().st_mode & 0o777 == 0o700
+    assert files_under(Path(env["HOME"])) == {
+        ".local", ".local/bin", ".local/bin/mnema",
+        "mnema-server", "mnema-server/compose.yaml", "mnema-server/.env", "mnema-server/data",
+        "mnema-server/mnema",
+    }  # fmt: skip
+    assert Path(os.readlink(Path(env["HOME"]) / ".local/bin/mnema")) == folder / "mnema"
+    assert "http://203.0.113.7:43117#invite=one-time-code" in done.stdout
+    assert "Модель можно выбрать позже: mnema model" in done.stdout  # no terminal to ask in
+    assert "docker logs -f mnema" in done.stdout
+
+
+def test_reinstall_keeps_the_port_and_takes_a_new_address(system):
+    """The port is picked once: devices keep reaching the same one. --url is the address devices
+    reach the server at (a domain, a forwarded port)."""
+    assert installer(system, "server").returncode == 0
+    system[1]["FAKE_HOST"] = "45000 203.0.113.7"
+    done = installer(system, "server", "--url", "http://mnema.example.org:8443")
+    assert done.returncode == 0, done.stderr
+    assert compose_env(system)["MNEMA_PORT"] == "43117"
+    assert compose_env(system)["MNEMA_URL"] == "http://mnema.example.org:8443"
+    assert "http://mnema.example.org:8443#invite=one-time-code" in done.stdout
+
+
+def test_server_without_an_address_asks_for_one_and_starts_nothing(system):
+    system[1]["FAKE_HOST"] = "43117"
+    done = installer(system, "server")
+    assert done.returncode != 0
+    assert "./install.sh server --url http://АДРЕС:43117" in done.stdout
+    assert not [c for c in docker(system) if "up" in c]
+    assert not server_dir(system).exists()
+
+
+@pytest.mark.parametrize(("missing", "text"), [
+    ("docker", "Установите Docker Engine с плагином Compose: https://docs.docker.com/engine/install/"),
+    ("compose", "Установите Docker Engine с плагином Compose: https://docs.docker.com/engine/install/"),
+    ("daemon", "Docker не запущен, или этому пользователю он недоступен"),
+])  # fmt: skip
+def test_server_without_docker_says_what_to_install(system, missing, text):
+    root, env = system
+    if missing == "docker":
+        (root / "bin/docker").unlink()
+    env["FAKE_DOCKER_MISSING"] = missing
+    done = installer(system, "server")
+    assert done.returncode != 0
+    assert text in done.stdout
+    assert not server_dir(system).exists()
+    assert not (Path(env["HOME"]) / ".local").exists()
+
+
+def test_server_built_here_or_given_as_a_local_image_is_not_pulled(system):
+    root, env = system
+    done = installer(system, "server", "--build")
+    assert done.returncode == 0, done.stderr
+    assert ["build", "-t", "mnema:local", str(root)] in docker(system)
+    assert not [c for c in docker(system) if c[0] == "pull"]
+    assert (compose_env(system)["MNEMA_IMAGE"], compose_env(system)["MNEMA_PULL"]) == (
+        "mnema:local",
+        "never",
+    )
+
+    env["MNEMA_IMAGE"] = "mnema-server:dev"
+    assert installer(system, "server").returncode == 0
+    assert not [c for c in docker(system) if c[0] == "pull"]
+    assert (compose_env(system)["MNEMA_IMAGE"], compose_env(system)["MNEMA_PULL"]) == (
+        "mnema-server:dev",
+        "never",
+    )
+
+
+def test_root_runs_the_container_as_the_image_user(system):
+    """The container never runs as root: as root the data folder goes to the image's user."""
+    system[1]["FAKE_UID"] = "0"
+    assert installer(system, "server").returncode == 0
+    assert (compose_env(system)["MNEMA_UID"], compose_env(system)["MNEMA_GID"]) == ("1000", "1000")
+    assert ["chown", "-R", "1000:1000", str(server_dir(system) / "data")] in calls(system)
+
+
+def test_container_failure_is_not_reported_as_success(system):
+    system[1]["FAKE_FAIL"] = "docker"
+    done = installer(system, "server")
+    assert done.returncode != 0
+    assert "#invite=" not in done.stdout
+
+
+@pytest.mark.parametrize(("os_name", "ok"), [("Linux", True), ("Darwin", False)])
+def test_server_swap_only_when_asked_and_only_on_linux(system, os_name, ok):
+    system[1]["FAKE_OS"] = os_name
+    done = installer(system, "server", "--swap-size", "8G")
+    assert (done.returncode == 0) is ok, done.stderr
+    assert any(c[:2] == ["sudo", "bash"] and c[-1] == "8" for c in calls(system)) is ok
+    assert installer(system, "server").returncode == 0 or not ok
+    assert len([c for c in calls(system) if c[:2] == ["sudo", "bash"]]) == int(ok)
+
+
+def host_command(system, *args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [str(Path(system[1]["HOME"]) / ".local/bin/mnema"), *args],
+        env=system[1],
+        capture_output=True,
+        text=True,
+        stdin=subprocess.DEVNULL,
+    )
+
+
+def test_host_command_runs_mnema_in_the_container(system):
+    assert installer(system, "server").returncode == 0
+    log = Path(system[1]["FAKE_LOG"])
+    log.write_text("")
+    done = host_command(system, "devices", "revoke", "a b")
+    assert done.returncode == 0, done.stderr
+    assert docker(system) == [compose(system, "exec", "-T", "mnema", "mnema", "devices", "revoke",
+                                      "a b")]  # fmt: skip
+
+
+@pytest.mark.parametrize("built_here", [False, True])
+def test_host_update_pulls_the_image_and_recreates_the_container(system, built_here):
+    """mnema update: the newest image (compose pulls the published one, an image built here
+    stays), the container recreated and healthy, the previous image removed."""
+    root, env = system
+    image = "mnema:local" if built_here else "ghcr.io/fozt/mnema:latest"
+    assert installer(system, *(["server", "--build"] if built_here else ["server"])).returncode == 0
+    Path(env["FAKE_LOG"]).write_text("")
+    (root / "pulled").unlink(missing_ok=True)
+    done = host_command(system, "update")
+    assert done.returncode == 0, done.stderr
+    expected = [
+        compose(system, "config", "--images"),
+        ["image", "inspect", "-f", "{{.Id}}", image],
+        compose(system, "up", "-d", "--wait"),
+        ["image", "inspect", "-f", "{{.Id}}", image],
+        compose(system, "exec", "-T", "mnema", "mnema", "--version"),
+    ]
+    if not built_here:
+        expected.insert(-1, ["image", "rm", "sha256:old"])
+    assert docker(system) == expected
+    assert "mnema 9.9.9" in done.stdout
 
 
 def client_sync(*extras: str) -> list[str]:
@@ -343,15 +511,16 @@ def client_sync(*extras: str) -> list[str]:
 # a Mac processes itself with the engines it ships (no GigaAM), Linux only sends recordings
 MAC_SYNC = client_sync("menubar", "mcp", "parakeet", "whisper")
 LINUX_SYNC = client_sync("menubar", "mcp")
-SERVER_SYNC = client_sync("full", "live")
 
 
 @pytest.mark.parametrize(
     "args", [(), ("bogus",), ("client", "--bogus"), ("server", "http://server#invite=x"),
              ("server", "--swap-size", "0G"), ("server", "--swap-size", "4"),
-             ("server", "--swap-size", "65G"), ("client", "--threads"),
-             ("client", "--threads", "8"), ("server", "--threads", "all"),
-             ("server", "--threads", "1.5")],
+             ("server", "--swap-size", "65G"), ("client", "--threads", "8"),
+             ("server", "--threads", "8"), ("client", "--build"),
+             ("client", "--url", "http://203.0.113.7:43117"),
+             ("server", "--url", "http://host:1#invite=x"), ("server", "--url", "host:1"),
+             ("server", "--url", "http://host:$PORT")],
 )  # fmt: skip
 def test_invalid_options_do_not_touch_system(system, args):
     assert installer(system, *args).returncode != 0
@@ -402,30 +571,13 @@ def test_client_environment_follows_xdg_data_home(system):
     assert synced_into(system) == [str(root / "data home/mnema/app/.venv")]
 
 
-@pytest.mark.parametrize("order", [("server", "client"), ("client", "server")])
-def test_client_and_server_from_one_folder_keep_their_own_environments(system, order):
-    """A Linux client next to a server service of the same folder: each mode syncs only its own
-    environment, so neither strips the other's packages. The server ignores an exported
-    UV_PROJECT_ENVIRONMENT: its unit runs the checkout's .venv."""
-    root, env = system
-    env["UV_PROJECT_ENVIRONMENT"] = str(root / "elsewhere")
-    for mode in order:
-        assert installer(system, mode).returncode == 0
-    into = {"server": str(root / ".venv"), "client": str(app_env(system))}
-    assert synced_into(system) == [into[mode] for mode in order]
-    syncs = [c for c in calls(system) if c[:2] == ["uv", "sync"]]
-    sets = {"server": SERVER_SYNC, "client": LINUX_SYNC}
-    assert syncs == [sets[mode] for mode in order]
-    assert not (root / "elsewhere").exists()
-
-
 @pytest.mark.parametrize(
     ("lang", "text"),
     [
-        ({"LANG": "en_US.UTF-8"}, "--threads is only for the server install"),
-        ({"LANG": "ru_RU.UTF-8"}, "--threads задаётся только при установке сервера"),
-        ({"LC_ALL": "ru_RU.UTF-8", "LANG": "en_US.UTF-8"}, "--threads задаётся только"),
-        ({"LC_ALL": "C", "LANG": "ru_RU.UTF-8"}, "--threads is only for the server install"),
+        ({"LANG": "en_US.UTF-8"}, "--swap-size: 1G to 64G"),
+        ({"LANG": "ru_RU.UTF-8"}, "--swap-size: от 1G до 64G"),
+        ({"LC_ALL": "ru_RU.UTF-8", "LANG": "en_US.UTF-8"}, "--swap-size: от 1G"),
+        ({"LC_ALL": "C", "LANG": "ru_RU.UTF-8"}, "--swap-size: 1G to 64G"),
     ],
 )
 def test_installer_speaks_the_language_of_the_locale(system, lang, text):
@@ -433,7 +585,7 @@ def test_installer_speaks_the_language_of_the_locale(system, lang, text):
     for name in ("MNEMA_UI_LANG", "LC_ALL", "LC_MESSAGES", "LANG"):
         env.pop(name, None)
     env.update(lang)
-    done = installer(system, "client", "--threads", "8")
+    done = installer(system, "server", "--swap-size", "0G")
     assert done.returncode != 0
     assert text in done.stdout
 
@@ -449,21 +601,6 @@ def test_mac_client_without_command_line_tools_stops_before_installing(system):
     assert not env_file(system).parent.exists()
 
 
-@pytest.mark.parametrize("mode", [("server",)])
-def test_threads_are_chosen_at_install_and_manual_edit_survives_reinstall(system, mode):
-    """The machine that transcribes picks its threads: the flag writes them to ~/.config/mnema/.env,
-    and a reinstall without it keeps a manual edit."""
-    assert installer(system, *mode, "--threads", "auto").returncode == 0
-    assert dotenv_values(env_file(system))["MNEMA_ASR_THREADS"] == "auto"
-    config = env_file(system)
-    config.write_text(config.read_text().replace("'auto'", "6"))
-    assert installer(system, *mode).returncode == 0
-    assert dotenv_values(config)["MNEMA_ASR_THREADS"] == "6"
-    assert installer(system, *mode, "--threads", "12").returncode == 0
-    assert dotenv_values(config)["MNEMA_ASR_THREADS"] == "12"
-    assert config.read_text().count("MNEMA_ASR_THREADS") == 1
-
-
 @pytest.mark.parametrize("os_name", ["Darwin", "Linux"])
 def test_client_install_preserves_existing_local_server_configuration(system, os_name):
     system[1]["FAKE_OS"] = os_name
@@ -477,17 +614,6 @@ def test_client_install_preserves_existing_local_server_configuration(system, os
     done = installer(system, "client")
     assert done.returncode == 0, done.stderr
     assert [config.with_name(name).read_bytes() for name in files] == before
-
-
-def test_server_installed_with_its_address_invites_to_it_from_now_on(system):
-    """--url is the address clients reach the server at (a domain, a forwarded port): the
-    installer's invitation and later ones lead there, after a reinstall too."""
-    first = installer(system, "server", "--url", "http://mnema.example.org:8443")
-    assert first.returncode == 0, first.stderr
-    assert parse_connection(printed_invite(first.stdout)).url == "http://mnema.example.org:8443"
-    again = installer(system, "server")
-    assert again.returncode == 0, again.stderr
-    assert parse_connection(printed_invite(again.stdout)).url == "http://mnema.example.org:8443"
 
 
 class _Node:
@@ -610,56 +736,6 @@ def test_client_install_with_a_refused_invite_fails_clearly(system):
     assert not env_file(system).exists() or "MNEMA_RUNNER" not in env_file(system).read_text()
 
 
-def test_server_token_is_independent_and_client_preserves_other_settings(system):
-    config = env_file(system)
-    config.parent.mkdir(parents=True)
-    config.write_text("# keep\nMNEMA_TOKEN='secret-$HOME-#-value'\nMNEMA_ASR_THREADS=6\n")
-    done = installer(system, "server")
-    assert done.returncode == 0, done.stderr
-    token = dotenv_values(config.with_name("server.env"))["MNEMA_TOKEN"]
-    assert token != "secret-$HOME-#-value" and token not in done.stdout
-    assert installer(system, "server").returncode == 0
-    assert dotenv_values(config.with_name("server.env"))["MNEMA_TOKEN"] == token
-    assert config.read_text().startswith("# keep\nMNEMA_TOKEN=")
-    with node(system) as url:
-        assert installer(system, "client", f"{url}#invite=one-time-code").returncode == 0
-    assert dotenv_values(config)["MNEMA_TOKEN"] == "device-token"
-    assert dotenv_values(config)["MNEMA_ASR_THREADS"] == "6"
-    assert dotenv_values(config.with_name("server.env"))["MNEMA_TOKEN"] == token
-
-
-def test_service_failure_is_not_reported_as_success(system):
-    system[1]["FAKE_FAIL"] = "systemctl"
-    done = installer(system, "server")
-    assert done.returncode != 0
-    assert "Приглашение" not in done.stdout and "#invite=" not in done.stdout
-    assert not (Path(system[1]["HOME"]) / "mnema-server/.mnema/devices.db").exists()
-
-
-def test_systemd_quotes_special_home_and_repository_paths(system):
-    root, env = system
-    home = root / 'home space % $ "quote"'
-    home.mkdir()
-    env.update(HOME=str(home), XDG_CONFIG_HOME=str(home / ".config"))
-    repo = root / 'repo space % $ "quote"'
-    repo.mkdir()
-    done = installer((repo, env), "server")
-    assert done.returncode == 0, done.stderr
-    unit = (root / "systemd/mnema.service").read_text()
-    assert 'repo space %% $$ \\"quote\\"' in unit
-    assert 'Environment="HOME=' in unit and 'home space %% $ \\"quote\\"' in unit
-    assert f"WorkingDirectory={str(repo).replace('%', '%%')}\n" in unit
-    assert f"EnvironmentFile={str(home).replace('%', '%%')}/.config/mnema/server.env\n" in unit
-    command = next(
-        line for line in done.stdout.splitlines() if line.startswith("Новое приглашение:")
-    )
-    arguments = shlex.split(command.removeprefix("Новое приглашение: "))
-    assert arguments == [str(repo / ".venv/bin/mnema"), "invite"]
-    assert '/.venv/bin/mnema" "serve" ' in unit  # the console script exists in a release too
-    invite = parse_connection(printed_invite(done.stdout)).invite
-    assert invite and node_devices(home).claim(invite, "ПК", now=time.time()) is not None
-
-
 @pytest.mark.parametrize("connection", [(), ("http://host:43117",)])
 def test_client_reinstall_keeps_the_app_settings(system, connection):
     """A reinstall, with a connection string or without, keeps the app settings."""
@@ -684,7 +760,7 @@ def test_client_without_a_server_is_told_how_to_connect(
     from mnema.core import base
 
     monkeypatch.setattr(base, "STANDALONE", standalone)
-    argv = ["install_setup", "client", "--repo", str(tmp_path), "--connection", connection]
+    argv = ["install_setup", "client", "--connection", connection]
     monkeypatch.setattr(sys, "argv", argv)
     install_setup.main()
     assert ("Сервер не подключён, сохранится только звук" in capsys.readouterr().out) is told
@@ -858,15 +934,26 @@ def test_xdg_config_home_is_the_one_settings_dir(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("args", [("server",), ("client", "http://203.0.113.7:43117")])
 def test_install_links_the_mnema_command(system, args):
-    """Both installs point ~/.local/bin/mnema at the command of their environment: the server
-    at the checkout's .venv, the app at its own; a reinstall moves the link."""
+    """Both installs point ~/.local/bin/mnema at their command: the server at the one that runs
+    commands in its container, the app at its environment's; a reinstall moves the link."""
     link = Path(system[1]["HOME"]) / ".local/bin/mnema"
     link.parent.mkdir(parents=True)
     link.symlink_to(system[0] / "old/.venv/bin/mnema")
     done = installer(system, *args)
     assert done.returncode == 0, done.stderr
-    venv = system[0] / ".venv" if args[0] == "server" else app_env(system)
-    assert Path(os.readlink(link)) == venv / "bin/mnema"
+    command = server_dir(system) / "mnema" if args[0] == "server" else app_env(system) / "bin/mnema"
+    assert Path(os.readlink(link)) == command
+
+
+def test_server_leaves_a_foreign_mnema_command_alone(system):
+    link = Path(system[1]["HOME"]) / ".local/bin/mnema"
+    link.parent.mkdir(parents=True)
+    link.write_text("#!/bin/sh\n")
+    done = installer(system, "server")
+    assert done.returncode == 0, done.stderr
+    assert link.read_text() == "#!/bin/sh\n"
+    assert f"Запускайте Mnema так: {server_dir(system) / 'mnema'}" in done.stdout
+    assert "#invite=one-time-code" in done.stdout
 
 
 def test_shared_texts_are_read_in_the_language_of_the_moment():
