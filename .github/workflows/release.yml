@@ -1,7 +1,8 @@
-# A pushed tag vX.Y.Z publishes the release: the source archive (Linux app and server updates),
-# the self-contained Mac app (zip for updates, DMG for installs), the signed APK and the
-# manifests the apps read from releases/latest/download/. Everything is built first, uploaded to
-# a draft, checked, and only then published as the latest release.
+# A pushed tag vX.Y.Z publishes the release: the source archive (Linux app updates), the
+# self-contained Mac app (zip for updates, DMG for installs), the signed APK, the manifests the
+# apps read from releases/latest/download/ and the server image ghcr.io/<repo>:X.Y.Z for
+# linux/amd64 and linux/arm64. Everything is built first, uploaded to a draft, checked; the image
+# is tagged latest and only then the release is published as the latest.
 name: Release
 
 on:
@@ -17,6 +18,7 @@ concurrency:
 
 env:
   TAG: ${{ github.ref_name }}
+  IMAGE: ghcr.io/${{ github.repository }}
 
 jobs:
   # the same checks as every push: a red commit is never published
@@ -98,6 +100,67 @@ jobs:
           if-no-files-found: error
           compression-level: 0
 
+  # The server image, built natively for each platform and checked there: it starts as an
+  # unprivileged user of its data folder, answers its healthcheck and makes an invitation. Pushed
+  # as :X.Y.Z-<arch>, joined into :X.Y.Z by image; :latest moves in publish.
+  image-build:
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+      # the build needs more disk than the runner leaves free
+      - run: sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL
+      - name: Build
+        run: |
+          docker build -t "$IMAGE:${TAG#v}-${{ matrix.arch }}" \
+            --label "org.opencontainers.image.version=${TAG#v}" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" .
+          docker image ls "$IMAGE"
+      - name: Start check
+        run: |
+          mkdir data && sudo chown 4321:4321 data
+          docker run -d --name mnema --user 4321:4321 -v "$PWD/data:/data" \
+            -e MNEMA_URL=http://203.0.113.5:38837 "$IMAGE:${TAG#v}-${{ matrix.arch }}"
+          for _ in $(seq 60); do
+            if [ "$(docker inspect -f '{{.State.Health.Status}}' mnema)" = healthy ]; then
+              docker logs mnema | grep -q '^http://203.0.113.5:38837#invite='
+              docker exec mnema mnema invite | grep -q '^http://203.0.113.5:38837#invite='
+              docker exec mnema mnema devices
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs mnema
+          exit 1
+      - name: Push
+        run: |
+          printf '%s' "${{ github.token }}" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker push "$IMAGE:${TAG#v}-${{ matrix.arch }}"
+
+  image:
+    needs: image-build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - run: |
+          printf '%s' "${{ github.token }}" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker buildx imagetools create -t "$IMAGE:${TAG#v}" \
+            "$IMAGE:${TAG#v}-amd64" "$IMAGE:${TAG#v}-arm64"
+          docker buildx imagetools inspect "$IMAGE:${TAG#v}"
+
   android:
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -146,11 +209,12 @@ jobs:
           if-no-files-found: error
 
   publish:
-    needs: [checks, source, mac, android]
+    needs: [checks, source, mac, android, image]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: write
+      packages: write
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
@@ -194,5 +258,15 @@ jobs:
           gh release view "$TAG" --json assets -q '.assets[] | select(.state == "uploaded") | .name' \
             | sort > uploaded.txt
           diff -u expected.txt uploaded.txt
+      # The installer pulls the image without signing in. GitHub creates a package private:
+      # make it public once in its settings, then re-run this job.
+      - name: Image is public
+        run: |
+          docker logout ghcr.io || true
+          docker buildx imagetools inspect "$IMAGE:${TAG#v}" > /dev/null
+      - name: Image latest
+        run: |
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker buildx imagetools create -t "$IMAGE:latest" "$IMAGE:${TAG#v}"
       - name: Publish
         run: gh release edit "$TAG" --draft=false --latest
