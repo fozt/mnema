@@ -1,6 +1,6 @@
 [project]
 name = "mnema"
-version = "0.3.0"
+version = "0.3.1"
 description = "Meeting recordings: transcription, translation, summaries, merging, compression"
 requires-python = ">=3.12"
 # The core is a thin client: HTTP to the server and link downloads; the server calls the cloud
