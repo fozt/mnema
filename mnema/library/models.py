@@ -11,8 +11,11 @@ from ..i18n import _
 
 class FileName(StrEnum):
     TRANSCRIPT = "transcript.txt"
-    SUMMARY = "summary.md"
+    SUMMARY = "summary.txt"
     META = ".mnema-meta.json"
+
+
+LEGACY_SUMMARY = "summary.md"  # earlier versions; becomes summary.txt when the recording is read
 
 
 def recording_id(value: str) -> str:

@@ -276,7 +276,7 @@ class FolderRecordingStore(
             if (active != null && restoreRenames(layout.renaming, active)) layout = libraryFolders(root, knownSections())
         }
         groups.value = layout.sections
-        layout.records.forEach { dir -> synchronized(filesLock) { ensureIdentity(dir) } }
+        layout.records.forEach { dir -> synchronized(filesLock) { ensureIdentity(dir); migrateSummary(dir) } }
         if (!syncing()) separateCopies(layout.records)
         return layout.records.mapNotNull(::item).sortedByDescending { it.startedAt }
     }
@@ -302,6 +302,12 @@ class FolderRecordingStore(
         if (recordingId(dir) != null) return
         val occupied = try { isBusy(dir) } catch (_: IOException) { true }
         if (!occupied) Meta.ensureRecording(dir, UUID.randomUUID().toString()) { startedIso(dir) }
+    }
+
+    // not while the recording is processed: the result applies its own summary
+    private fun migrateSummary(dir: File) {
+        val occupied = try { isBusy(dir) } catch (_: IOException) { true }
+        if (!occupied) RecordingFolder.migrateSummary(dir)
     }
 
     private fun item(dir: File): RecordingItem? {

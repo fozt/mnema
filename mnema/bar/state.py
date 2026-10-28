@@ -100,7 +100,7 @@ class BarPrefs(BaseModel):
     where: Where = Where.MAC
     mic: bool = True
     system: bool = True
-    summary: bool = True  # summary.md of the whole recording, and the title from it
+    summary: bool = True  # summary.txt of the whole recording, and the title from it
     asr: str = "auto"  # auto | parakeet | gigaam | whisper | "provider/model"
     summary_lang: str | None = None  # None — the language of the conversation
     replace_original: bool = True  # processing a part moves the full recording to the Trash
@@ -193,7 +193,7 @@ class BarState(BaseModel):
     notice: str = ""  # warning before or during recording (no server, server down)
     last_result: Path | None = None  # transcript.txt, or the folder when there is no text
     last_warnings: list[Remark] = Field(default_factory=list)
-    last_summary: Path | None = None  # summary.md of the last recording
+    last_summary: Path | None = None  # summary.txt of the last recording
     unfinished: list[Path] = Field(default_factory=list)  # interrupted recordings without text
     # recording → the server that did not answer: "<server> is unavailable", Retry, Choose server
     unreachable: dict[Path, str] = Field(default_factory=dict)

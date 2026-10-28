@@ -171,7 +171,7 @@ def test_summary_file_gives_the_shared_gist(tmp_path, case):
     folder = tmp_path / "2026-10-21_Дейли"
     folder.mkdir()
     (folder / "transcript.txt").write_text("mic: текст\n", encoding="utf-8")
-    (folder / "summary.md").write_text(case["text"], encoding="utf-8")
+    (folder / "summary.txt").write_text(case["text"], encoding="utf-8")
     [card] = library(tmp_path).cards
     assert card.gist == case["about"]
     assert card.title == "Дейли"  # the title follows the folder name

@@ -104,7 +104,7 @@ class PipelineTest {
 
     private fun done(id: String): MockResponse {
         doneResult?.let { return MockResponse(200, body = """{"id":"$id","status":"done","result":$it}""") }
-        val files = if (summaryOnly) """{"summary.md":"Итог.\n\n- x\n"}""" else """{"transcript.txt":"[0:12] mic: x\n","summary.md":null}"""
+        val files = if (summaryOnly) """{"summary.txt":"Итог.\n\n- x\n"}""" else """{"transcript.txt":"[0:12] mic: x\n","summary.txt":null}"""
         return MockResponse(200, body = """{"id":"$id","status":"done","result":{"files":$files,"folder":"2026-10-22_Дейли","run":{"status":"ok","settings":{"node":"Узел"},"remarks":[]}}}""")
     }
 
@@ -172,7 +172,7 @@ class PipelineTest {
 
     @Test fun twoTracksUseOneNodeJobAndApplyBeforeDeletingIt() {
         val dir = recording()
-        File(dir, "summary.md").writeText("старое")
+        File(dir, "summary.txt").writeText("старое")
         val (result, folder) = step(dir)
         assertEquals(StepResult.Done, result)
         assertEquals(listOf("mic.m4a", "system.m4a"), uploaded)
@@ -191,7 +191,7 @@ class PipelineTest {
         assertEquals(payload["key"]!!.jsonPrimitive.content, persisted.single().key)
         assertEquals(dir.name, persisted.single().sentName)
         assertEquals("[0:12] mic: x\n", File(folder, "transcript.txt").readText())
-        assertFalse(File(folder, "summary.md").exists())
+        assertFalse(File(folder, "summary.txt").exists())
         assertEquals("j1", Meta.lastRun(folder)!!["job"]!!.jsonPrimitive.content)
         assertEquals(ProcessStage.DONE, ProcessStateFile.read(folder)!!.stage)
         assertNull(ProcessStateFile.read(folder)!!.problem)
@@ -411,7 +411,7 @@ class PipelineTest {
 
     @Test fun failedFileApplyKeepsTheNodeResultAndRetryAfterRenameCompletesOnce() {
         val dir = recording()
-        val blocker = File(dir, "summary.md").apply { mkdir() }
+        val blocker = File(dir, "summary.txt").apply { mkdir() }
         assertTrue(step(dir).first is StepResult.Again)
         assertFalse(calls.any { it.startsWith("DELETE") })
         blocker.delete()

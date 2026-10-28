@@ -5,18 +5,30 @@ import os
 import tempfile
 from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from ..connection import parse_connection
 from ..library.layout import TEXTS
-from ..library.models import FileName, Record, Stamp
+from ..library.models import LEGACY_SUMMARY, FileName, Record, Stamp
 
 
 class Checkpoint(BaseModel):
     server: str = ""
     records: dict[str, Record] = Field(default_factory=dict)
     sections: list[str] = Field(default_factory=list)
+
+    @field_validator("records", mode="before")
+    @classmethod
+    def _summary_txt(cls, records: Any) -> Any:
+        """summary.md of an earlier sync is summary.txt now: the scan renames the file and keeps
+        its bytes and time, so the rename is no change on either side."""
+        for record in records.values() if isinstance(records, dict) else ():
+            files: Any = record.get("files") if isinstance(record, dict) else None
+            if isinstance(files, dict) and LEGACY_SUMMARY in files:
+                files.setdefault(FileName.SUMMARY.value, files.pop(LEGACY_SUMMARY))
+        return records
 
 
 def checkpoint_path() -> Path:

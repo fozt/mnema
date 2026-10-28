@@ -71,7 +71,7 @@ class LibraryIntegrationTest {
             root.deleteRecursively()
             for (path in strings("records")) recording(root, path).also { folder ->
                 // record_files instead of texts: a recording with audio of any format is listed too
-                if ("record_files" in case) { File(folder, "transcript.txt").delete(); File(folder, "summary.md").delete() }
+                if ("record_files" in case) { File(folder, "transcript.txt").delete(); File(folder, "summary.txt").delete() }
                 strings("record_files").forEach { File(folder, it).writeBytes(ByteArray(32044)) }
             }
             for (path in strings("tree")) {

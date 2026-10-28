@@ -105,7 +105,7 @@ def test_feed_newest_first_with_length_gist_and_remarks(tmp_path) -> None:
         datetime(2026, 9, 30, 9, 15),
         seconds=72 * 60,
         files={
-            "summary.md": summary,
+            "summary.txt": summary,
             ".mnema-meta.json": meta,
         },
     )
@@ -131,7 +131,7 @@ def test_feed_newest_first_with_length_gist_and_remarks(tmp_path) -> None:
 
 def test_feed_gist_is_cut_on_a_word(tmp_path) -> None:
     about = " ".join(["слово"] * 100)
-    _rec(tmp_path, "a", datetime(2026, 9, 30, 9, 0), files={"summary.md": f"{about}\n"})
+    _rec(tmp_path, "a", datetime(2026, 9, 30, 9, 0), files={"summary.txt": f"{about}\n"})
     [card] = library(tmp_path).cards
     assert len(card.gist) <= 281 and card.gist.endswith("слово…")
     assert set(card.gist.removesuffix("…").split()) == {"слово"}
@@ -175,9 +175,9 @@ def test_feed_date_from_folder_name_when_track_was_rewritten(tmp_path) -> None:
 
 
 def test_feed_rereads_edited_summary(tmp_path) -> None:
-    d = _rec(tmp_path, "a", datetime(2026, 9, 30, 9, 0), files={"summary.md": "Первая.\n"})
+    d = _rec(tmp_path, "a", datetime(2026, 9, 30, 9, 0), files={"summary.txt": "Первая.\n"})
     assert library(tmp_path).cards[0].gist == "Первая."
-    summary = d / "summary.md"
+    summary = d / "summary.txt"
     summary.write_text("Вторая.\n", encoding="utf-8")
     later = summary.stat().st_mtime + 5  # the edit is later than the previous read
     os.utime(summary, (later, later))
@@ -669,7 +669,7 @@ def test_open_key_opens_existing_file_in_any_phase(monkeypatch, tmp_path) -> Non
     monkeypatch.setenv("MNEMA_LIVE_DIR", str(tmp_path / "notes"))
     platform = _Platform()
     rt = BarRuntime(platform=platform, prefs_file=tmp_path / "bar.json")
-    summary = tmp_path / "summary.md"
+    summary = tmp_path / "summary.txt"
     summary.write_text("Суть.\n", encoding="utf-8")
     rt.handle(f"open:{summary}")
     rt.handle(f"open:{tmp_path / 'нет.md'}")
@@ -700,7 +700,7 @@ def test_rename_key_renames_only_the_folder(monkeypatch, tmp_path) -> None:
     folder = notes / "2026-09-27_13-05"
     folder.mkdir(parents=True)
     (folder / "transcript.txt").write_text("x", encoding="utf-8")
-    (folder / "summary.md").write_text("Суть.\n\n- пункт\n", encoding="utf-8")
+    (folder / "summary.txt").write_text("Суть.\n\n- пункт\n", encoding="utf-8")
     monkeypatch.setenv("MNEMA_LIVE_DIR", str(notes))
     platform = _Platform("Дейли")
     rt = BarRuntime(platform=platform, prefs_file=tmp_path / "bar.json")
@@ -710,9 +710,9 @@ def test_rename_key_renames_only_the_folder(monkeypatch, tmp_path) -> None:
     new = notes / "2026-09-27_Дейли"
     assert platform.asked == [None]  # an untitled recording has an empty field
     assert not folder.exists()
-    assert (new / "summary.md").read_text(encoding="utf-8") == "Суть.\n\n- пункт\n"
+    assert (new / "summary.txt").read_text(encoding="utf-8") == "Суть.\n\n- пункт\n"
     assert rt.state.last_result == new / "transcript.txt"
-    assert rt.state.last_summary == new / "summary.md"
+    assert rt.state.last_summary == new / "summary.txt"
 
     other = notes / "2026-09-26_Планёрка"
     other.mkdir()
@@ -780,7 +780,7 @@ def test_trash_moves_recording_and_forgets_it_as_last(monkeypatch, tmp_path) -> 
     platform = _Trash()
     rt = BarRuntime(platform=platform, prefs_file=tmp_path / "bar.json")
     rt.state.last_result = folder / "transcript.txt"
-    rt.state.last_summary = folder / "summary.md"
+    rt.state.last_summary = folder / "summary.txt"
     rt.handle(_action(folder, "trash"))
     assert platform.trashed == [folder] and not folder.exists()
     assert rt.state.last_result is None and rt.state.last_summary is None

@@ -80,7 +80,7 @@ def test_rewritten_transcript_keeps_ordinary_permissions(tmp_path) -> None:
     new = tmp_path / "transcript.txt"
     _atomic_bytes(new, b"text")
     assert new.stat().st_mode & 0o777 == 0o666 & ~_mask()
-    old = tmp_path / "summary.md"
+    old = tmp_path / "summary.txt"
     old.write_text("x")
     os.chmod(old, 0o644)
     _atomic_bytes(old, b"y")

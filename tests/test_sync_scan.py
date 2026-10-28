@@ -92,7 +92,7 @@ def test_scan_all_records_sections_and_identity_without_audio(tmp_path):
     (audio / "mic.wav").write_bytes(b"audio")
     handmade = tmp_path / "Собрана вручную"
     handmade.mkdir()
-    (handmade / "summary.md").write_text("пересказ")
+    (handmade / "summary.txt").write_text("пересказ")
     result = scan(tmp_path, set())
     assert result.complete and len(result.manifest.records) == 36
     assert result.manifest.sections == ["Пустой", "Работа"]

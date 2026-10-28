@@ -28,6 +28,7 @@ from ..core import base as _base
 from ..core.base import MediaError, Progress, noop
 from ..i18n import _
 from ..jobs import JobErrorKind
+from ..library.disk import migrate_summary
 from ..ops import recording_result
 from ..sync.scan import FILES_LOCK
 from . import meta, remarks
@@ -286,7 +287,7 @@ def _result(base: Path, run: meta.Run) -> LiveResult:
         else existing("transcript.txt"),
         summary_md=None
         if run.kind == "summary" and run.status == "failed"
-        else existing("summary.md"),
+        else existing("summary.txt"),
         translation_md=existing("translation.md"),
         recordings=[p for p in base.glob("*.wav") if p.is_file()],
         refined_labels=[label for label, track in run.tracks.items() if not track.error],
@@ -318,6 +319,7 @@ def _apply(base: Path, pending: _Pending, answer: dict, on_base) -> tuple[Path, 
     proposed = result.folder
     with FILES_LOCK:
         _safe(base, {*files, meta.META_FILE, PROCESSING_MARK})
+        migrate_summary(base, set(os.listdir(base)))  # the new summary replaces the old file
         own = own_title(base)  # set during processing, also after the request was sent
         if pending.target is None:
             if own:

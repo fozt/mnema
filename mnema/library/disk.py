@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import stat
 import tempfile
@@ -13,7 +14,9 @@ from pathlib import Path
 
 from ..i18n import _
 from .layout import hidden
-from .models import FileName, Record, Stamp, recording_id
+from .models import LEGACY_SUMMARY, FileName, Record, Stamp, recording_id
+
+logger = logging.getLogger(__name__)
 
 
 class LibraryError(Exception):
@@ -105,6 +108,22 @@ def listing(folder: Path) -> tuple[set[str], list[Path]]:
         else:
             files.add(path.name)
     return files, folders
+
+
+def migrate_summary(folder: Path, files: set[str]) -> set[str]:
+    """summary.md of earlier versions becomes summary.txt the first time the recording is read;
+    files are the folder's file names, returned as they are after the rename. An existing
+    summary.txt wins and the old file is left alone."""
+    target = folder / FileName.SUMMARY
+    if LEGACY_SUMMARY not in files or FileName.SUMMARY in files or target.is_symlink():
+        return files
+    try:
+        (folder / LEGACY_SUMMARY).rename(target)
+        fsync_dir(folder)
+    except OSError as error:
+        logger.warning("Could not rename summary.md in %s: %s", folder, error)
+        return files
+    return files - {LEGACY_SUMMARY} | {FileName.SUMMARY}
 
 
 def nested(folders: list[Path], real: Path) -> Path | None:

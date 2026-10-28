@@ -116,7 +116,7 @@ class AudioCleanupTest {
         assertEquals(2, store.clearAudio(plan))
         assertEquals(setOf("2026-10-21_10-00/mic.wav", "2026-10-21_10-00/system.wav", "Работа/2026-10-20_Дейли/mic.wav"), trashed.toSet())
         for (dir in listOf(done, inSection)) {
-            assertEquals(setOf("transcript.txt", "summary.md", ".mnema-meta.json"), dir.list()!!.toSet())
+            assertEquals(setOf("transcript.txt", "summary.txt", ".mnema-meta.json"), dir.list()!!.toSet())
         }
         for (dir in listOf(edited, processing, recorded, failed, soundOnly, later)) assertTrue(dir.name, File(dir, "mic.wav").isFile)
     }
@@ -139,7 +139,7 @@ class AudioCleanupTest {
         assertEquals(1, store.clearAudio(plan))
         assertEquals(listOf("2026-10-21_12-00/mic.wav"), trashed)
         assertTrue(File(edited, "mic.wav").isFile && File(started, "mic.wav").isFile && File(appeared, "mic.wav").isFile)
-        assertEquals(setOf("transcript.txt", "summary.md", ".mnema-meta.json"), kept.list()!!.toSet())
+        assertEquals(setOf("transcript.txt", "summary.txt", ".mnema-meta.json"), kept.list()!!.toSet())
     }
 
     /**
@@ -201,7 +201,7 @@ class AudioCleanupTest {
         assertFalse(forever.trash)
         assertEquals(1, store.clearAudio(forever))
         assertTrue(trashed.isEmpty())
-        assertEquals(setOf("transcript.txt", "summary.md", ".mnema-meta.json"), done.list()!!.toSet())
+        assertEquals(setOf("transcript.txt", "summary.txt", ".mnema-meta.json"), done.list()!!.toSet())
     }
 
     @Test fun withoutTheSystemTrashSoundStaysAndTheReasonIsShown() = withServer { url, controller ->

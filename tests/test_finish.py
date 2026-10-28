@@ -78,14 +78,14 @@ def test_range_goes_to_sibling_folder_and_leaves_original(tmp_path, seen) -> Non
     folder."""
     base = tmp_path / "2026-09-27_13-05"
     _two_tracks(base, 180)
-    for name in ("transcript.txt", "summary.md", "recording.mp3"):
+    for name in ("transcript.txt", "summary.txt", "recording.mp3"):
         (base / name).write_text("весь звонок", encoding="utf-8")
 
     commands.cmd_finish(_args(base, "0:01", "0:02"))
     assert sorted(seen) == [("mic", 1060, 1119, 60.0), ("system", 5060, 5119, 60.0)]
     frag = tmp_path / "2026-09-27_Созвон (0.01–0.02)"
     assert (frag / "transcript.txt").exists() and (frag / "mic.wav").exists()
-    for name in ("transcript.txt", "summary.md", "recording.mp3"):
+    for name in ("transcript.txt", "summary.txt", "recording.mp3"):
         assert (base / name).read_text(encoding="utf-8") == "весь звонок"
     assert _edges(base / "mic.wav")[2] == 180.0
 

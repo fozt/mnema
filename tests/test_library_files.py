@@ -39,7 +39,7 @@ def test_plain_files_per_file_update_and_external_rename(tmp_path):
     original = store.create(ID, "Работа/Разговор", files())
     folder = tmp_path / original.path
     assert (folder / "transcript.txt").read_text() == "Я: привет\n"
-    assert (folder / "summary.md").stat().st_mtime_ns == TIME + 2
+    assert (folder / "summary.txt").stat().st_mtime_ns == TIME + 2
     before = {p.name: (p.read_bytes(), p.stat().st_mtime_ns) for p in folder.iterdir()}
     store.write(
         ID, FileName.SUMMARY, b"new summary", TIME + 5, original.files[FileName.SUMMARY].sha256
@@ -47,14 +47,26 @@ def test_plain_files_per_file_update_and_external_rename(tmp_path):
     assert {
         p.name: (p.read_bytes(), p.stat().st_mtime_ns)
         for p in folder.iterdir()
-        if p.name != "summary.md"
-    } == {name: value for name, value in before.items() if name != "summary.md"}
+        if p.name != "summary.txt"
+    } == {name: value for name, value in before.items() if name != "summary.txt"}
     folder.rename(tmp_path / "Новое имя")
     record = LibraryFiles(tmp_path).manifest().records[0]
     assert record.id == ID and record.path == "Новое имя"
     assert record.files[FileName.SUMMARY].mtime_ns == TIME + 5
     assert store.read(ID, FileName.SUMMARY)[0] == b"new summary"
     assert store.manifest().sections == ["Работа"]
+
+
+def test_server_renames_summary_md_of_an_earlier_version_when_it_lists_the_library(tmp_path):
+    store = LibraryFiles(tmp_path)
+    folder = tmp_path / store.create(ID, "Разговор", files()).path
+    (folder / "summary.txt").rename(folder / "summary.md")
+    [record] = store.manifest().records
+    assert record.files[FileName.SUMMARY].mtime_ns == TIME + 2
+    assert store.read(ID, FileName.SUMMARY)[0] == "Встреча.\n".encode()
+    assert sorted(p.name for p in folder.iterdir()) == [
+        ".mnema-meta.json", "summary.txt", "transcript.txt",
+    ]  # fmt: skip
 
 
 def test_empty_sections_collisions_and_conditional_move_delete(tmp_path):
@@ -141,7 +153,7 @@ def test_failed_file_replace_keeps_old_text_and_stamp(tmp_path, monkeypatch):
     real_replace = os.replace
 
     def disk_full(source, destination):
-        if Path(destination).name == "summary.md":
+        if Path(destination).name == "summary.txt":
             raise OSError("disk full")
         return real_replace(source, destination)
 

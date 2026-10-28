@@ -7,6 +7,7 @@ import java.io.FileOutputStream
 import dev.mnema.app.recordings.freeName
 import dev.mnema.app.recordings.sameFolder
 import dev.mnema.app.recordings.startedIso
+import dev.mnema.app.transcript.RecordingFolder
 import java.nio.ByteBuffer
 import java.nio.channels.FileChannel
 import java.nio.charset.CodingErrorAction
@@ -128,7 +129,7 @@ internal fun readRecord(root: File, relative: String): Record {
 
 internal enum class Kind { RECORD, SECTION, OTHER }
 
-private val RECORD_FILES = setOf("mic.wav", "system.wav") + FileName.entries.map { it.fileName }
+private val RECORD_FILES = setOf("mic.wav", "system.wav", RecordingFolder.LEGACY_SUMMARY) + FileName.entries.map { it.fileName }
 private val TEXTS = setOf(FileName.TRANSCRIPT.fileName, FileName.SUMMARY.fileName)
 
 /** Hidden folders (.obsidian, .git, .Trash-*) are neither sections nor recordings. */
@@ -235,6 +236,7 @@ fun scan(root: File, busy: Set<String>, sections: Set<String> = emptySet(), reco
     val knownSections = sections.mapTo(HashSet(), ::pathKey)
     val knownRecords = records.mapTo(HashSet(), ::pathKey)
     var complete = true
+    var readable = true // no folder failed to be read other than the nested and moved recordings
     fun isDirectory(file: File) = Files.readAttributes(file.toPath(), BasicFileAttributes::class.java).isDirectory
     // hidden entries other than meta are never read
     fun list(dir: File): List<File> = Files.newDirectoryStream(dir.toPath()).use { entries ->
@@ -255,8 +257,8 @@ fun scan(root: File, busy: Set<String>, sections: Set<String> = emptySet(), reco
                 Kind.SECTION -> { found += relative; folders.forEach { visit(it, 2) }; return }
                 Kind.OTHER -> {
                     // a known recording without its files is not a deletion; an unknown foreign folder is skipped
-                    if (pathKey(relative) in knownRecords) { withoutFiles += relative; throw SyncException(tr("The recording folder has none of its files")) }
-                    inner(folders)?.let { deep += it; throw SyncException(tr("The recording is in a section subfolder")) }
+                    if (pathKey(relative) in knownRecords) { withoutFiles += relative; complete = false; blocked += relative; return }
+                    inner(folders)?.let { deep += it; complete = false; blocked += relative; return }
                     return // an empty or foreign folder in a section: not a recording and no reason to postpone
                 }
                 Kind.RECORD -> {}
@@ -265,30 +267,31 @@ fun scan(root: File, busy: Set<String>, sections: Set<String> = emptySet(), reco
                 val data = wire.parseToJsonElement(utf8(readFile(recordFile(base, relative, FileName.META)).bytes)).jsonObject
                 if ((data["id"] as? JsonPrimitive)?.content in busy) { blocked += relative; return }
             }
-            inner(folders)?.let { nested += it; throw SyncException(tr("There is another recording inside the recording")) }
-            if (names.any { it in TEXTS } || FileName.META.fileName in names) {
+            inner(folders)?.let { nested += it; complete = false; blocked += relative; return }
+            val texts = if (RecordingFolder.migrateSummary(folder)) names + FileName.SUMMARY.fileName else names
+            if (texts.any { it in TEXTS } || FileName.META.fileName in names) {
                 FileName.entries.forEach { recordFile(base, relative, it) }
                 ensureIdentity(folder)
                 result += readRecord(base, relative)
             } else blocked += relative // audio without text is not published
-        } catch (_: java.io.IOException) { complete = false; blocked += relative }
-        catch (_: IllegalArgumentException) { complete = false; blocked += relative }
-        catch (_: NoSuchElementException) { complete = false; blocked += relative }
+        } catch (_: java.io.IOException) { complete = false; readable = false; blocked += relative }
+        catch (_: IllegalArgumentException) { complete = false; readable = false; blocked += relative }
+        catch (_: NoSuchElementException) { complete = false; readable = false; blocked += relative }
     }
     try { Files.readAttributes(base.toPath(), BasicFileAttributes::class.java) }
     catch (_: NoSuchFileException) {
-        return@synchronized if (exists(base)) Scan(complete = false, blockedPaths = listOf("."))
+        return@synchronized if (exists(base)) Scan(complete = false, blockedPaths = listOf("."), readable = false)
         else Scan(complete = false, missingRoot = true)
     }
-    catch (_: java.io.IOException) { return@synchronized Scan(complete = false, blockedPaths = listOf(".")) }
+    catch (_: java.io.IOException) { return@synchronized Scan(complete = false, blockedPaths = listOf("."), readable = false) }
     try {
         if (base.canonicalFile != base) throw SyncException(tr("The Mnema folder was replaced with a link"))
         // a recording under a temporary name is not missing: restore it first; if it stays, the scan is incomplete and its id is kept
         restoreRenames(renamingFolders(base), busy)
         if (renamingFolders(base).any { it.parentFile == base && Files.isDirectory(it.toPath(), NOFOLLOW_LINKS) || Files.isRegularFile(File(it, FileName.META.fileName).toPath(), NOFOLLOW_LINKS) }) complete = false
         list(base).forEach { if (!hidden(it.name) && isDirectory(it)) visit(it, 1) }
-    } catch (_: java.io.IOException) { complete = false; blocked += "." }
-    Scan(Manifest(result, found), complete, blocked, nested = nested, deep = deep, withoutFiles = withoutFiles)
+    } catch (_: java.io.IOException) { complete = false; readable = false; blocked += "." }
+    Scan(Manifest(result, found), complete, blocked, nested = nested, deep = deep, withoutFiles = withoutFiles, readable = readable)
 }
 
 internal fun metaIdentity(data: JsonObject): String {

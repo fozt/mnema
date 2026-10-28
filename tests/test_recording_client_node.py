@@ -138,7 +138,7 @@ def test_failed_track_on_reprocessing_keeps_transcript_summary_and_name(monkeypa
     _model(monkeypatch, lambda: _answer("Другое название"))
     base = _recording(tmp_path, "2026-10-22_Мой созвон")
     (base / "transcript.txt").write_text("[0:00] mic: прежнее\n\n[0:01] system: прежнее\n")
-    (base / "summary.md").write_text("Мой созвон.\n\nПрежний пересказ.\n")
+    (base / "summary.txt").write_text("Мой созвон.\n\nПрежний пересказ.\n")
     _asr(monkeypatch, failing={"system"})
     result, full = recording_client.recover_on_node(
         base, LiveConfig(mix_audio=False), NODE, retitle=True
@@ -147,7 +147,7 @@ def test_failed_track_on_reprocessing_keeps_transcript_summary_and_name(monkeypa
     assert (
         base / "transcript.txt"
     ).read_text() == "[0:00] mic: прежнее\n\n[0:01] system: прежнее\n"
-    assert (base / "summary.md").read_text() == "Мой созвон.\n\nПрежний пересказ.\n"
+    assert (base / "summary.txt").read_text() == "Мой созвон.\n\nПрежний пересказ.\n"
     run = meta.last(base)
     assert run.status == "failed" and run.tracks["system"].error and not run.tracks["mic"].error
     assert any(

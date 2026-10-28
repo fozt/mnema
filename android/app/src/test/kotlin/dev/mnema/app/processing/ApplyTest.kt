@@ -33,7 +33,7 @@ class ApplyTest {
         Meta.ensureRecording(it, "recording-id") { Meta.isoNow(1_790_000_000_000, TimeZone.getTimeZone("Europe/Moscow")) }
     }
     private fun result(folder: String? = target) = RecordingResult(
-        files = linkedMapOf("transcript.txt" to "[0:12] mic: x\n", "summary.md" to null), folder = folder,
+        files = linkedMapOf("transcript.txt" to "[0:12] mic: x\n", "summary.txt" to null), folder = folder,
         run = buildJsonObject { put("kind", "process"); put("settings", buildJsonObject { put("node", "Сервер") }) },
     )
     private fun apply(dir: File, result: RecordingResult = result(), recordingNow: String? = null) =
@@ -45,7 +45,7 @@ class ApplyTest {
     }
 
     private fun texts(dir: File): Map<String, String> =
-        listOf("transcript.txt", "summary.md", "translation.md").filter { File(dir, it).isFile }.associateWith { File(dir, it).readText() }
+        listOf("transcript.txt", "summary.txt", "translation.md").filter { File(dir, it).isFile }.associateWith { File(dir, it).readText() }
 
     private fun strings(value: JsonObject): Map<String, String> =
         value.filterValues { it != JsonNull }.mapValues { it.value.jsonPrimitive.content }
@@ -73,14 +73,22 @@ class ApplyTest {
         }
     }
 
-    @Test fun appliesFilesRenameAndRunOnceAndKeepsMetadata() {
+    @Test fun newResultReplacesSummaryMdOfAnEarlierVersion() {
         val dir = recording()
         File(dir, "summary.md").writeText("старый пересказ")
+        val applied = apply(dir)
+        assertFalse(File(applied, "summary.md").exists())
+        assertFalse(File(applied, "summary.txt").exists()) // the result has no summary
+    }
+
+    @Test fun appliesFilesRenameAndRunOnceAndKeepsMetadata() {
+        val dir = recording()
+        File(dir, "summary.txt").writeText("старый пересказ")
         val applied = apply(dir)
         assertEquals(target, applied.name)
         assertFalse(dir.exists())
         assertEquals("[0:12] mic: x\n", File(applied, "transcript.txt").readText())
-        assertFalse(File(applied, "summary.md").exists())
+        assertFalse(File(applied, "summary.txt").exists())
         val meta = requireNotNull(Meta.read(applied))
         assertEquals(JsonPrimitive("recording-id"), meta["id"])
         val run = requireNotNull(Meta.lastRun(applied))
@@ -95,7 +103,7 @@ class ApplyTest {
 
     @Test fun retryAfterFilesAndAfterRenameFinishesOneRun() {
         val dir = recording()
-        val blocked = File(dir, "summary.md").apply { mkdir() }
+        val blocked = File(dir, "summary.txt").apply { mkdir() }
         File(blocked, "keep").writeText("занято")
         assertThrows(IOException::class.java) { apply(dir) }
         assertEquals("[0:12] mic: x\n", File(dir, "transcript.txt").readText())

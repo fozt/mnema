@@ -27,6 +27,7 @@ from ..config import library_root
 from ..core import base as _base
 from ..core.base import MediaError
 from ..i18n import _, _n
+from ..library.models import FileName
 from ..live import meta
 from ..live.remarks import SOURCE_NAMES
 from ..live.setup import FinalizeCancelled
@@ -1114,7 +1115,7 @@ class BarRuntime:
             if inside:
                 self._platform.open(folder)
         elif action in ("transcript", "summary"):
-            path = folder / ("transcript.txt" if action == "transcript" else "summary.md")
+            path = folder / (FileName.TRANSCRIPT if action == "transcript" else FileName.SUMMARY)
             if path.is_file() and inside:
                 self._platform.open(path)
 
@@ -1296,8 +1297,8 @@ class BarRuntime:
         last = self.state.last_result
         if last is not None and folder_of(last) == folder:
             self.state.last_result = new / last.name if is_artifact(last) else new
-            if (new / "summary.md").exists():
-                self.state.last_summary = new / "summary.md"
+            if (new / FileName.SUMMARY).exists():
+                self.state.last_summary = new / FileName.SUMMARY
 
     def _ask_section(self, folder: Path, *, record_id: str | None = None) -> None:
         """The "New section…" item: a name window; the section is created, the recording moves

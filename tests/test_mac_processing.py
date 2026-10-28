@@ -153,7 +153,7 @@ def test_mac_processes_like_the_server_without_it(monkeypatch, tmp_path, sources
     )
     assert result.base.name == served.base.name == "2026-10-22_Подготовка выпуска"
     assert sorted(_files(result.base)) == sorted(_files(served.base))
-    assert full and "Готовим выпуск." in (result.base / "summary.md").read_text(encoding="utf-8")
+    assert full and "Готовим выпуск." in (result.base / "summary.txt").read_text(encoding="utf-8")
     assert [p.name for p in here.iterdir()] == [result.base.name]
     run = meta.last(result.base)
     assert run is not None and run.status == "ok"

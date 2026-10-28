@@ -90,7 +90,7 @@ def test_model_refusal_is_reported_without_the_key(tmp_path, monkeypatch):
     }
     job_id = client.post("/api/jobs", json=body).json()["id"]
     result = _finished(client, job_id)["result"]
-    assert not result["files"].get("summary.md")
+    assert not result["files"].get("summary.txt")
     assert "ключ модели не подошёл" in " ".join(result["run"]["remarks"])
     assert KEY not in client.get(f"/api/jobs/{job_id}").text
 

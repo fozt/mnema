@@ -168,20 +168,20 @@ class RecordingsUiTest {
     fun shareSendsTheRecordingFilesThatExistNamedByFolder() {
         val dir = tmp.newFolder("2026-10-22_Звонок-маме")
         File(dir, "transcript.txt").writeText("mic: Привет\n")
-        File(dir, "summary.md").writeText("Поговорили с мамой.\n")
+        File(dir, "summary.txt").writeText("Поговорили с мамой.\n")
         File(dir, "mic.wav").writeBytes(ByteArray(64))
 
         val files = sharedFiles(dir)
 
-        assertEquals(listOf("2026-10-22_Звонок-маме_transcript.txt", "2026-10-22_Звонок-маме_summary.md"), files.map { it.name })
-        assertEquals(listOf("text/plain", "text/markdown"), files.map { it.type })
-        assertEquals(listOf(File(dir, "transcript.txt"), File(dir, "summary.md")), files.map { it.source })
+        assertEquals(listOf("2026-10-22_Звонок-маме_transcript.txt", "2026-10-22_Звонок-маме_summary.txt"), files.map { it.name })
+        assertEquals(listOf("text/plain", "text/plain"), files.map { it.type })
+        assertEquals(listOf(File(dir, "transcript.txt"), File(dir, "summary.txt")), files.map { it.source })
 
         val empty = tmp.newFolder("2026-10-22_08-35")
         File(empty, "transcript.txt").writeText("")
         assertEquals("пустая расшифровка не отправляется", emptyList<String>(), sharedFiles(empty).map { it.name })
-        File(empty, "summary.md").writeText("Итог.\n")
-        assertEquals(listOf("2026-10-22_08-35_summary.md"), sharedFiles(empty).map { it.name })
+        File(empty, "summary.txt").writeText("Итог.\n")
+        assertEquals(listOf("2026-10-22_08-35_summary.txt"), sharedFiles(empty).map { it.name })
     }
 
     @Test
@@ -595,7 +595,7 @@ class RecordingsUiTest {
                 val root = tmp.newFolder("Mnema")
                 val dir = File(root, "Моё название").apply { mkdirs() }
                 File(dir, "transcript.txt").writeText("mic: Готовая расшифровка")
-                File(dir, "summary.md").writeText("Старая суть.\n\n- Старый пункт")
+                File(dir, "summary.txt").writeText("Старая суть.\n\n- Старый пункт")
                 Meta.ensureRecording(dir, "id") { null }
                 ProcessStateFile.write(dir, ProcessState("id", stage = ProcessStage.FAILED,
                     summaryOnly = true, problem = "Лимит модели", since = outcomeKey(Meta.read(dir))))
@@ -634,7 +634,7 @@ class RecordingsUiTest {
                 model.retry()
                 assertEquals(dir to true, request.await())
                 assertEquals("Моё название", dir.name)
-                assertEquals("Старая суть.\n\n- Старый пункт", File(dir, "summary.md").readText())
+                assertEquals("Старая суть.\n\n- Старый пункт", File(dir, "summary.txt").readText())
                 assertEquals("mic: Готовая расшифровка", File(dir, "transcript.txt").readText())
             }
         } finally { Dispatchers.resetMain() }

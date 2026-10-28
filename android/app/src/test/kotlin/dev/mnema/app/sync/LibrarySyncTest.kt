@@ -10,6 +10,7 @@ import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.attribute.PosixFilePermission
 import java.util.UUID
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -123,13 +124,36 @@ class LibrarySyncTest {
         }
     }
 
+    @Test fun renameConflictNamesTheRecording() {
+        val (folder, id) = synced("2026-10-20_Обзор состояния проекта")
+        assertTrue(folder.renameTo(File(root, "2026-10-20_Обзор проекта")))
+        remote(id).path = "2026-10-20_Проект"
+        val error = run().errors.single()
+        assertTrue(error, "Обзор проекта" in error && "2026-10-20" !in error) // the title as the list shows it
+    }
+
+    @Test fun summaryMdOfAnEarlierVersionBecomesSummaryTxtWithoutChanges() {
+        val (folder, id) = synced()
+        val (gone, _) = synced("gone")
+        Files.move(File(folder, "summary.txt").toPath(), File(folder, "summary.md").toPath())
+        checkpoint.writeText(checkpoint.readText().replace("\"summary.txt\"", "\"summary.md\""))
+        assertTrue(gone.deleteRecursively()) // the earlier sync is still known: a deletion, not a new download
+        library.requests.clear()
+        ok()
+        assertEquals("пересказ", File(folder, "summary.txt").readText())
+        assertEquals(100L, Files.getLastModifiedTime(File(folder, "summary.txt").toPath()).to(TimeUnit.NANOSECONDS))
+        assertFalse(File(folder, "summary.md").exists())
+        assertEquals(listOf("DELETE"), library.requests.map { it.method }.filter { it != "GET" })
+        assertFalse(gone.exists()); assertEquals(setOf(id), library.records.keys)
+    }
+
     @Test fun independentFilesAndConcurrentChangesUseOriginalNanoseconds() {
         val (folder, id) = synced()
         edit(File(folder, "transcript.txt"), "local", 300)
         remote(id).edit(FileName.SUMMARY, "remote", 400)
         ok()
         assertEquals("local", remote(id).files.getValue(FileName.TRANSCRIPT).text)
-        assertEquals("remote", File(folder, "summary.md").readText())
+        assertEquals("remote", File(folder, "summary.txt").readText())
         edit(File(folder, "transcript.txt"), "older", 500)
         remote(id).edit(FileName.TRANSCRIPT, "newer", 600)
         ok()
@@ -143,10 +167,10 @@ class LibrarySyncTest {
 
     @Test fun equalTimestampConflictAndConcurrentRenamesNeverReplaceEitherSide() {
         val (folder, id) = synced()
-        edit(File(folder, "summary.md"), "local", 300)
+        edit(File(folder, "summary.txt"), "local", 300)
         remote(id).edit(FileName.SUMMARY, "remote", 300)
         assertTrue(run().errors.isNotEmpty())
-        assertEquals("local", File(folder, "summary.md").readText())
+        assertEquals("local", File(folder, "summary.txt").readText())
         assertEquals("remote", remote(id).files.getValue(FileName.SUMMARY).text)
         Files.move(folder.toPath(), File(root, "Local").toPath())
         remote(id).path = "Remote"
@@ -489,7 +513,7 @@ class LibrarySyncTest {
         assertTrue(run().errors.isNotEmpty())
         library.after = { _, response -> response }; ok()
         assertEquals(1, library.requests.count { it.method == "PUT" })
-        File(folder, "summary.md").delete()
+        File(folder, "summary.txt").delete()
         library.after = { req, response -> if (req.method == "DELETE") dropped() else response }
         assertTrue(run().errors.isNotEmpty())
         library.after = { _, response -> response }; ok()
@@ -512,11 +536,11 @@ class LibrarySyncTest {
 
     @Test fun offlineAnd503RetainLocalEditsDeletionAndPreviousCheckpoint() {
         val (a, _) = synced("a"); val (b, bid) = synced("b")
-        a.deleteRecursively(); edit(File(b, "summary.md"), "offline edit", 300)
+        a.deleteRecursively(); edit(File(b, "summary.txt"), "offline edit", 300)
         val before = checkpoint.readBytes()
         library.before = { response(503) }
         assertTrue(run().errors.isNotEmpty()); assertArrayEquals(before, checkpoint.readBytes())
-        assertFalse(a.exists()); assertEquals("offline edit", File(b, "summary.md").readText())
+        assertFalse(a.exists()); assertEquals("offline edit", File(b, "summary.txt").readText())
         library.before = { dropped() }
         assertTrue(run().errors.isNotEmpty()); assertArrayEquals(before, checkpoint.readBytes())
         library.before = { null }; ok()
@@ -599,7 +623,7 @@ class LibrarySyncTest {
         val stamp = "{\"sha256\":\"s\",\"mtime_ns\":100}"
         val badRecords = listOf(
             "{\"id\":\"$id\",\"path\":\"../outside\",\"files\":{\".mnema-meta.json\":$stamp},\"tag\":\"opaque\"}",
-            "{\"id\":\"$id\",\"path\":\"remote\",\"files\":{\"summary.md\":$stamp},\"tag\":\"opaque\"}",
+            "{\"id\":\"$id\",\"path\":\"remote\",\"files\":{\"summary.txt\":$stamp},\"tag\":\"opaque\"}",
         )
         for (record in badRecords) {
             library.before = { json("{\"records\":[$record],\"sections\":[]}") }
@@ -611,12 +635,12 @@ class LibrarySyncTest {
 
     @Test fun partialDownloadAfterMetaNeverBecomesAnInferredDelete() {
         val id = library.add("remote")
-        library.before = { req -> if (req.target.endsWith("/summary.md")) response(503) else null }
+        library.before = { req -> if (req.target.endsWith("/summary.txt")) response(503) else null }
         assertTrue(run().errors.isNotEmpty())
         assertTrue(File(root, "remote/${FileName.META.fileName}").exists())
         assertTrue(id in loadCheckpoint(checkpoint).records)
         library.before = { null }; ok()
-        assertEquals("remote summary", File(root, "remote/summary.md").readText())
+        assertEquals("remote summary", File(root, "remote/summary.txt").readText())
         assertTrue(id in library.records)
         assertTrue(library.requests.none { it.method == "DELETE" })
     }
@@ -643,7 +667,7 @@ class LibrarySyncTest {
         File(section, "memo.m4a").writeText("audio")
         File(section, "mic.wav").writeBytes(ByteArray(32044))
         File(section, "transcript.txt").writeText("случайный файл")
-        File(section, "summary.md").writeText("случайный пересказ")
+        File(section, "summary.txt").writeText("случайный пересказ")
         ok()
         assertEquals(listOf(id to "Работа/Встреча"), library.records.map { (key, remote) -> key to remote.path })
         assertEquals(setOf("Работа"), library.sections)
@@ -684,12 +708,24 @@ class LibrarySyncTest {
         } finally { other.close() }
     }
 
-    @Test fun recordInsideRecordNamesTheFolderAndDeletesNothing() {
+    @Test fun recordInsideRecordIsOneMessageWithBothTitlesAndDeletesNothing() {
+        val (outer, _) = synced("2026-10-20_Обзор состояния проекта")
+        val (inner, _) = synced("2026-10-21_ИИ встреча")
+        Files.move(inner.toPath(), File(outer, inner.name).toPath())
+        val error = run().errors.single()
+        assertTrue(error, "«ИИ встреча»" in error && "«Обзор состояния проекта»" in error && "2026-10-2" !in error)
+        assertEquals(2, library.records.size); assertTrue(trashed.isEmpty())
+    }
+
+    @Test fun otherUnreadableFoldersKeepTheGeneralMessage() {
         val (outer, _) = synced("Звонок")
         val (inner, _) = synced("Внутри")
+        val (broken, _) = synced("Сломанная")
         Files.move(inner.toPath(), File(outer, "Внутри").toPath())
-        assertTrue("Запись «Звонок/Внутри» лежит внутри другой записи" in run().errors)
-        assertEquals(2, library.records.size); assertTrue(trashed.isEmpty())
+        File(broken, FileName.META.fileName).writeText("broken")
+        val errors = run().errors
+        assertTrue(errors.toString(), "Не все локальные записи удалось прочитать; удаления отложены" in errors)
+        assertEquals(2, errors.size); assertTrue(trashed.isEmpty())
     }
 
     @Test fun syncErrorsAreEnglishInAnEnglishInterface() {
@@ -700,9 +736,8 @@ class LibrarySyncTest {
         Ui.lang = UiLang.EN
         try {
             val errors = run().errors
-            assertTrue("The recording “Звонок/Внутри” is inside another recording" in errors)
-            assertTrue(errors.isNotEmpty())
-            errors.forEach { assertFalse(it, it.replace("Звонок/Внутри", "").any { c -> c in 'а'..'я' || c in 'А'..'Я' }) }
+            assertTrue(errors.toString(), errors.single().startsWith("“Внутри” is inside the recording “Звонок”"))
+            errors.forEach { assertFalse(it, it.replace("Внутри", "").replace("Звонок", "").any { c -> c in 'а'..'я' || c in 'А'..'Я' }) }
         } finally { Ui.lang = before }
     }
 
@@ -733,7 +768,8 @@ class LibrarySyncTest {
         val before = checkpoint.readBytes()
         library.requests.clear()
         val result = run()
-        assertTrue("Запись «Работа/Старые/Встреча» лежит в подпапке раздела" in result.errors)
+        val error = result.errors.single()
+        assertTrue(error, "«Встреча»" in error && "«Работа»" in error)
         assertFalse(result.changed); assertTrue(result.bulkMissing.isEmpty()); assertTrue(trashed.isEmpty())
         assertArrayEquals(before, checkpoint.readBytes())
         assertTrue(library.requests.all { it.method == "GET" })
@@ -772,7 +808,7 @@ class LibrarySyncTest {
         changedCaseInTwoSteps("projects", "Projects")
         assertEquals(listOf("Projects") to listOf("Projects/$name"), shown())
         assertEquals("оригинал", File(root, "Projects/$name/transcript.txt").readText())
-        assertEquals("пересказ", File(root, "Projects/$name/summary.md").readText())
+        assertEquals("пересказ", File(root, "Projects/$name/summary.txt").readText())
         assertEquals(id, metaId(File(root, "Projects/$name")))
         assertEquals(listOf("Projects"), loadCheckpoint(checkpoint).sections)
         assertEquals("Projects/$name", loadCheckpoint(checkpoint).records.getValue(id).path)
@@ -938,7 +974,7 @@ class LibrarySyncTest {
         assertEquals(listOf("Android не дал переименовать папку «$name»; запись осталась под прежним именем"), errors)
         assertTrue(folder.isDirectory)
         assertEquals(name, remote(id).path)
-        assertEquals("пересказ с Mac", File(folder, "summary.md").readText())
+        assertEquals("пересказ с Mac", File(folder, "summary.txt").readText())
 
         library.requests.clear()
         assertFalse(ok().changed)
@@ -993,7 +1029,7 @@ class LibrarySyncTest {
 
     @Test fun hiddenFoldersAreNotSectionsAndDoNotHoldDeletion() {
         val (a, aid) = synced("a")
-        for (path in listOf(".obsidian/plugins/x/main.js", ".git/objects/ab/cd", ".Trash-1000/files/old/transcript.txt", ".mnema-sync-1/summary.md")) {
+        for (path in listOf(".obsidian/plugins/x/main.js", ".git/objects/ab/cd", ".Trash-1000/files/old/transcript.txt", ".mnema-sync-1/summary.txt")) {
             File(root, path).apply { parentFile!!.mkdirs() }.writeText("x")
         }
         File(root, ".stfolder").mkdir()
@@ -1064,7 +1100,7 @@ class LibrarySyncTest {
         Files.setLastModifiedTime(checkpoint.toPath(), old)
         repeat(2) { assertFalse(ok().changed) }
         assertEquals(old, Files.getLastModifiedTime(checkpoint.toPath()))
-        edit(File(root, "rec 1/summary.md"), "новый пересказ", 500)
+        edit(File(root, "rec 1/summary.txt"), "новый пересказ", 500)
         assertTrue(ok().changed)
         assertNotEquals(old, Files.getLastModifiedTime(checkpoint.toPath()))
     }
@@ -1084,7 +1120,7 @@ class LibrarySyncTest {
         library.add("z-later", id = "ffffffff-ffff-ffff-ffff-ffffffffffff")
         val system = NativeTrash(37, { true }, { File(temp.root, "probe") }) { throw IllegalStateException("trash directory cannot be created") }
         trash = system::move
-        assertEquals(listOf("Система не переместила запись в корзину"), run().errors)
+        assertEquals(listOf("«a»: Система не переместила запись в корзину"), run().errors)
         assertTrue(folder.exists()); assertTrue(id in loadCheckpoint(checkpoint).records)
         assertEquals("server", File(root, "z-later/transcript.txt").readText())
     }
@@ -1107,6 +1143,8 @@ class LibrarySyncTest {
             strings("broken").forEach { File(root, "$it/${FileName.META.fileName}").writeText("broken") }
             if (case["root_removed"]?.jsonPrimitive?.boolean == true) assertTrue(root.deleteRecursively())
             strings("lost").forEach { library.records.remove(ids.getValue(it)) }
+            pairs("server_renamed").forEach { (from, to) -> remote(ids.getValue(from)).path = to }
+            if (case["checkpoint_lost"]?.jsonPrimitive?.boolean == true) assertTrue(checkpoint.delete())
             strings("busy").forEach { busy += ids.getValue(it) }
             if (case["server_unavailable"]?.jsonPrimitive?.boolean == true) library.before = { response(503) }
             val unreadable = case["root_unreadable"]?.jsonPrimitive?.boolean == true

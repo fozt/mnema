@@ -52,7 +52,7 @@ class SyncFilesTest {
         val audio = File(root, "Звук").apply { mkdir() }
         File(audio, "mic.wav").writeText("not a wav")
         val retold = File(root, "Пересказ").apply { mkdir() }
-        File(retold, "summary.md").writeText("пересказ")
+        File(retold, "summary.txt").writeText("пересказ")
         val work = """{"id":"process-id","stage":"done"}"""
         File(retold, ProcessStateFile.FILE).writeText(work)
         val result = scan(root, emptySet())
@@ -72,7 +72,7 @@ class SyncFilesTest {
             fun strings(key: String) = case[key]?.jsonArray.orEmpty().map { it.jsonPrimitive.content }
             val root = temp.newFolder()
             for (path in strings("records")) recording(root, path).also { folder ->
-                if ("record_files" in case) { File(folder, "transcript.txt").delete(); File(folder, "summary.md").delete() }
+                if ("record_files" in case) { File(folder, "transcript.txt").delete(); File(folder, "summary.txt").delete() }
                 strings("record_files").forEach { File(folder, it).writeBytes(ByteArray(32044)) }
             }
             for (path in strings("tree")) {
@@ -189,7 +189,7 @@ internal fun recording(root: File, path: String): File {
     val id = java.util.UUID.randomUUID().toString()
     File(folder, FileName.META.fileName).writeText("""{"id":"$id","started":"2020-01-02T03:04:05+03:00","runs":[{"remarks":["human"]}],"unknown":{"value":1.5}}""")
     edit(File(folder, "transcript.txt"), "оригинал", 100)
-    edit(File(folder, "summary.md"), "пересказ", 100)
+    edit(File(folder, "summary.txt"), "пересказ", 100)
     return folder
 }
 internal fun edit(file: File, text: String, ns: Long) {

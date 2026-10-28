@@ -48,7 +48,7 @@ def notes(monkeypatch, tmp_path) -> Path:
     ):
         folder.mkdir(parents=True)
         (folder / "transcript.txt").write_text(text, encoding="utf-8")
-        (folder / "summary.md").write_text("Суть.\n", encoding="utf-8")
+        (folder / "summary.txt").write_text("Суть.\n", encoding="utf-8")
     (root / "Личное").mkdir()
     monkeypatch.setenv("MNEMA_LIVE_DIR", str(root))
     return root
@@ -209,7 +209,7 @@ def test_tray_moves_the_last_record(tmp_path, notes) -> None:
     rt = BarRuntime(platform=platform, prefs_file=tmp_path / "bar.json")
     folder = notes / "2026-10-02_Итоги"
     rt.state.last_result = folder / "transcript.txt"
-    rt.state.last_summary = folder / "summary.md"
+    rt.state.last_summary = folder / "summary.txt"
     items = menu(rt.state, rt.prefs, MenuEnv(), sections=rt.record_sections())
     last = next(i for i in items if i.title.startswith("Последняя запись"))
     move = next(i for i in last.children if i.title == "Переместить в раздел")
@@ -222,7 +222,7 @@ def test_tray_moves_the_last_record(tmp_path, notes) -> None:
     rt.handle("move_last:Работа")
     moved = notes / "Работа" / "2026-10-02_Итоги"
     assert moved.is_dir() and rt.state.last_result == moved / "transcript.txt"
-    assert rt.state.last_summary == moved / "summary.md"
+    assert rt.state.last_summary == moved / "summary.txt"
     rt.handle("new_section_last")
     assert (notes / "Архив" / "2026-10-02_Итоги").is_dir()
     assert rt.state.last_result == notes / "Архив" / "2026-10-02_Итоги" / "transcript.txt"
