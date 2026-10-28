@@ -87,14 +87,14 @@ jobs:
         run: |
           uv run --no-project --python 3.12 python -m scripts.build_mac_app \
             --out "$RUNNER_TEMP/mac" --ffmpeg "$RUNNER_TEMP/ffmpeg-prefix" \
-            --sources "$RUNNER_TEMP/mac/sources" --version "${TAG#v}" --smoke
+            --sources --version "${TAG#v}" --smoke
       - uses: actions/upload-artifact@v7
         with:
           name: mac
           path: |
             ${{ runner.temp }}/mac/Mnema-*-mac.zip
             ${{ runner.temp }}/mac/Mnema-*.dmg
-            ${{ runner.temp }}/mac/sources/*
+            ${{ runner.temp }}/mac/third-party-sources-*.tar.gz
           if-no-files-found: error
           compression-level: 0
 
@@ -163,7 +163,6 @@ jobs:
       - name: Manifests
         run: |
           version=${TAG#v}
-          mkdir ffmpeg && tar -xf artifacts/ffmpeg/ffmpeg.tar -C ffmpeg src licenses
           uv run --no-project --python 3.12 python -m scripts.build_release "$TAG" --dist dist \
             --mac-zip "artifacts/mac/Mnema-$version-mac.zip" \
             --apk "artifacts/android/mnema-$version.apk"
@@ -185,8 +184,7 @@ jobs:
           version=${TAG#v}
           set -- dist/mnema-$version.tar.gz dist/mnema-release.json dist/mnema-android.json \
             artifacts/mac/Mnema-$version-mac.zip artifacts/mac/Mnema-$version.dmg \
-            artifacts/android/mnema-$version.apk artifacts/mac/sources/* \
-            ffmpeg/src/* ffmpeg/licenses/*
+            artifacts/android/mnema-$version.apk artifacts/mac/third-party-sources-$version.tar.gz
           gh release upload "$TAG" --clobber "$@"
           for file in "$@"; do basename "$file"; done | sort > expected.txt
       - name: Check assets

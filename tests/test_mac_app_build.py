@@ -88,9 +88,11 @@ def test_bundle_carries_every_package_license_and_names_the_copyleft_ones(tmp_pa
           {"LICENSE": "bsd"})  # fmt: skip
     _dist(site, "httpx", "0.28.1", "License: BSD-3-Clause\n", {"licenses/LICENSE.md": "bsd"})
     _dist(site, "mnema", "0.2.21", "", {})
+    (site / "scipy/.dylibs").mkdir(parents=True)
+    (site / "scipy/.dylibs/libquadmath.0.dylib").write_bytes(b"")
     dest = tmp_path / "licenses"
 
-    assert build.package_licenses(site, dest) == ["soxr"]
+    assert build.package_licenses(site, dest, "0.4.0") == ["soxr"]
 
     assert (dest / "python/soxr-1.1.0/licenses/COPYING.LGPL").read_text() == "lgpl"
     assert (dest / "python/soundfile-0.14.0/LICENSE").read_text() == "bsd"
@@ -102,46 +104,12 @@ def test_bundle_carries_every_package_license_and_names_the_copyleft_ones(tmp_pa
         "soxr 1.1.0: LGPL-2.1-or-later",
     ]
     offer = (dest / "SOURCE-OFFER.txt").read_text()
-    assert "soxr 1.1.0: LGPL-2.1-or-later" in offer and "soundfile 0.14.0: libsndfile" in offer
+    assert "third-party-sources-0.4.0.tar.gz" in offer
+    assert "soxr 1.1.0: LGPL-2.1-or-later" in offer
+    assert "libsndfile 1.2.2" in offer and "mpg123 1.32.3" in offer
+    on_request = offer.split("On request:")[1]
+    assert "libquadmath" in on_request and "scipy/.dylibs/libquadmath.0.dylib" in on_request
     assert "httpx" not in offer
-
-
-class _Response:
-    def __init__(self, data: bytes) -> None:
-        self.data = data
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc):
-        return False
-
-    def read(self) -> bytes:
-        return self.data
-
-
-def test_copyleft_sources_are_the_sdists_uv_lock_pins(tmp_path, monkeypatch):
-    import hashlib
-    import urllib.request
-
-    url = "https://files.pythonhosted.org/packages/aa/soxr-1.1.0.tar.gz"
-    root = tmp_path / "project"
-    root.mkdir()
-    (root / "uv.lock").write_text(
-        '[[package]]\nname = "soxr"\nversion = "1.1.0"\n'
-        f'sdist = {{ url = "{url}", hash = "sha256:{hashlib.sha256(b"genuine").hexdigest()}" }}\n'
-    )
-    monkeypatch.setattr(build, "ROOT", root)
-    served = {"data": b"tampered"}
-    monkeypatch.setattr(urllib.request, "urlopen", lambda url, timeout: _Response(served["data"]))
-
-    with pytest.raises(SystemExit, match="sha256"):
-        build.copyleft_sources(["soxr"], tmp_path / "bad")
-    served["data"] = b"genuine"
-    saved = build.copyleft_sources(["soxr"], tmp_path / "src")
-    assert [(p.name, p.read_bytes()) for p in saved] == [("soxr-1.1.0.tar.gz", b"genuine")]
-    with pytest.raises(SystemExit, match="no sdist"):
-        build.copyleft_sources(["not-locked"], tmp_path / "none")
 
 
 def test_trim_drops_build_tools_and_test_suites_but_keeps_what_imports_them(tmp_path):
