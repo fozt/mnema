@@ -1286,14 +1286,16 @@ def cmd_serve(args) -> None:
     if token:
         _cli.console.print(_("[{accent}]🔒 token sign-in[/] (server token)", accent=ACCENT))
     from .. import node_settings
+    from ..node import server_command
 
     if model := node_settings.model():
         _cli.console.print(_("model: {model}", model=model))
-    else:  # shows in the service journal too
+    else:  # shows in the container's log too
         _cli.console.print(
             _(
                 "[yellow]No model set up[/]: recordings will have no title or summary. Set one "
-                "with mnema model"
+                "with {command}",
+                command=server_command("model"),
             )
         )
     _configure_runner_logging(Settings().log_level)
@@ -1360,7 +1362,11 @@ def cmd_devices(args) -> None:
         return time.strftime(_("%Y-%m-%d %H:%M"), time.localtime(stamp)) if stamp else _("never")
 
     if not active:
-        _cli.console.print(_("No connected devices. New invitation: mnema invite"))
+        from ..node import server_command
+
+        _cli.console.print(
+            _("No connected devices. New invitation: {command}", command=server_command("invite"))
+        )
         return
     table = Table(box=box.SIMPLE)
     for column in (_("Name"), "id", _("Added"), _("Last seen")):

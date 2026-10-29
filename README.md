@@ -103,16 +103,20 @@ Open the port the installer prints in your firewall. Docker publishes it past `u
 rules do not close it: use your provider's firewall for that.
 
 Everything lives in `~/mnema-server`: `compose.yaml` with its `.env`, and the data (settings,
-recordings, devices, model weights) in `data/`. On the server the `mnema` command runs in the
-container:
+recordings, devices, model weights) in `data/`. Nothing else is installed on the machine. The
+server's commands run from the folder you cloned, next to `install.sh`:
+
+```bash
+cd ~/mnema && ./mnema.sh invite
+```
 
 | Command | What it does |
 |---|---|
-| `mnema model` | Choose the model for titles and summaries |
-| `mnema invite` | A new invite (`--hours` up to 72) |
-| `mnema devices` | Connected devices; `mnema devices revoke <id>` disconnects one |
-| `mnema update` | Pull the latest image and restart the server with it |
-| `docker logs -f mnema` | Server log |
+| `./mnema.sh model` | Choose the model for titles and summaries |
+| `./mnema.sh invite` | A new invite (`--hours` up to 72) |
+| `./mnema.sh devices` | Connected devices; `./mnema.sh devices revoke <id>` disconnects one |
+| `./mnema.sh update` | Pull the latest image and restart the server with it |
+| `./mnema.sh logs` | Server log |
 
 `./install.sh server --build` builds the image from the checkout instead of pulling it.
 
@@ -127,6 +131,9 @@ Docker server, and the 0.3.1 apps do not sync with it. Stop it with
 `sudo systemctl disable --now mnema`, install the server as above and connect the devices with new
 invites. Its data stays in place: recordings in `~/mnema-server/library`, settings in
 `~/.config/mnema`.
+
+**A server installed with Mnema 0.3.1** had a `mnema` command in `~/.local/bin`. Running
+`./install.sh server` again removes that link; the commands are `./mnema.sh` now.
 
 ### Linux desktop
 
@@ -191,7 +198,7 @@ Any provider works; a key takes a minute to get:
 | DeepSeek | [platform.deepseek.com/api_keys](https://platform.deepseek.com/api_keys) | Paid, very cheap |
 | OpenAI, Claude, Qwen, Groq | the provider's console | Paid |
 
-One recording costs one request. On a server the same steps run with `mnema model`.
+One recording costs one request. On a server the same steps run with `./mnema.sh model`.
 
 ## Command line
 

@@ -105,15 +105,20 @@ git clone https://github.com/fozt/mnema.git && cd mnema
 правила `ufw` его не закрывают: для этого есть файрвол провайдера.
 
 Всё лежит в `~/mnema-server`: `compose.yaml` с его `.env` и данные (настройки, записи, устройства,
-веса моделей) в `data/`. На сервере команда `mnema` выполняется в контейнере:
+веса моделей) в `data/`. Больше на машину ничего не ставится. Команды сервера запускаются из
+скачанной папки, рядом с `install.sh`:
+
+```bash
+cd ~/mnema && ./mnema.sh invite
+```
 
 | Команда | Что делает |
 |---|---|
-| `mnema model` | Выбрать модель для названий и пересказов |
-| `mnema invite` | Новое приглашение (`--hours` до 72) |
-| `mnema devices` | Подключённые устройства; `mnema devices revoke <id>` отключает одно |
-| `mnema update` | Скачать последний образ и перезапустить с ним сервер |
-| `docker logs -f mnema` | Журнал сервера |
+| `./mnema.sh model` | Выбрать модель для названий и пересказов |
+| `./mnema.sh invite` | Новое приглашение (`--hours` до 72) |
+| `./mnema.sh devices` | Подключённые устройства; `./mnema.sh devices revoke <id>` отключает одно |
+| `./mnema.sh update` | Скачать последний образ и перезапустить с ним сервер |
+| `./mnema.sh logs` | Журнал сервера |
 
 `./install.sh server --build` собирает образ из этой папки, а не скачивает его.
 
@@ -128,6 +133,9 @@ git clone https://github.com/fozt/mnema.git && cd mnema
 `sudo systemctl disable --now mnema`, установите сервер, как описано выше, и подключите устройства
 новыми приглашениями. Его данные остаются на месте: записи в `~/mnema-server/library`, настройки в
 `~/.config/mnema`.
+
+**У сервера, установленного Mnema 0.3.1**, была команда `mnema` в `~/.local/bin`. Повторный
+`./install.sh server` убирает эту ссылку, команды теперь — `./mnema.sh`.
 
 ### Linux
 
@@ -192,7 +200,7 @@ Android 14 или новее. Запись собеседника провере
 | DeepSeek | [platform.deepseek.com/api_keys](https://platform.deepseek.com/api_keys) | Платно, очень дёшево |
 | OpenAI, Claude, Qwen, Groq | консоль провайдера | Платно |
 
-Одна запись — один запрос. На сервере те же шаги делает `mnema model`.
+Одна запись — один запрос. На сервере те же шаги делает `./mnema.sh model`.
 
 ## Командная строка
 

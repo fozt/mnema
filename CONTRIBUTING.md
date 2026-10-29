@@ -63,13 +63,13 @@ It installs the server's locked set from `uv.lock` (the extras in `mnema/extras.
 builds of torch, torchaudio and torchvision from the PyTorch CPU index in place of the CUDA
 wheels, for linux/amd64 and linux/arm64 (there without torchcodec, which has no aarch64 wheel;
 pyannote's decoding, unused). To try the installer against that image without touching your own
-server, give it another home (with the Docker CLI plugins, for Compose), image and container
-name, then make an invite for the port it prints:
+server, give it another server folder, image and container name, then make an invite for the
+port it prints with `./mnema.sh` and the same folder:
 
 ```bash
-try=$(mktemp -d) && mkdir "$try/.docker" && ln -s ~/.docker/cli-plugins "$try/.docker/"
-HOME=$try MNEMA_IMAGE=mnema-server:dev MNEMA_NAME=mnema-try ./install.sh server
-"$try/mnema-server/mnema" invite --url http://127.0.0.1:PORT
+export MNEMA_SERVER_DIR=$(mktemp -d)/mnema-server
+MNEMA_IMAGE=mnema-server:dev MNEMA_NAME=mnema-try ./install.sh server
+./mnema.sh invite --url http://127.0.0.1:PORT
 ```
 
 ## How the code is organized

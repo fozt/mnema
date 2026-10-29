@@ -3,7 +3,7 @@ lock file, under data_dir()/releases/<version>-*/.venv.
 
 Neither a developer's checkout nor the running version's environment is touched. The new
 version becomes the app only after it is installed and checked; the previous one stays on disk.
-The server is a Docker image and is updated with a new one on its host (`mnema update` there).
+The server is a Docker image and is updated with a new one on its host (./mnema.sh update there).
 
 The self-contained Mac app (Mnema.app from the DMG) is replaced as a whole bundle from the
 manifest's `mac` block instead: the new bundle is checked next to the old one and swapped in.
@@ -490,7 +490,7 @@ def apply(on: Callable[[str], None] = lambda _m: None, *, terminal: bool = False
             raise MediaError(
                 _(
                     "The update installs the Mnema app, and there is none here. The server is "
-                    "updated on its machine: mnema update"
+                    "updated on its machine: ./mnema.sh update"
                 )
             )
         _drop_unfinished(root)
