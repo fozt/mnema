@@ -75,7 +75,8 @@ folder you can write to, such as *Applications*. To remove Mnema, turn off *Open
 (*Settings → General*), quit it, move it to the Trash and delete the `~/.local/bin/mnema` link if
 Mnema made it; settings stay in `~/.config/mnema`, recordings in `~/mnema`. The licenses of
 everything inside the app are in `Mnema.app/Contents/Resources/licenses`; the source code of its
-LGPL and GPL parts is `third-party-sources-X.Y.Z.tar.gz` on the same release page.
+LGPL and GPL parts is in `third-party-sources-X.Y.Z.tar.gz` on the same release page, except the
+ones that `licenses/SOURCE-OFFER.txt` lists as on request.
 
 ### Server (Linux)
 
@@ -95,10 +96,11 @@ one device and expires in 6 hours.
 
 The invite carries the server's address, which the installer finds on its own (Tailscale, a public
 IP or the home network). If devices reach the server another way, for example by a domain name or
-through port forwarding on a router, give that address with `--url http://my.host:port`.
+through port forwarding on a router, give that address with `--url http://my.host:port`. Later
+installs keep it.
 
-Open the port from the invite in your firewall. Docker publishes it past `ufw`, so `ufw` rules do
-not close it: use your provider's firewall for that.
+Open the port the installer prints in your firewall. Docker publishes it past `ufw`, so `ufw`
+rules do not close it: use your provider's firewall for that.
 
 Everything lives in `~/mnema-server`: `compose.yaml` with its `.env`, and the data (settings,
 recordings, devices, model weights) in `data/`. On the server the `mnema` command runs in the
@@ -114,8 +116,17 @@ container:
 
 `./install.sh server --build` builds the image from the checkout instead of pulling it.
 
+Speech is recognized with 4 CPU threads. To change that, add `MNEMA_ASR_THREADS=8` (a number, or
+`auto` for all of them) to `~/mnema-server/data/config/mnema/.env`; the next recording uses it.
+
 The server speaks plain HTTP and requires a token from every device. If the network between your
 devices and the server is not trusted, put a TLS proxy in front of it.
+
+**A server installed with Mnema 0.3.0** ran as a systemd service. It does not update itself to the
+Docker server, and the 0.3.1 apps do not sync with it. Stop it with
+`sudo systemctl disable --now mnema`, install the server as above and connect the devices with new
+invites. Its data stays in place: recordings in `~/mnema-server/library`, settings in
+`~/.config/mnema`.
 
 ### Linux desktop
 
@@ -135,8 +146,8 @@ recordings are processed once you connect one in *Settings → Server*.
 Android 14 or later. Recording the other side of a call is tested only on Pixel phones: on
 other phones Mnema may record only your microphone, and it tells you when call audio is missing.
 
-1. Download `mnema.apk` from [Releases](https://github.com/fozt/mnema/releases/latest) and install
-   it (allow installs from your browser).
+1. Download `mnema-X.Y.Z.apk` from [Releases](https://github.com/fozt/mnema/releases/latest) and
+   install it (allow installs from your browser).
 2. Follow the *Getting started* checklist: file access, notifications, no battery
    limits.
 3. Start the recording helper. It needs Wi-Fi debugging, which is in *Developer options* (tap

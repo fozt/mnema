@@ -63,11 +63,13 @@ It installs the server's locked set from `uv.lock` (the extras in `mnema/extras.
 builds of torch, torchaudio and torchvision from the PyTorch CPU index in place of the CUDA
 wheels, for linux/amd64 and linux/arm64 (there without torchcodec, which has no aarch64 wheel;
 pyannote's decoding, unused). To try the installer against that image without touching your own
-server, give it another home, image and container name:
+server, give it another home (with the Docker CLI plugins, for Compose), image and container
+name, then make an invite for the port it prints:
 
 ```bash
-HOME=$(mktemp -d) MNEMA_IMAGE=mnema-server:dev MNEMA_NAME=mnema-try \
-  ./install.sh server --url http://127.0.0.1:38837
+try=$(mktemp -d) && mkdir "$try/.docker" && ln -s ~/.docker/cli-plugins "$try/.docker/"
+HOME=$try MNEMA_IMAGE=mnema-server:dev MNEMA_NAME=mnema-try ./install.sh server
+"$try/mnema-server/mnema" invite --url http://127.0.0.1:PORT
 ```
 
 ## How the code is organized
@@ -153,9 +155,10 @@ builds, each in its own job:
 - the LGPL ffmpeg (CI on `main` caches it until `scripts/build_ffmpeg.sh` changes; a tag reads
   that cache and never writes one);
 - `Mnema-X.Y.Z-mac.zip` (Mac app updates) and `Mnema-X.Y.Z.dmg` (installs), checked by the smoke,
-  and `third-party-sources-X.Y.Z.tar.gz`: the source code of every (L)GPL component inside the
+  and `third-party-sources-X.Y.Z.tar.gz`: the source code of the (L)GPL components inside the
   app (ffmpeg and LAME, the sdists of the (L)GPL Python packages, libsndfile and mpg123 from the
-  soundfile wheel), with a README naming the binary each file belongs to
+  soundfile wheel), with a README naming the binary each file belongs to and the ones whose
+  source is offered on request instead (libquadmath in the scipy wheel)
   (`scripts/third_party_sources.py`);
 - the signed `mnema-X.Y.Z.apk`;
 - the server image `ghcr.io/fozt/mnema:X.Y.Z` for linux/amd64 and linux/arm64, each built and
