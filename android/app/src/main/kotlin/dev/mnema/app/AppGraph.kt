@@ -18,7 +18,11 @@ import java.util.UUID
 import java.util.TimeZone
 import java.io.IOException
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.distinctUntilChanged
 import dev.mnema.app.helper.HelperClient
 import dev.mnema.app.helper.HelperProtocol
@@ -35,6 +39,7 @@ import dev.mnema.app.server.Connection
 import dev.mnema.app.server.ConnectionException
 import dev.mnema.app.server.RunnerClient
 import dev.mnema.app.server.parseConnection
+import dev.mnema.app.server.versionNotice
 import dev.mnema.app.settings.NodeEntry
 import dev.mnema.app.settings.Settings
 import dev.mnema.app.settings.SettingsStore
@@ -52,6 +57,15 @@ import okhttp3.OkHttpClient
 /** Process-wide app dependencies: one instance of each. */
 class AppGraph(val context: Context) {
     val settings = SettingsStore(context)
+
+    // node versions from the capabilities answers of this run, by address
+    private val versions = MutableStateFlow<Map<String, String?>>(emptyMap())
+
+    /** The version notice for the chosen server, once it answered capabilities in this run (settings, processing). */
+    val serverNotice: Flow<String?> = combine(settings.settings, versions) { current, known ->
+        current.activeEntry()?.let { versionNotice(known[it.address], updates.versionName) }
+    }
+
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     // the exchange folder may be unavailable: then the first access fails, not the start
@@ -194,7 +208,10 @@ class AppGraph(val context: Context) {
         null
     }
 
-    fun runner(connection: Connection): RunnerClient = RunnerClient(connection, runnerHttp) { name -> nodeNamed(connection.url, name) }
+    fun runner(connection: Connection): RunnerClient =
+        RunnerClient(connection, runnerHttp, versioned = { version -> versions.update { it + (connection.url to version) } }) { name ->
+            nodeNamed(connection.url, name)
+        }
 
     // the node name in the list comes from the last successful capabilities answer, wherever it was asked
     private fun nodeNamed(address: String, name: String) {

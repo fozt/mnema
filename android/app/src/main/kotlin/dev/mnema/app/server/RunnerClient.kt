@@ -86,8 +86,8 @@ private class SubmissionBody(private val body: RequestBody) : RequestBody() {
 @Serializable
 data class UploadInfo(val offset: Long, val path: String? = null, val name: String? = null, val size: Long? = null)
 
-/** What the node can do (`GET /api/capabilities`); when [health] is not Ok, the rest is unknown. */
-data class NodeCheck(val health: Health, val llm: Boolean = false, val name: String? = null)
+/** What the node can do (`GET /api/capabilities`); when [health] is not Ok, the rest is unknown; [version] — its Mnema version, null before 0.3.2. */
+data class NodeCheck(val health: Health, val llm: Boolean = false, val name: String? = null, val version: String? = null)
 
 /** Node details; the model and its settings come only from the server configuration. */
 @Serializable
@@ -117,8 +117,13 @@ private class Reply(val code: Int, val body: String) {
     val ok: Boolean get() = code in 200..299
 }
 
-/** [named] — the node named itself in a successful capabilities reply; the name in the node list follows it. */
-class RunnerClient(val connection: Connection, private val http: OkHttpClient = defaultHttp(), private val named: (String) -> Unit = {}) {
+/** [named] — the node named itself in a successful capabilities reply; the name in the node list follows it; [versioned] — its version in that reply. */
+class RunnerClient(
+    val connection: Connection,
+    private val http: OkHttpClient = defaultHttp(),
+    private val versioned: (String?) -> Unit = {},
+    private val named: (String) -> Unit = {},
+) {
     suspend fun submitRecording(key: String, tracks: Map<String, String>, params: RecordingParams): String =
         submitNodeRecording(buildJsonObject {
             put("op", "recording")
@@ -236,7 +241,9 @@ class RunnerClient(val connection: Connection, private val http: OkHttpClient = 
         val body = json.parseToJsonElement(reply.body).jsonObject
         val name = (body["name"] as? JsonPrimitive)?.takeIf { it.isString }?.content?.trim()?.ifEmpty { null }
         name?.let(named)
-        return NodeCheck(Health.Ok, llm = body["llm"].strictBoolean() == true, name = name)
+        val version = (body["version"] as? JsonPrimitive)?.takeIf { it.isString }?.content
+        versioned(version)
+        return NodeCheck(Health.Ok, llm = body["llm"].strictBoolean() == true, name = name, version = version)
     }
 
     /** Exchanges a node invitation for this device's token; the request has no token, a refusal carries the node's text without the code. */

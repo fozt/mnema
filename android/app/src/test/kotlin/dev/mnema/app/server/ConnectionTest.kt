@@ -84,11 +84,32 @@ class ConnectionTest {
                     "not_mnema" -> Health.NotMnema
                     else -> Health.Unreachable
                 }
-                assertEquals("$status $body", expected, client.capabilities().health)
+                val check = client.capabilities()
+                assertEquals("$status $body", expected, check.health)
+                if (expected == Health.Ok) {
+                    val version = (Json.parseToJsonElement(body).jsonObject["version"] as? JsonPrimitive)?.contentOrNull
+                    assertEquals("$status $body", version, check.version)
+                }
             }
         }
         http.dispatcher.executorService.shutdown()
         http.connectionPool.evictAll()
+    }
+
+    @Test
+    fun versionsDifferingInMajorMinorSayWhichSideToUpdateAsOnTheDesktop() {
+        for (case in cases("versions")) {
+            val server = (case["server"] as? JsonPrimitive)?.takeIf { it.isString }?.content
+            val expected = when (case.text("gap")) {
+                "app" -> VersionGap.APP
+                "server" -> VersionGap.SERVER
+                else -> null
+            }
+            assertEquals("$case", expected, versionGap(server, case.text("app")!!))
+        }
+        assertEquals("На сервере новая версия Mnema 0.4.0. Обновите приложение", versionNotice("0.4.0", "0.3.1"))
+        assertEquals("На сервере старая версия Mnema 0.2.5. Обновите сервер", versionNotice("0.2.5", "0.3.1"))
+        assertEquals(null, versionNotice("0.3.9", "0.3.1"))
     }
 
     @Test

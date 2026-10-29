@@ -66,6 +66,8 @@
   "Sync: {error}": "Синхронизация: {error}",
   "System audio": "Системный звук",
   "The server no longer accepts this device. Get a new invitation from the server": "Сервер не принимает это устройство. Нужно новое приглашение с сервера",
+  "The server runs Mnema {server}, older than this app. Update the server": "На сервере старая версия Mnema {server}. Обновите сервер",
+  "The server runs Mnema {server}. Update the app": "На сервере новая версия Mnema {server}. Обновите приложение",
   "Today": "Сегодня",
   "Update": "Обновить",
   "Update available: {version}": "Доступно обновление: {version}",

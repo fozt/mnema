@@ -196,7 +196,7 @@ private fun recordingRoute(path: String) = "recordings/recording?${RecordingView
 @Composable
 fun RecordingsScreen(graph: AppGraph, onOpen: (File) -> Unit, onDeleted: (RecordingItem) -> Unit, modifier: Modifier = Modifier) {
     val zone = remember { ZoneId.systemDefault() }
-    val model = viewModel { RecordingsViewModel(graph.recordings, zone, graph.sync) }
+    val model = viewModel { RecordingsViewModel(graph.recordings, zone, graph.sync, graph.serverNotice) }
     val groups by model.groups.collectAsStateWithLifecycle()
     val query by model.query.collectAsStateWithLifecycle()
     val section by model.section.collectAsStateWithLifecycle()

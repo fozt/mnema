@@ -35,6 +35,8 @@ internal val RU_DATA: Map<String, Any> = mapOf(
     "The server is not responding. Check the address and make sure the server is running" to "Сервер не отвечает. Проверьте адрес и запущен ли сервер",
     "A new invitation from the server is needed" to "Нужно новое приглашение с сервера",
     "There is no Mnema server at this address" to "По этому адресу нет сервера Mnema",
+    "The server runs Mnema {server}. Update the app" to "На сервере новая версия Mnema {server}. Обновите приложение",
+    "The server runs Mnema {server}, older than this app. Update the server" to "На сервере старая версия Mnema {server}. Обновите сервер",
     "The server is busy: the queue is full. Try again later" to "Сервер занят: очередь заполнена. Повторите позже",
     "The file is no longer available on the server. Upload the recording again" to "Файл на сервере уже недоступен. Загрузите запись заново",
     "The server gave an unexpected response" to "Сервер ответил не так, как ожидалось",

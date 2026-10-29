@@ -11,6 +11,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from . import __version__
 from .i18n import _
 
 
@@ -88,6 +89,29 @@ def format_invite(url: str, code: str) -> str:
 def is_mnema(answer: object) -> bool:
     """The GET /api/capabilities body is a Mnema server: ok is true, llm is a boolean."""
     return isinstance(answer, dict) and answer.get("ok") is True and type(answer.get("llm")) is bool
+
+
+class VersionGap(StrEnum):
+    """Which side to update when the app and the server differ in MAJOR.MINOR."""
+
+    APP = "app"  # the server is newer
+    SERVER = "server"  # the server is older
+
+
+_RELEASE = re.compile(r"(\d+)\.(\d+)(?:\.\d+)?")
+
+
+def version_gap(server: object, app: str = __version__) -> VersionGap | None:
+    """The `version` of GET /api/capabilities against this app; a patch difference is fine,
+    a server without a readable version (before 0.3.2) is not judged."""
+    found = _RELEASE.fullmatch(server) if isinstance(server, str) else None
+    mine = _RELEASE.fullmatch(app)
+    if found is None or mine is None:
+        return None
+    theirs, ours = tuple(map(int, found.groups()[:2])), tuple(map(int, mine.groups()[:2]))
+    if theirs == ours:
+        return None
+    return VersionGap.APP if theirs > ours else VersionGap.SERVER
 
 
 class Answer(StrEnum):

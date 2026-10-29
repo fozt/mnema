@@ -157,9 +157,9 @@ def test_summary_that_cannot_start_says_why_and_keeps_the_record(
 
 
 def test_server_name_and_llm_from_capabilities(monkeypatch, home) -> None:
-    """The server name and whether it summarizes come from its capabilities."""
+    """The server name, whether it summarizes and its version come from its capabilities."""
     real = client_mod.MnemaClient
-    caps = {"ok": True, "llm": True, "name": "  ПК Ubuntu  "}
+    caps = {"ok": True, "llm": True, "name": "  ПК Ubuntu  ", "version": "9.1.0"}
     transport = httpx.MockTransport(lambda r: httpx.Response(200, json=caps))
     monkeypatch.setattr(
         client_mod,
@@ -173,6 +173,7 @@ def test_server_name_and_llm_from_capabilities(monkeypatch, home) -> None:
             t.join(timeout=10)
     env = rt.menu_env()
     assert (env.server_ok, env.server_name, env.server_llm) == (True, "ПК Ubuntu", True)
+    assert env.server_version == "9.1.0"
 
 
 def test_linux_summary_goes_to_the_server_model(monkeypatch, home) -> None:

@@ -229,6 +229,7 @@ class MenuEnv(BaseModel):
     server_llm: bool = False  # the server makes titles and summaries itself
     server_model: str | None = None  # server model without the key; None — none or unknown
     server_records: int | None = None  # recordings in the last sync with this server
+    server_version: str | None = None  # Mnema version from its capabilities; None — unknown
     model: str | None = None  # this Mac's model without the key; None — not set (or not a Mac)
     mac: bool = False  # standalone Mac (base.STANDALONE)
     asr_choices: list[tuple[str, str]] = Field(default_factory=list)
