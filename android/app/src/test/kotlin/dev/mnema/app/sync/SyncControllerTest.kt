@@ -164,9 +164,9 @@ class SyncControllerTest {
         assertFalse(File(tmp.root, "sync.json").exists())
     }
 
-    /** The chosen server runs another Mnema version: the list says which side to update instead of the sync errors. */
+    /** The chosen server runs another Mnema version: the list says which side to update, and the sync errors stay under it. */
     @OptIn(ExperimentalCoroutinesApi::class)
-    @Test fun anotherServerVersionReplacesTheSyncErrorsInTheList() {
+    @Test fun anotherServerVersionIsSaidAboveTheSyncErrorsInTheList() {
         Dispatchers.setMain(UnconfinedTestDispatcher())
         try {
             runBlocking {
@@ -188,7 +188,8 @@ class SyncControllerTest {
                         withTimeout(5_000) {
                             assertEquals(errors.joinToString("\n"), model.failure.first { it != null })
                             notice.value = versionNotice("0.4.0", "0.3.1")
-                            assertEquals("На сервере новая версия Mnema 0.4.0. Обновите приложение", model.failure.first { it != errors.joinToString("\n") })
+                            val said = (listOf("На сервере новая версия Mnema 0.4.0. Обновите приложение") + errors).joinToString("\n")
+                            assertEquals(said, model.failure.first { it != errors.joinToString("\n") })
                         }
                     } finally { http.dispatcher.executorService.shutdown(); http.connectionPool.evictAll() }
                 }

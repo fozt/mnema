@@ -98,7 +98,7 @@ class VersionGap(StrEnum):
     SERVER = "server"  # the server is older
 
 
-_RELEASE = re.compile(r"(\d+)\.(\d+)(?:\.\d+)?")
+_RELEASE = re.compile(r"(\d+)\.(\d+)(?:\.\d+)?", re.ASCII)  # digits as on the phone
 
 
 def version_gap(server: object, app: str = __version__) -> VersionGap | None:

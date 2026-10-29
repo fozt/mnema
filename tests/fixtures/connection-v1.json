@@ -114,6 +114,7 @@
     {"server": null, "app": "0.4.0", "gap": null},
     {"server": "", "app": "0.4.0", "gap": null},
     {"server": "dev", "app": "0.4.0", "gap": null},
+    {"server": "\u0660.\u0664.\u0660", "app": "0.3.1", "gap": null},
     {"server": 3, "app": "0.4.0", "gap": null}
   ]
 }

@@ -62,7 +62,7 @@ class RecordingsViewModel(
     private val store: RecordingStore,
     private val zone: ZoneId,
     private val sync: SyncController? = null,
-    // the chosen server runs another Mnema version: this one message replaces the sync errors
+    // the chosen server runs another Mnema version: which side to update, above the sync errors
     serverNotice: Flow<String?> = flowOf(null),
     private val compute: CoroutineContext = Dispatchers.Default,
 ) : ViewModel() {
@@ -74,7 +74,7 @@ class RecordingsViewModel(
     val resolving = MutableStateFlow(false)
     val trash: StateFlow<Boolean> = store.trashAvailable
     val failure = combine(store.failure, syncStatus, serverNotice) { local, remote, notice ->
-        (listOfNotNull(local) + (notice?.let(::listOf) ?: remote.errors)).distinct().joinToString("\n").ifBlank { null }
+        (listOfNotNull(local, notice) + remote.errors).distinct().joinToString("\n").ifBlank { null }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), null)
     // null until the first scan of the folders: the list shows nothing rather than "No recordings yet"
     val groups: StateFlow<List<DayGroup>?> = combine(store.items, store.loaded, query, section) { items, loaded, text, group ->

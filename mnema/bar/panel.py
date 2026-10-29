@@ -351,10 +351,12 @@ def panel_model(
                 ],
             )
         )
-    # the server refuses the token or runs another Mnema version: sync and processing share the
-    # trouble, so one notice and no "Sync: …" about the same thing
+    # the server refuses the token: sync and processing share the trouble, so one notice with a
+    # button and no "Sync: …" about the same thing
     refused = env.server is not None and not env.server_auth
-    gap = version_gap(env.server_version) if env.server is not None else None
+    # another Mnema version on the server: which side to update, above its own sync errors (they
+    # may have another cause, such as the server being down)
+    gap = version_gap(env.server_version) if env.server is not None and not refused else None
     if refused:
         text = _("The server no longer accepts this device. Get a new invitation from the server")
         connect = Button(key="server_setup", title=_("Connect…"))
@@ -370,7 +372,7 @@ def panel_model(
             server=env.server_version,
         )
         notices.append(Notice(text=text))
-    else:
+    if not refused:
         notices.extend(
             Notice(text=_("Sync: {error}", error=_after_colon(e))) for e in state.sync_errors
         )

@@ -1,5 +1,5 @@
-"""The server refuses the device token or runs another Mnema version: one notice instead of
-sync errors; a refused token also keeps "unavailable" out of the header."""
+"""The server refuses the device token: one notice instead of sync errors and no "unavailable"
+in the header; another Mnema version on the server: which side to update, above the sync errors."""
 
 from mnema import __version__
 from mnema.bar.panel import panel_model
@@ -36,12 +36,13 @@ def _release(minor: int) -> str:
     return f"{major}.{ours + minor}.0"
 
 
-def test_newer_server_asks_to_update_the_app_instead_of_sync_errors():
+def test_newer_server_asks_to_update_the_app_above_the_sync_errors():
     server = _release(1)
     env = MenuEnv(server="http://srv:8000", server_ok=True, server_version=server, update=server)
     panel = model(env, ["Сервер вернул неполные данные библиотеки"])
     assert [n.text for n in panel.notices] == [
-        f"На сервере новая версия Mnema {server}. Обновите приложение"
+        f"На сервере новая версия Mnema {server}. Обновите приложение",
+        "Синхронизация: сервер вернул неполные данные библиотеки",
     ]
     assert [b.key for b in panel.notices[0].buttons] == ["update"]
     # the app's update is not found yet: the same words without a button
@@ -53,9 +54,23 @@ def test_older_server_asks_to_update_the_server():
     major, minor = map(int, __version__.split(".")[:2])
     server = f"{major}.{minor - 1}.9" if minor else f"{major - 1}.99.0"
     env = MenuEnv(server="http://srv:8000", server_ok=True, server_version=server)
-    panel = model(env, ["Сервер вернул неполные данные библиотеки"])
+    panel = model(env, [])
     assert [(n.text, n.buttons) for n in panel.notices] == [
         (f"На сервере старая версия Mnema {server}. Обновите сервер", [])
+    ]
+
+
+def test_server_down_since_its_version_was_read_still_says_so():
+    """The version known from an earlier answer does not hide why sync fails now."""
+    server = _release(1)
+    env = MenuEnv(
+        server="http://srv:8000", server_ok=False, server_name="Дом", server_version=server
+    )
+    panel = model(env, ["Сервер не отвечает"])
+    assert panel.where == "Дом недоступен"
+    assert [n.text for n in panel.notices] == [
+        f"На сервере новая версия Mnema {server}. Обновите приложение",
+        "Синхронизация: сервер не отвечает",
     ]
 
 
