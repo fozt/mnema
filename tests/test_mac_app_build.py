@@ -88,17 +88,21 @@ def test_bundle_carries_every_package_license_and_names_the_copyleft_ones(tmp_pa
           {"LICENSE": "bsd"})  # fmt: skip
     _dist(site, "httpx", "0.28.1", "License: BSD-3-Clause\n", {"licenses/LICENSE.md": "bsd"})
     _dist(site, "mnema", "0.2.21", "", {})
+    _dist(site, "chardet", "5.2.0", "License: LGPLv2.1+\n", {})
+    _dist(site, "gplthing", "1.0", "License: GPLv3\n", {})
     (site / "scipy/.dylibs").mkdir(parents=True)
     (site / "scipy/.dylibs/libquadmath.0.dylib").write_bytes(b"")
     dest = tmp_path / "licenses"
 
-    assert build.package_licenses(site, dest, "0.4.0") == ["soxr"]
+    assert build.package_licenses(site, dest, "0.4.0") == ["chardet", "gplthing", "soxr"]
 
     assert (dest / "python/soxr-1.1.0/licenses/COPYING.LGPL").read_text() == "lgpl"
     assert (dest / "python/soundfile-0.14.0/LICENSE").read_text() == "bsd"
     assert not (dest / "python/soxr-1.1.0/RECORD").exists()
     listed = (dest / "THIRD-PARTY.txt").read_text().splitlines()
     assert listed == [
+        "chardet 5.2.0: LGPLv2.1+",
+        "gplthing 1.0: GPLv3",
         "httpx 0.28.1: BSD-3-Clause",
         "soundfile 0.14.0: BSD License",
         "soxr 1.1.0: LGPL-2.1-or-later",

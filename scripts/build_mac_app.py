@@ -161,7 +161,7 @@ def trim(python_home: Path) -> int:
     return freed
 
 
-_COPYLEFT = re.compile(r"\bL?GPL\b|GNU (Lesser |Library )?General Public", re.I)
+_COPYLEFT = re.compile(r"\bL?GPL(?:v\d|\b)|GNU (Lesser |Library )?General Public", re.I)
 _LICENSE_FILE = re.compile(r"^(LICEN[CS]E|COPYING|NOTICE|AUTHORS)", re.I)
 SOURCE_OFFER = """\
 Mnema.app includes components under the GNU LGPL or GPL, listed below. Their source code is in

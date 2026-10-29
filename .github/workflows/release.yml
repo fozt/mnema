@@ -1,8 +1,9 @@
 # A pushed tag vX.Y.Z publishes the release: the source archive (Linux app updates), the
-# self-contained Mac app (zip for updates, DMG for installs), the signed APK, the manifests the
-# apps read from releases/latest/download/ and the server image ghcr.io/<repo>:X.Y.Z for
-# linux/amd64 and linux/arm64. Everything is built first, uploaded to a draft, checked; the image
-# is tagged latest and only then the release is published as the latest.
+# self-contained Mac app (zip for updates, DMG for installs) with the sources of its (L)GPL parts,
+# the signed APK, the manifests the apps read from releases/latest/download/ and the server image
+# ghcr.io/<repo>:X.Y.Z for linux/amd64 and linux/arm64. Everything is built first, uploaded to a
+# draft, checked; the image is tagged latest and only then the release is published as the
+# latest. Each step can be re-run while the release is a draft.
 name: Release
 
 on:
@@ -102,8 +103,10 @@ jobs:
 
   # The server image, built natively for each platform and checked there: it starts as an
   # unprivileged user of its data folder, answers its healthcheck and makes an invitation. Pushed
-  # as :X.Y.Z-<arch>, joined into :X.Y.Z by image; :latest moves in publish.
+  # as :X.Y.Z-<arch>, joined into :X.Y.Z by image, only after the checks; :latest moves in
+  # publish.
   image-build:
+    needs: checks
     strategy:
       matrix:
         include:
