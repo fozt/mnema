@@ -103,7 +103,12 @@ elif name == "docker":
     if args[:2] == ["compose", "version"]:
         sys.exit(int("compose" in os.environ.get("FAKE_DOCKER_MISSING", "")))
     elif args[:1] == ["info"]:
-        sys.exit(int("daemon" in os.environ.get("FAKE_DOCKER_MISSING", "")))
+        missing = os.environ.get("FAKE_DOCKER_MISSING", "")
+        if "denied" in missing:
+            print("permission denied while trying to connect to the docker API", file=sys.stderr)
+        elif "daemon" in missing:
+            print("Cannot connect to the Docker daemon", file=sys.stderr)
+        sys.exit(int("denied" in missing or "daemon" in missing))
     elif args[:2] == ["image", "inspect"]:  # the image id: a pull brings a new one
         print("sha256:" + ("new" if pulled.exists() else "old"))
     elif args[:1] == ["run"]:  # the image on the host's network
@@ -444,7 +449,10 @@ def test_server_of_an_earlier_version_is_stopped_first(system):
 @pytest.mark.parametrize(("missing", "text"), [
     ("docker", "Установите Docker Engine с плагином Compose: https://docs.docker.com/engine/install/"),
     ("compose", "Установите Docker Engine с плагином Compose: https://docs.docker.com/engine/install/"),
-    ("daemon", "Docker не запущен, или этому пользователю он недоступен"),
+    ("daemon", "Docker не запущен. Запустите его и установите снова:\n"
+     "  sudo systemctl enable --now docker"),
+    ("denied", "Добавьте его в группу docker, откройте новую оболочку и установите снова:\n"
+     "  sudo usermod -aG docker "),
 ])  # fmt: skip
 def test_server_without_docker_says_what_to_install(system, missing, text):
     root, env = system

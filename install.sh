@@ -137,9 +137,17 @@ if [ "$MODE" = server ]; then
       "Сервер работает в Docker. Установите Docker Engine с плагином Compose: https://docs.docker.com/engine/install/"
     exit 1
   fi
-  if ! docker info >/dev/null 2>&1; then
-    say "Docker isn't running, or this user may not use it: https://docs.docker.com/engine/install/linux-postinstall/" \
-      "Docker не запущен, или этому пользователю он недоступен: https://docs.docker.com/engine/install/linux-postinstall/"
+  if ! docker_error="$(docker info 2>&1 >/dev/null)"; then
+    case "$docker_error" in
+      *"permission denied"*)
+        say "This user may not use Docker. Add it to the docker group, open a new shell and install again:" \
+          "Этому пользователю нельзя пользоваться Docker. Добавьте его в группу docker, откройте новую оболочку и установите снова:"
+        printf '  sudo usermod -aG docker %s\n  newgrp docker\n' "$(id -un)" ;;
+      *)
+        say "Docker isn't running. Start it and install again:" \
+          "Docker не запущен. Запустите его и установите снова:"
+        printf '  sudo systemctl enable --now docker\n' ;;
+    esac
     exit 1
   fi
   # 0.3.0 ran the server as this systemd service; two servers would share nothing but the name
