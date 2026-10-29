@@ -44,6 +44,7 @@ import dev.mnema.app.ui.components.durationLabel
 import dev.mnema.app.ui.recordings.CleanupDialog
 import dev.mnema.app.ui.recordings.DetailAction
 import dev.mnema.app.ui.recordings.RecordingsViewModel
+import dev.mnema.app.ui.recordings.DayGroup
 import dev.mnema.app.ui.recordings.DetailState
 import dev.mnema.app.ui.recordings.FolderFollower
 import dev.mnema.app.ui.recordings.filterRecordings
@@ -86,6 +87,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.Assert.assertEquals
@@ -696,6 +698,30 @@ class RecordingsUiTest {
         val withoutSaved = withSelected(listOf(AsrOption("auto", "Автоматически")), "groq/whisper-large-v3")
         assertEquals(AsrOption("groq/whisper-large-v3", "groq/whisper-large-v3"), withoutSaved.last())
         assertEquals(node, withSelected(node, "groq/whisper-large-v3"))
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun theListIsEmptyOnlyAfterTheFirstScanFoundNothing() {
+        Dispatchers.setMain(UnconfinedTestDispatcher())
+        try {
+            runTest {
+                val root = tmp.newFolder("Mnema")
+                val store = FolderRecordingStore(root, backgroundScope, { null }, { false }, Dispatchers.Unconfined)
+                val model = RecordingsViewModel(store, zone, compute = Dispatchers.Unconfined)
+                backgroundScope.launch { model.groups.collect {} }
+                runCurrent()
+                // not scanned yet: the screen shows no "No recordings yet"
+                assertNull(model.groups.value)
+
+                store.refresh()
+                assertEquals(emptyList<DayGroup>(), model.groups.first { it != null })
+
+                WavFixture.write(File(File(root, "2026-10-21_14-35").apply { mkdirs() }, "mic.wav"), WavFixture.samples(1.0))
+                store.refresh()
+                assertEquals(listOf("2026-10-21_14-35"), model.groups.first { !it.isNullOrEmpty() }!!.flatMap { it.items }.map { it.dir.name })
+            }
+        } finally { Dispatchers.resetMain() }
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)

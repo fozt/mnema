@@ -58,7 +58,12 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-class RecordingsViewModel(private val store: RecordingStore, private val zone: ZoneId, private val sync: SyncController? = null) : ViewModel() {
+class RecordingsViewModel(
+    private val store: RecordingStore,
+    private val zone: ZoneId,
+    private val sync: SyncController? = null,
+    private val compute: CoroutineContext = Dispatchers.Default,
+) : ViewModel() {
     val query = MutableStateFlow("")
     // null means all recordings, the empty string means recordings in the root without a section.
     val section = MutableStateFlow<String?>(null)
@@ -69,9 +74,10 @@ class RecordingsViewModel(private val store: RecordingStore, private val zone: Z
     val failure = combine(store.failure, syncStatus) { local, remote ->
         (listOfNotNull(local) + remote.errors).distinct().joinToString("\n").ifBlank { null }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), null)
-    val groups: StateFlow<List<DayGroup>?> = combine(store.items, query, section) { items, text, group ->
-        groupByDay(filterRecordings(items, text, group), LocalDate.now(zone), zone)
-    }.flowOn(Dispatchers.Default)
+    // null until the first scan of the folders: the list shows nothing rather than "No recordings yet"
+    val groups: StateFlow<List<DayGroup>?> = combine(store.items, store.loaded, query, section) { items, loaded, text, group ->
+        if (loaded) groupByDay(filterRecordings(items, text, group), LocalDate.now(zone), zone) else null
+    }.flowOn(compute)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), null)
 
     /** Delete audio of processed recordings: first a confirmation with the number of recordings and the space. */

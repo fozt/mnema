@@ -87,6 +87,8 @@ interface RecordingStore {
     val sections: StateFlow<List<String>> get() = NO_SECTIONS
     val failure: StateFlow<String?> get() = NO_FAILURE
     val items: StateFlow<List<RecordingItem>>
+    // the first scan of the folders is over: until then an empty [items] means "not read yet", not "no recordings"
+    val loaded: StateFlow<Boolean>
     // whether there is a trash; without it the delete dialogs ask about deleting forever
     val trashAvailable: StateFlow<Boolean> get() = WITH_TRASH
     fun refresh()
