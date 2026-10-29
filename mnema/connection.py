@@ -99,14 +99,15 @@ class VersionGap(StrEnum):
 
 
 _RELEASE = re.compile(r"(\d+)\.(\d+)(?:\.\d+)?", re.ASCII)  # digits as on the phone
+_UNVERSIONED = "0.0.0"  # a local build without a release version (the phone's debug default)
 
 
 def version_gap(server: object, app: str = __version__) -> VersionGap | None:
     """The `version` of GET /api/capabilities against this app; a patch difference is fine,
-    a server without a readable version (before 0.3.2) is not judged."""
+    a server without a readable version (before 0.3.2) or an unversioned build is not judged."""
     found = _RELEASE.fullmatch(server) if isinstance(server, str) else None
     mine = _RELEASE.fullmatch(app)
-    if found is None or mine is None:
+    if found is None or mine is None or _UNVERSIONED in (server, app):
         return None
     theirs, ours = tuple(map(int, found.groups()[:2])), tuple(map(int, mine.groups()[:2]))
     if theirs == ours:

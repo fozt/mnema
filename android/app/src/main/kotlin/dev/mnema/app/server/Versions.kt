@@ -7,8 +7,12 @@ enum class VersionGap { APP, SERVER }
 
 private val RELEASE = Regex("""(\d+)\.(\d+)(?:\.\d+)?""")
 
-/** The `version` of `GET /api/capabilities` against this app; a patch difference is fine, a server without a readable version is not judged. */
+// a local build without a release version (versionName without -PmnemaVersion)
+private const val UNVERSIONED = "0.0.0"
+
+/** The `version` of `GET /api/capabilities` against this app; a patch difference is fine, a server without a readable version or an unversioned build is not judged. */
 fun versionGap(server: String?, app: String): VersionGap? {
+    if (server == UNVERSIONED || app == UNVERSIONED) return null
     val theirs = server?.let(RELEASE::matchEntire)?.release() ?: return null
     val ours = RELEASE.matchEntire(app)?.release() ?: return null
     val order = compareValuesBy(theirs, ours, { it.first }, { it.second })

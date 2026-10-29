@@ -127,7 +127,7 @@ The server speaks plain HTTP and requires a token from every device. If the netw
 devices and the server is not trusted, put a TLS proxy in front of it.
 
 **A server installed with Mnema 0.3.0** ran as a systemd service. It does not update itself to the
-Docker server, and the 0.3.1 apps do not sync with it. Stop it with
+Docker server, and the apps since 0.3.1 do not sync with it. Stop it with
 `sudo systemctl disable --now mnema`, install the server as above and connect the devices with new
 invites. Its data stays in place: recordings in `~/mnema-server/library`, settings in
 `~/.config/mnema`.
