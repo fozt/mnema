@@ -55,11 +55,9 @@ def cli_link() -> Path:
 
 def link_cli(venv: Path) -> bool:
     """Point ~/.local/bin/mnema at the mnema command of the environment ``venv``, replacing the
-    previous link atomically. A file that is not a link is someone else's, a link to the command
-    of the server in Docker (./install.sh server) is the server's: both are left alone, False."""
+    previous link atomically. A file that is not a link is someone else's: left alone, False."""
     link = cli_link()
-    server = Path.home() / "mnema-server/mnema"
-    if link.exists() and (not link.is_symlink() or link.resolve() == server.resolve()):
+    if link.exists() and not link.is_symlink():
         return False
     link.parent.mkdir(parents=True, exist_ok=True)
     draft = link.with_name(f".{link.name}.{os.getpid()}")
@@ -193,7 +191,7 @@ def _server_state() -> dict | None:
 
 
 def saved_url() -> str | None:
-    """The invitation address set explicitly (`mnema invite --url`); None when unset or
+    """The invitation address set explicitly (`./mnema.sh invite --url`); None when unset or
     server.json is unreadable."""
     try:
         data = _server_state()
@@ -244,7 +242,7 @@ def start_container() -> None:
     `mnema serve` on DEFAULT_PORT. Until a device joins, every start logs an invitation, or how
     to make one when no address is known (node.node_url)."""
     from .devices import DeviceStore, devices_db
-    from .node import node_url
+    from .node import node_url, server_command
 
     os.umask(0o077)  # every file of the server is private
     ensure_server_token()
@@ -255,7 +253,7 @@ def start_container() -> None:
         if address := node_url(DEFAULT_PORT):
             print(issue_invite(root, address, now=time.time()), flush=True)
         else:
-            hint = "mnema invite --url " + _("http://ADDRESS:PORT")
+            hint = server_command("invite --url ") + _("http://ADDRESS:PORT")
             print(_("New invitation: {command}", command=hint), flush=True)
     launcher = str(_command(Path(sys.prefix)))
     os.execv(launcher, [launcher, "serve", "--host", "0.0.0.0", "--dir", str(root)])

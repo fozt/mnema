@@ -116,8 +116,16 @@ def node_address(found: Iterable[tuple[str, str]] | None = None) -> str | None:
     return None
 
 
+def server_command(args: str) -> str:
+    """A server command as a person on the server's machine runs it: ./mnema.sh in the folder of
+    install.sh for the server in Docker, the mnema command elsewhere (a developer's serve)."""
+    from .config import Settings
+
+    return ("./mnema.sh " if Settings().container else "mnema ") + args
+
+
 def node_url(port: int, address: Callable[[], str | None] = node_address) -> str | None:
-    """This server's address in an invitation: the one given with `mnema invite --url`
+    """This server's address in an invitation: the one given with `./mnema.sh invite --url`
     (install_setup.saved_url), else MNEMA_URL (the server image's environment), else this
     computer's network address (address — node_address) and port, never inside a container,
     whose network is its own; None when there is none."""

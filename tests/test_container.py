@@ -103,7 +103,7 @@ def test_the_address_given_to_mnema_invite_wins_and_is_remembered(container, mon
     _data, _started = container
     out = start(monkeypatch, capsys)
     assert invite_in(out) is None
-    assert "mnema invite --url http://АДРЕС:ПОРТ" in out
+    assert "./mnema.sh invite --url http://АДРЕС:ПОРТ" in out
     with pytest.raises(SystemExit):
         cli("invite")
 
@@ -169,3 +169,28 @@ def test_the_installer_learns_a_free_port_and_the_hosts_address(monkeypatch, cap
     monkeypatch.setattr(node, "interfaces", lambda: [])
     install_setup.main()
     assert capsys.readouterr().out.split()[0].isdigit()
+
+
+def test_the_server_names_its_commands_as_run_on_its_machine(container, monkeypatch, capsys):
+    """The server's machine has no mnema command: the container's output and its start log say
+    ./mnema.sh (the folder of install.sh)."""
+    import logging
+    from unittest.mock import patch
+
+    data, _started = container
+    monkeypatch.delenv("MNEMA_MODEL")
+    monkeypatch.delenv("MNEMA_API_KEY")
+    start(monkeypatch, capsys)
+    cli("devices")
+    assert "Новое приглашение: ./mnema.sh invite" in capsys.readouterr().out
+    logger = logging.getLogger("mnema")
+    handlers = logger.handlers[:]
+    try:
+        with patch("uvicorn.run"):
+            cli("serve", "--host", "127.0.0.1", "--dir", str(data))
+    finally:
+        for handler in logger.handlers[:]:
+            if handler not in handlers:
+                logger.removeHandler(handler)
+                handler.close()
+    assert "Задайте её командой ./mnema.sh model" in " ".join(capsys.readouterr().out.split())

@@ -3,19 +3,9 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-# Messages in Russian for a Russian interface language (looked up as mnema.i18n.detect does),
-# English otherwise.
-RU=""
-for value in "${MNEMA_UI_LANG:-}" "${LC_ALL:-}" "${LC_MESSAGES:-}" "${LANG:-}"; do
-  value="${value//[[:space:]]/}"
-  if [ -n "$value" ]; then
-    case "$value" in [Rr][Uu]*) RU=1;; esac
-    break
-  fi
-done
-
-# say ENGLISH RUSSIAN
-say() { if [ -n "$RU" ]; then printf '%s\n' "$2"; else printf '%s\n' "$1"; fi; }
+# say, SERVER_DIR, server_commands
+# shellcheck source=scripts/common.sh
+source scripts/common.sh
 
 # usage [server|client]: the short overview, or one mode's options
 usage() {
@@ -25,7 +15,7 @@ usage() {
 Использование: ./install.sh server [--url http://адрес:порт] [--build] [--swap-size 4G]
 
 Ставит сервер Mnema в Docker (нужен Docker Engine с Compose). Настройки и данные — в
-~/mnema-server, команда mnema выполняет там mnema model, invite, devices и update.
+~/mnema-server (или MNEMA_SERVER_DIR), команды сервера — ./mnema.sh в этой папке.
 
   --url АДРЕС      адрес, по которому сервер видят устройства, например домен; запоминается.
                    Без него — адрес этого компьютера в сети
@@ -57,7 +47,7 @@ HELP
 Usage: ./install.sh server [--url http://address:port] [--build] [--swap-size 4G]
 
 Installs the Mnema server in Docker (Docker Engine with Compose is needed). Settings and data go
-to ~/mnema-server, and the mnema command runs mnema model, invite, devices and update there.
+to ~/mnema-server (or MNEMA_SERVER_DIR); the server's commands are ./mnema.sh in this folder.
 
   --url URL        the address devices use to reach the server, such as a domain; remembered.
                    Without it, this machine's network address
@@ -131,8 +121,8 @@ as_root() {
 
 OS="$(uname -s)"
 
-# The server: a container from compose.yaml in ~/mnema-server, data in ~/mnema-server/data, and
-# the host command ~/.local/bin/mnema (scripts/server-command.sh). Nothing else on this machine.
+# The server: a container from compose.yaml in ~/mnema-server, data in ~/mnema-server/data.
+# Nothing else on this machine: its commands are ./mnema.sh in this folder.
 if [ "$MODE" = server ]; then
   if ! command -v docker >/dev/null || ! docker compose version >/dev/null 2>&1; then
     say "The server runs in Docker. Install Docker Engine with the Compose plugin: https://docs.docker.com/engine/install/" \
@@ -166,9 +156,9 @@ if [ "$MODE" = server ]; then
     as_root bash "$PWD/scripts/setup-swap.sh" "$SWAP_SIZE"
   fi
 
-  DIR="$HOME/mnema-server"
+  DIR="$SERVER_DIR"
   NAME="${MNEMA_NAME:-mnema}"
-  # the published image is pulled on every start (mnema update); one built here or given in
+  # the published image is pulled on every start (./mnema.sh update); one built here or given in
   # MNEMA_IMAGE is used as it is
   IMAGE="${MNEMA_IMAGE:-ghcr.io/fozt/mnema:latest}" PULL=never
   if [ -n "$BUILD" ]; then
@@ -180,8 +170,8 @@ if [ "$MODE" = server ]; then
   fi
 
   # The port is picked once; the image tells a free one and this computer's address, looked up
-  # on the host's network by the same rule as mnema invite (node.node_address). The detected
-  # address goes to MNEMA_URL on every install; --url is remembered by mnema invite --url and
+  # on the host's network by the same rule as ./mnema.sh invite (node.node_address). The detected
+  # address goes to MNEMA_URL on every install; --url is remembered by ./mnema.sh invite --url and
   # wins over it (node.node_url).
   PORT="" FREE="" ADDRESS="" DETECTED=""
   if [ -f "$DIR/.env" ]; then PORT="$(sed -n 's/^MNEMA_PORT=//p' "$DIR/.env" | tail -n 1)"; fi
@@ -207,35 +197,31 @@ if [ "$MODE" = server ]; then
   ZONE="$(readlink /etc/localtime 2>/dev/null | sed -n 's|.*/zoneinfo/||p')"
   printf '%s\n' "MNEMA_NAME=$NAME" "MNEMA_IMAGE=$IMAGE" "MNEMA_PULL=$PULL" "MNEMA_PORT=$PORT" \
     "MNEMA_URL=$DETECTED" "MNEMA_TZ=$ZONE" "MNEMA_UID=$uid" "MNEMA_GID=$gid" > "$DIR/.env"
-  { sed -n 1p "$PWD/scripts/server-command.sh"; printf 'DIR=%q\n' "$DIR"; sed 1d "$PWD/scripts/server-command.sh"; } > "$DIR/mnema"
-  chmod 755 "$DIR/mnema"
   docker compose -f "$DIR/compose.yaml" up -d --wait
-
+  # the command of 0.3.1, $DIR/mnema, and its link; never a file or link of someone else
   link="$HOME/.local/bin/mnema"
-  mnema="$link"
-  if [ -e "$link" ] && ! [ -L "$link" ]; then
-    mnema="$DIR/mnema"  # someone else's file: left alone
-    say "$link is taken by another file. Run Mnema as $mnema" "$link занят другим файлом. Запускайте Mnema так: $mnema"
-  else
-    mkdir -p "$HOME/.local/bin"
-    ln -sfn "$DIR/mnema" "$link"
+  if [ -L "$link" ] && [ "$(readlink "$link")" = "$DIR/mnema" ]; then rm -f "$link"; fi
+  if [ -f "$DIR/mnema" ] && ! [ -L "$DIR/mnema" ] \
+    && grep -q "^# The mnema command on the server's machine" "$DIR/mnema"; then
+    rm -f "$DIR/mnema"
   fi
 
-  "$mnema" model --show
+  ./mnema.sh model --show
   answer=n
   if [ -t 0 ] && [ -t 1 ]; then
     if [ -n "$RU" ]; then read -r -p "Выбрать модель для названия и пересказа сейчас? [Y/n] " answer
     else read -r -p "Choose the model for titles and summaries now? [Y/n] " answer; fi
   fi
   case "$answer" in
-    [Nn]*) say "The model can be chosen later: mnema model" "Модель можно выбрать позже: mnema model";;
-    *) "$mnema" model || true;;
+    [Nn]*) say "The model can be chosen later: ./mnema.sh model" "Модель можно выбрать позже: ./mnema.sh model";;
+    *) ./mnema.sh model || true;;
   esac
   echo
   say "The server listens on port $PORT." "Сервер принимает подключения на порту $PORT."
-  if [ -n "$URL" ]; then "$mnema" invite --url "$URL"; else "$mnema" invite; fi
-  say "Commands: mnema invite, mnema devices, mnema model, mnema update. Log: docker logs -f $NAME" \
-    "Команды: mnema invite, mnema devices, mnema model, mnema update. Журнал: docker logs -f $NAME"
+  if [ -n "$URL" ]; then ./mnema.sh invite --url "$URL"; else ./mnema.sh invite; fi
+  echo
+  say "The server's commands, in $PWD:" "Команды сервера, в папке $PWD:"
+  server_commands
   exit 0
 fi
 

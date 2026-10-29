@@ -29,7 +29,7 @@
   "The update package has no locked Mnema version": "В пакете обновления нет зафиксированной версии Mnema",
   "The new Mnema version failed the start check": "Новая версия Mnema не прошла проверку запуска",
   "A Mnema update is already running": "Обновление Mnema уже идёт",
-  "The update installs the Mnema app, and there is none here. The server is updated on its machine: mnema update": "Обновление ставит приложение Mnema, а здесь его нет. Сервер обновляется на своей машине: mnema update",
+  "The update installs the Mnema app, and there is none here. The server is updated on its machine: ./mnema.sh update": "Обновление ставит приложение Mnema, а здесь его нет. Сервер обновляется на своей машине: ./mnema.sh update",
   "Couldn't update. Reinstall Mnema": "Не удалось обновить. Переустановите Mnema",
   "Downloading Mnema {version}…": "Скачиваю Mnema {version}…",
   "Preparing the new version…": "Готовлю новую версию…",
