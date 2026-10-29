@@ -61,6 +61,7 @@ _FREE = ("toggle_record", "quit", "quit_now", "choose_server")
 _FREE_PREFIXES = ("hotkey:", "hotkey_busy:")  # the hotkey field and its registration answer
 _FOLDER_PREFIXES = ("record:",)  # an action on a feed recording: reread the feed
 _ENV_EVERY_S = 2.0  # menu environment (server, models), at most this often
+_REDRAWS = ("change", "tick")  # events that only redraw the panel
 
 
 class Channel:
@@ -259,9 +260,9 @@ class Engine:
         self.channel = channel
         self.platform = ProtocolPlatform(channel)
         self.events: queue.SimpleQueue[tuple[str, Any]] = queue.SimpleQueue()
-        self.rt = runtime(
-            on_change=lambda: self.events.put(("change", None)), platform=self.platform
-        )
+        self._waiting: set[str] = set()  # redraws queued or held, not yet handled
+        self._held: dict[str, tuple[str, Any]] = {}  # redraws put aside for app input; loop only
+        self.rt = runtime(on_change=lambda: self._redraw("change"), platform=self.platform)
         self._root = root
         self._open = False  # panel open: faster ticks for live source levels
         self._line = ""  # last state sent
@@ -274,6 +275,26 @@ class Engine:
         self._env_rev = -1
         self._done = threading.Event()
 
+    def _redraw(self, kind: str) -> None:
+        """A tick or a change; while one is still waiting, a second is not queued: a slow redraw
+        (a large library) must not pile them up in front of a click, "Quit Mnema" among them."""
+        if kind not in self._waiting:
+            self._waiting.add(kind)
+            self.events.put((kind, None))
+
+    def _next(self) -> tuple[str, Any]:
+        """The next event: app input and signals in their order, a waiting redraw after them."""
+        block = not self._held
+        while True:
+            try:
+                item = self.events.get(block=block)
+            except queue.Empty:
+                return self._held.pop(next(iter(self._held)))
+            if item[0] not in _REDRAWS:
+                return item
+            self._held[item[0]] = item
+            block = False
+
     def run(self, stdin: Iterable[str]) -> None:
         self.rt.start_sync()
         self.send_state()  # before reading: the first action must find its keys shown
@@ -281,10 +302,12 @@ class Engine:
         threading.Thread(target=self._timer, daemon=True, name="mnema-timer").start()
         try:
             while not self.rt.can_exit:
-                kind, msg = self.events.get()
+                kind, msg = self._next()
+                self._waiting.discard(kind)  # before the redraw: a later change queues again
                 try:
                     self._on(kind, msg)
-                    self.send_state()
+                    if not self.rt.can_exit:  # quitting: the panel closes, nothing to draw
+                        self.send_state()
                 except Exception:  # noqa: BLE001 - one failed event does not stop the engine
                     logger.exception("engine: event %s", kind)
         finally:
@@ -310,7 +333,7 @@ class Engine:
 
     def _timer(self) -> None:
         while not self._done.wait(0.1 if self._open else 1.0):
-            self.events.put(("tick", None))
+            self._redraw("tick")
 
     def _allowed(self, key: str) -> bool:
         """Shown by the panel or a notification, the hotkey, quit; "open:" and "reveal:" of an

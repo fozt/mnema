@@ -13,6 +13,7 @@ import os
 import queue
 import re
 import signal
+import socket
 import subprocess
 import sys
 import threading
@@ -38,6 +39,7 @@ from mnema.bar.protocol import (
     FormMsg,
     FormOp,
     NotifyMsg,
+    PanelMsg,
     QuitMsg,
     SettingsMsg,
     StateMsg,
@@ -459,6 +461,50 @@ def test_quit_mid_recording_saves_it_without_processing(monkeypatch, tmp_path, q
     assert card.state is RecordState.UNPROCESSED and (card.path / "mic.wav").exists()
 
 
+def test_quit_from_open_panel_does_not_wait_behind_slow_redraws(tmp_path, notes) -> None:
+    """A library this large takes longer to read than the panel's ticks: "Quit Mnema" waits only
+    for the redraw already running, not for the ticks that came meanwhile (a real case: 7 s)."""
+
+    def large_library() -> Path:  # longer than the 2 s between rereads: every redraw rereads it
+        time.sleep(2.1)
+        return notes
+
+    out = _Out()
+    runtime = functools.partial(BarRuntime, prefs_file=tmp_path / "bar.json")
+    thread, app = _start(Engine(Channel(out), runtime=runtime, root=large_library))
+    with app:
+        out.until(lambda m: isinstance(m, StateMsg))
+        app.write(_line(PanelMsg(open=True)))
+        time.sleep(1)  # ticks every 0.1 s while the redraw for the open panel runs
+        asked = time.monotonic()
+        app.write(_line(ActionMsg(key="quit")))
+        out.until(lambda m: isinstance(m, QuitMsg), timeout=15)
+        took = time.monotonic() - asked
+    thread.join(timeout=10)
+    assert not thread.is_alive()
+    assert took < 2.6  # one redraw at most
+
+
+def _silent_server() -> tuple[socket.socket, threading.Event]:
+    """A server that takes connections and never answers; the event: someone connected."""
+    srv = socket.socket()
+    srv.bind(("127.0.0.1", 0))
+    srv.listen()
+    came = threading.Event()
+    held: list[socket.socket] = []
+
+    def accept() -> None:
+        while True:
+            try:
+                held.append(srv.accept()[0])
+            except OSError:
+                return
+            came.set()
+
+    threading.Thread(target=accept, daemon=True).start()
+    return srv, came
+
+
 _ENGINE = [sys.executable, "-m", "mnema.bar", "--headless"]
 
 
@@ -599,3 +645,37 @@ def test_windows_speak_english_in_an_english_interface() -> None:
     )  # fmt: skip
     assert [c.title for c in part.ask.langs] == ["Automatic", "Russian", "English"]
     assert (title.ask.title, confirm.ask.cancel) == ("Recording title", "Cancel")
+
+
+def test_real_process_quits_at_once_while_the_server_does_not_answer(tmp_path) -> None:
+    """The connected server takes the connection and stays silent (sync and the server check
+    hang): Quit Mnema from the open panel still ends the engine at once, sync is not waited for."""
+    srv, came = _silent_server()
+    env = _engine_env(tmp_path) | {
+        "MNEMA_RUNNER": f"http://127.0.0.1:{srv.getsockname()[1]}",
+        "MNEMA_UPDATE_URL": "https://127.0.0.1:1/latest",  # the update check stays local
+    }
+    pipe = subprocess.PIPE
+    try:
+        with subprocess.Popen(
+            _ENGINE, stdin=pipe, stdout=pipe, stderr=pipe, text=True, env=env
+        ) as proc:
+            assert proc.stdin is not None and proc.stdout is not None
+            try:
+                assert isinstance(OUTGOING.validate_json(proc.stdout.readline()), StateMsg)
+                proc.stdin.write(_line(PanelMsg(open=True)))
+                proc.stdin.flush()
+                assert came.wait(timeout=30)  # the engine is waiting for the server
+                time.sleep(1)
+                asked = time.monotonic()
+                proc.stdin.write(_line(ActionMsg(key="quit")))
+                proc.stdin.flush()
+                code = proc.wait(timeout=30)
+                took = time.monotonic() - asked
+            finally:
+                proc.kill()
+            msgs = [OUTGOING.validate_json(line) for line in proc.stdout.read().splitlines()]
+    finally:
+        srv.close()
+    assert code == 0 and isinstance(msgs[-1], QuitMsg)
+    assert took < 1.5
