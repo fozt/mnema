@@ -41,6 +41,7 @@ import java.time.ZoneId
 import java.util.Locale
 import kotlin.math.roundToInt
 import kotlin.math.roundToLong
+import kotlin.coroutines.CoroutineContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -57,7 +58,14 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-class RecordingsViewModel(private val store: RecordingStore, private val zone: ZoneId, private val sync: SyncController? = null) : ViewModel() {
+class RecordingsViewModel(
+    private val store: RecordingStore,
+    private val zone: ZoneId,
+    private val sync: SyncController? = null,
+    // the chosen server runs another Mnema version: which side to update, above the sync errors
+    serverNotice: Flow<String?> = flowOf(null),
+    private val compute: CoroutineContext = Dispatchers.Default,
+) : ViewModel() {
     val query = MutableStateFlow("")
     // null means all recordings, the empty string means recordings in the root without a section.
     val section = MutableStateFlow<String?>(null)
@@ -65,12 +73,13 @@ class RecordingsViewModel(private val store: RecordingStore, private val zone: Z
     val syncStatus: StateFlow<SyncStatus> = sync?.status ?: MutableStateFlow(SyncStatus())
     val resolving = MutableStateFlow(false)
     val trash: StateFlow<Boolean> = store.trashAvailable
-    val failure = combine(store.failure, syncStatus) { local, remote ->
-        (listOfNotNull(local) + remote.errors).distinct().joinToString("\n").ifBlank { null }
+    val failure = combine(store.failure, syncStatus, serverNotice) { local, remote, notice ->
+        (listOfNotNull(local, notice) + remote.errors).distinct().joinToString("\n").ifBlank { null }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), null)
-    val groups: StateFlow<List<DayGroup>?> = combine(store.items, query, section) { items, text, group ->
-        groupByDay(filterRecordings(items, text, group), LocalDate.now(zone), zone)
-    }.flowOn(Dispatchers.Default)
+    // null until the first scan of the folders: the list shows nothing rather than "No recordings yet"
+    val groups: StateFlow<List<DayGroup>?> = combine(store.items, store.loaded, query, section) { items, loaded, text, group ->
+        if (loaded) groupByDay(filterRecordings(items, text, group), LocalDate.now(zone), zone) else null
+    }.flowOn(compute)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), null)
 
     /** Delete audio of processed recordings: first a confirmation with the number of recordings and the space. */
@@ -202,6 +211,7 @@ class RecordingViewModel(
     private val handle: SavedStateHandle,
     settings: Flow<Settings> = flowOf(Settings()),
     private val loadAsr: suspend (Settings) -> List<AsrOption> = { fallbackAsrChoices() },
+    private val io: CoroutineContext = Dispatchers.IO,
 ) : ViewModel() {
     private val follower = FolderFollower(root, File(handle.get<String>(FOLDER_ARG).orEmpty()), recording = handle[IDENTITY_ARG])
     private val _deleted = MutableStateFlow(false)
@@ -246,7 +256,7 @@ class RecordingViewModel(
         val item = (state.value as? DetailState.Shown)?.detail?.item ?: return
         if (item.recordingNow || !isProcessing(item.state)) return
         viewModelScope.launch {
-            withContext(Dispatchers.IO) { processing.cancel(item.dir) }
+            withContext(io) { processing.cancel(item.dir) }
             store.refresh()
         }
     }
@@ -254,7 +264,7 @@ class RecordingViewModel(
     fun reprocess(options: ReprocessOptions) {
         val dir = (state.value as? DetailState.Shown)?.detail?.item?.dir ?: return
         viewModelScope.launch {
-            val target = withContext(Dispatchers.IO) { processing.reprocess(dir, options) }
+            val target = withContext(io) { processing.reprocess(dir, options) }
             when {
                 target == null -> _failure.value = REPROCESS_FAILED
                 target.absoluteFile != dir.absoluteFile -> _opened.value = target
@@ -312,7 +322,7 @@ class RecordingViewModel(
     private fun schedule(summaryOnly: Boolean) {
         val dir = (state.value as? DetailState.Shown)?.detail?.item?.dir ?: return
         viewModelScope.launch {
-            val accepted = withContext(Dispatchers.IO) { processing.enqueue(dir, summaryOnly) }
+            val accepted = withContext(io) { processing.enqueue(dir, summaryOnly) }
             if (!accepted) _failure.value = NOT_ACCEPTED
             store.refresh()
         }
@@ -321,7 +331,7 @@ class RecordingViewModel(
     // a recording deleted from here stays on screen while the screen leaves
     private suspend fun load(settings: Settings): DetailState {
         currentSettings = settings
-        val dir = withContext(Dispatchers.IO) { follower.current() }
+        val dir = withContext(io) { follower.current() }
         val detail = dir?.let { store.detail(it) } ?: return lastShown?.takeIf { _deleted.value } ?: DetailState.Gone
         handle[FOLDER_ARG] = detail.item.dir.path
         handle[IDENTITY_ARG] = detail.item.id

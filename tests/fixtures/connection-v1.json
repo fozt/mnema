@@ -83,6 +83,7 @@
   "capabilities": [
     {"status": 200, "body": "{\"ok\": true, \"llm\": false}", "answer": "mnema"},
     {"status": 200, "body": "{\"ok\": true, \"llm\": true, \"name\": \"Сервер\"}", "answer": "mnema"},
+    {"status": 200, "body": "{\"ok\": true, \"llm\": true, \"name\": \"Сервер\", \"version\": \"0.3.2\"}", "answer": "mnema"},
     {"status": 200, "body": "{\"ok\": true}", "answer": "not_mnema"},
     {"status": 200, "body": "{\"ok\": true, \"name\": \"Сервер\"}", "answer": "not_mnema"},
     {"status": 200, "body": "{\"llm\": false}", "answer": "not_mnema"},
@@ -100,5 +101,20 @@
     {"status": 503, "body": "", "answer": "no_answer"},
     {"status": 500, "body": "{\"ok\": true, \"llm\": false}", "answer": "no_answer"},
     {"status": 502, "body": "<html>bad gateway</html>", "answer": "no_answer"}
+  ],
+  "versions": [
+    {"server": "0.3.1", "app": "0.3.1", "gap": null},
+    {"server": "0.3.2", "app": "0.3.0", "gap": null},
+    {"server": "0.3.0", "app": "0.3.17", "gap": null},
+    {"server": "0.4.0", "app": "0.3.1", "gap": "app"},
+    {"server": "1.0.0", "app": "0.9.9", "gap": "app"},
+    {"server": "0.10.0", "app": "0.9.0", "gap": "app"},
+    {"server": "0.2.5", "app": "0.3.1", "gap": "server"},
+    {"server": "0.9.0", "app": "1.0.0", "gap": "server"},
+    {"server": null, "app": "0.4.0", "gap": null},
+    {"server": "", "app": "0.4.0", "gap": null},
+    {"server": "dev", "app": "0.4.0", "gap": null},
+    {"server": "\u0660.\u0664.\u0660", "app": "0.3.1", "gap": null},
+    {"server": 3, "app": "0.4.0", "gap": null}
   ]
 }

@@ -252,6 +252,8 @@ claude mcp add mnema -- "$(dirname "$(readlink ~/.local/bin/mnema)")/mnema-mcp"
 - **No microphone or call audio:** allow Mnema in *System Settings → Privacy & Security →
   Microphone* and *Screen & System Audio Recording*.
 - **The phone can't start the helper:** turn on Wi-Fi debugging and stay on Wi-Fi.
+- **"Update the app" or "Update the server":** the app and the server run different Mnema
+  versions (the first two numbers differ). Update the side the notice names.
 
 ## Development
 

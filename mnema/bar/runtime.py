@@ -384,6 +384,7 @@ class BarRuntime:
         self.server_auth = True  # False: the server answered 401/403
         self.server_name: str | None = None  # the server node name from capabilities
         self.server_llm = False  # the server node writes titles and summaries itself
+        self.server_version: str | None = None  # the server's Mnema version from capabilities
         self.server_model: str | None = None  # its model without the key (Mac: "Process on")
         self.hotkey_error = ""  # the shortcut did not fit or could not be registered
         self.env_rev = 0  # grows when the menu environment changes (models, server, token)
@@ -546,6 +547,7 @@ class BarRuntime:
             server_llm=self.server_llm,
             server_model=self.server_model,
             server_records=self._server_records(),
+            server_version=self.server_version,
             model=node_settings.model() if _base.STANDALONE else None,
             mac=_base.STANDALONE,
             asr_choices=self._asr_choices,
@@ -600,6 +602,7 @@ class BarRuntime:
         if url is None:
             self.server_ok, self.server_auth = False, True
             self.server_name, self.server_llm, self.server_model = None, False, None
+            self.server_version = None
             return
 
         def ping() -> None:
@@ -611,7 +614,10 @@ class BarRuntime:
             ok = caps is not None and auth
             if caps is None:  # no answer: what is known about it stays
                 name, llm, model = self.server_name, self.server_llm, self.server_model
+                version = self.server_version
             else:
+                found = caps.get("version")
+                version = found if isinstance(found, str) else None
                 name = caps.get("name")
                 name = (name.strip()[:40] or None) if isinstance(name, str) else None
                 llm = caps.get("llm") is True
@@ -622,13 +628,14 @@ class BarRuntime:
                 self._load_asr_choices()
             if not status:
                 ok, auth = self.server_ok, self.server_auth
-            now = (ok, auth, name, llm, model)
+            now = (ok, auth, name, llm, model, version)
             if now != (
                 self.server_ok,
                 self.server_auth,
                 self.server_name,
                 self.server_llm,
                 self.server_model,
+                self.server_version,
             ):
                 (
                     self.server_ok,
@@ -636,6 +643,7 @@ class BarRuntime:
                     self.server_name,
                     self.server_llm,
                     self.server_model,
+                    self.server_version,
                 ) = now
                 self._env_changed()
 
@@ -1440,6 +1448,7 @@ class BarRuntime:
         if flow.result is not None:
             self.server_ok, self.server_auth = flow.result
             self.server_name, self.server_llm, self.server_model = None, False, None
+            self.server_version = None
         self._env_changed()
         self._check_server_async(status=False)
         if not _base.STANDALONE or self.prefs.where == Where.SERVER:
@@ -1508,6 +1517,7 @@ class BarRuntime:
         self._load_asr_choices()  # the recognition list came from the server
         self.server_ok, self.server_auth = False, True
         self.server_name, self.server_llm, self.server_model = None, False, None
+        self.server_version = None
         self.state.sync_missing, self.state.sync_errors = [], []
         self._library_changed()
         self._env_changed()

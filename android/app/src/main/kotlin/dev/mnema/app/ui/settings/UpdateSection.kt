@@ -144,6 +144,7 @@ fun UpdateGroup(graph: AppGraph, modifier: Modifier = Modifier) {
         updates.permissionChanged()
         onPauseOrDispose {}
     }
+    val notice by graph.serverNotice.collectAsStateWithLifecycle(null)
     val zone = ZoneId.systemDefault()
     val row = rowState(updates.versionName, stage, checkedAt, LocalDate.now(zone), zone, recording)
     SettingsGroup(TITLE, modifier) {
@@ -161,6 +162,11 @@ fun UpdateGroup(graph: AppGraph, modifier: Modifier = Modifier) {
         }
         if (row.progress != null || row.busy) {
             UpdateProgress(row.progress, Modifier.padding(start = TEXT_INSET, end = 16.dp, bottom = 12.dp))
+        }
+        // the chosen server runs another Mnema version: which side to update, next to the app's update
+        notice?.let {
+            Text(it, Modifier.padding(start = TEXT_INSET, end = 16.dp, bottom = 12.dp),
+                color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
         }
     }
 }

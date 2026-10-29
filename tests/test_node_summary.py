@@ -16,7 +16,7 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
 
-from mnema import config, ops
+from mnema import __version__, config, ops
 from mnema.job_queue import JobQueue
 from mnema.llm import claude, limits, providers
 from mnema.server import create_app
@@ -115,7 +115,7 @@ def test_node_without_model_answers_no_model(tmp_path, monkeypatch):
     _no_model(monkeypatch)
     client = TestClient(create_app(tmp_path))
     response = client.get("/api/capabilities")
-    assert response.json() == {"ok": True, "llm": False, "name": "studio"}
+    assert response.json() == {"ok": True, "llm": False, "name": "studio", "version": __version__}
     assert client.get("/api/node/settings").json()["model"] is None
 
 

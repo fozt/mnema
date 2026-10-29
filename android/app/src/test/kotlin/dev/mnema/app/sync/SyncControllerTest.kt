@@ -3,6 +3,7 @@ package dev.mnema.app.sync
 import dev.mnema.app.recordings.FolderRecordingStore
 import dev.mnema.app.server.RunnerClient
 import dev.mnema.app.server.parseConnection
+import dev.mnema.app.server.versionNotice
 import dev.mnema.app.settings.NodeEntry
 import dev.mnema.app.settings.Settings
 import dev.mnema.app.ui.recordings.RecordingsViewModel
@@ -16,6 +17,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -160,5 +162,38 @@ class SyncControllerTest {
         assertEquals(listOf("Неизвестно состояние записи"), controller.runOnce().errors)
         assertEquals(0, clients)
         assertFalse(File(tmp.root, "sync.json").exists())
+    }
+
+    /** The chosen server runs another Mnema version: the list says which side to update, and the sync errors stay under it. */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test fun anotherServerVersionIsSaidAboveTheSyncErrorsInTheList() {
+        Dispatchers.setMain(UnconfinedTestDispatcher())
+        try {
+            runBlocking {
+                val library = TestLibrary().apply { before = { response(503) } }
+                MockWebServer().use { server ->
+                    server.dispatcher = library
+                    server.start()
+                    val connection = parseConnection(server.url("/").toString().trimEnd('/') + "#token=t")
+                    val root = tmp.newFolder("client")
+                    val http = RunnerClient.defaultHttp()
+                    try {
+                        val store = FolderRecordingStore(root, this, { null }, { false }, Dispatchers.Unconfined)
+                        val sync = SyncController(root, File(tmp.root, "sync.json"), { connection }, { emptySet() }, { error("unexpected trash") }, {},
+                            clientFactory = { LibraryClient(it, http) })
+                        val notice = MutableStateFlow<String?>(null)
+                        val model = RecordingsViewModel(store, ZoneId.of("UTC"), sync, notice)
+                        val errors = sync.runOnce().errors
+                        assertTrue(errors.isNotEmpty())
+                        withTimeout(5_000) {
+                            assertEquals(errors.joinToString("\n"), model.failure.first { it != null })
+                            notice.value = versionNotice("0.4.0", "0.3.1")
+                            val said = (listOf("На сервере новая версия Mnema 0.4.0. Обновите приложение") + errors).joinToString("\n")
+                            assertEquals(said, model.failure.first { it != errors.joinToString("\n") })
+                        }
+                    } finally { http.dispatcher.executorService.shutdown(); http.connectionPool.evictAll() }
+                }
+            }
+        } finally { Dispatchers.resetMain() }
     }
 }

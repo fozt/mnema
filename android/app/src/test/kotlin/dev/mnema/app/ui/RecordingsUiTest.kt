@@ -44,6 +44,7 @@ import dev.mnema.app.ui.components.durationLabel
 import dev.mnema.app.ui.recordings.CleanupDialog
 import dev.mnema.app.ui.recordings.DetailAction
 import dev.mnema.app.ui.recordings.RecordingsViewModel
+import dev.mnema.app.ui.recordings.DayGroup
 import dev.mnema.app.ui.recordings.DetailState
 import dev.mnema.app.ui.recordings.FolderFollower
 import dev.mnema.app.ui.recordings.filterRecordings
@@ -79,7 +80,6 @@ import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.ZoneId
 import java.util.TimeZone
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
@@ -87,6 +87,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.Assert.assertEquals
@@ -611,14 +612,14 @@ class RecordingsUiTest {
                 val settings = settingsFor("http://chosen-node:9000")
                 var offline = false
                 val choices = listOf(AsrOption("node-asr-new", "Новый движок узла"))
-                val store = FolderRecordingStore(root, CoroutineScope(Dispatchers.Unconfined), { null }, { false }, Dispatchers.Unconfined)
+                val store = FolderRecordingStore(root, backgroundScope, { null }, { false }, Dispatchers.Unconfined)
                 val model = RecordingViewModel(store, scheduler, root,
                     SavedStateHandle(mapOf(RecordingViewModel.FOLDER_ARG to dir.path)), flowOf(settings),
                     loadAsr = { current ->
                         assertEquals(settings.connection, current.connection)
                         if (offline) throw IOException("нет ответа")
                         choices
-                    })
+                    }, io = Dispatchers.Unconfined)
                 backgroundScope.launch { model.state.collect {} }
                 store.refresh()
                 val shown = model.state.first { it is DetailState.Shown } as DetailState.Shown
@@ -655,8 +656,8 @@ class RecordingsUiTest {
                     override fun reprocess(dir: File, options: ReprocessOptions): File? = dir
                     override fun cancel(dir: File) = Unit
                 }
-                val store = FolderRecordingStore(root, CoroutineScope(Dispatchers.Unconfined), { null }, { false }, Dispatchers.Unconfined)
-                val model = RecordingViewModel(store, scheduler, root, SavedStateHandle(mapOf(RecordingViewModel.FOLDER_ARG to dir.path)))
+                val store = FolderRecordingStore(root, backgroundScope, { null }, { false }, Dispatchers.Unconfined)
+                val model = RecordingViewModel(store, scheduler, root, SavedStateHandle(mapOf(RecordingViewModel.FOLDER_ARG to dir.path)), io = Dispatchers.Unconfined)
                 backgroundScope.launch { model.state.collect {} }
                 store.refresh()
                 model.state.first { it is DetailState.Shown }
@@ -701,6 +702,30 @@ class RecordingsUiTest {
 
     @OptIn(ExperimentalCoroutinesApi::class)
     @Test
+    fun theListIsEmptyOnlyAfterTheFirstScanFoundNothing() {
+        Dispatchers.setMain(UnconfinedTestDispatcher())
+        try {
+            runTest {
+                val root = tmp.newFolder("Mnema")
+                val store = FolderRecordingStore(root, backgroundScope, { null }, { false }, Dispatchers.Unconfined)
+                val model = RecordingsViewModel(store, zone, compute = Dispatchers.Unconfined)
+                backgroundScope.launch { model.groups.collect {} }
+                runCurrent()
+                // not scanned yet: the screen shows no "No recordings yet"
+                assertNull(model.groups.value)
+
+                store.refresh()
+                assertEquals(emptyList<DayGroup>(), model.groups.first { it != null })
+
+                WavFixture.write(File(File(root, "2026-10-21_14-35").apply { mkdirs() }, "mic.wav"), WavFixture.samples(1.0))
+                store.refresh()
+                assertEquals(listOf("2026-10-21_14-35"), model.groups.first { !it.isNullOrEmpty() }!!.flatMap { it.items }.map { it.dir.name })
+            }
+        } finally { Dispatchers.resetMain() }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
     fun cleanupIsConfirmedFirstAndThenSaysHowManyRecordingsLostTheirSound() {
         Dispatchers.setMain(UnconfinedTestDispatcher())
         try {
@@ -713,7 +738,7 @@ class RecordingsUiTest {
                 Meta.appendRun(dir, JsonObject(mapOf("status" to JsonPrimitive("ok"))))
                 val trashed = mutableListOf<String>()
                 var onServer = false
-                val store = FolderRecordingStore(root, CoroutineScope(Dispatchers.Unconfined), { null }, { false }, Dispatchers.Unconfined,
+                val store = FolderRecordingStore(root, backgroundScope, { null }, { false }, Dispatchers.Unconfined,
                     trash = { trashed += it.name; it.delete() }, textsOnServer = { { onServer } })
                 val model = RecordingsViewModel(store, zone)
 
@@ -773,8 +798,8 @@ class RecordingsUiTest {
 
             override fun cancel(dir: File) = Unit
         }
-        val store = FolderRecordingStore(root, CoroutineScope(Dispatchers.Unconfined), { null }, { false }, Dispatchers.Unconfined)
-        val model = RecordingViewModel(store, scheduler, root, SavedStateHandle(mapOf(RecordingViewModel.FOLDER_ARG to dir.path)))
+        val store = FolderRecordingStore(root, backgroundScope, { null }, { false }, Dispatchers.Unconfined)
+        val model = RecordingViewModel(store, scheduler, root, SavedStateHandle(mapOf(RecordingViewModel.FOLDER_ARG to dir.path)), io = Dispatchers.Unconfined)
         backgroundScope.launch { model.state.collect {} }
         store.refresh()
         model.state.first { it is DetailState.Shown }

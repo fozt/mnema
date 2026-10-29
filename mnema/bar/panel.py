@@ -8,6 +8,7 @@ import re
 import textwrap
 from datetime import datetime, timedelta
 
+from ..connection import VersionGap, version_gap
 from ..i18n import _, fmt_bar_panel
 from ..live.meta import UNFINISHED, RecordState
 from .protocol import (
@@ -353,17 +354,31 @@ def panel_model(
     # the server refuses the token: sync and processing share the trouble, so one notice with a
     # button and no "Sync: …" about the same thing
     refused = env.server is not None and not env.server_auth
+    # another Mnema version on the server: which side to update, above its own sync errors (they
+    # may have another cause, such as the server being down)
+    gap = version_gap(env.server_version) if env.server is not None and not refused else None
     if refused:
         text = _("The server no longer accepts this device. Get a new invitation from the server")
         connect = Button(key="server_setup", title=_("Connect…"))
         notices.append(Notice(text=text, buttons=[connect]))
-    else:
+    elif gap is VersionGap.APP:
+        text = _("The server runs Mnema {server}. Update the app", server=env.server_version)
+        update = [Button(key="update", title=_("Update"), enabled=not state.busy)]
+        offered = env.update and not env.update_step
+        notices.append(Notice(text=text, buttons=update if offered else []))
+    elif gap is VersionGap.SERVER:
+        text = _(
+            "The server runs Mnema {server}, older than this app. Update the server",
+            server=env.server_version,
+        )
+        notices.append(Notice(text=text))
+    if not refused:
         notices.extend(
             Notice(text=_("Sync: {error}", error=_after_colon(e))) for e in state.sync_errors
         )
     if env.update_step:
         notices.append(Notice(kind="info", text=env.update_step))
-    elif env.update:
+    elif env.update and gap is not VersionGap.APP:  # else the version notice has the button
         update = Button(key="update", title=_("Update"), enabled=not state.busy)
         notices.append(
             Notice(

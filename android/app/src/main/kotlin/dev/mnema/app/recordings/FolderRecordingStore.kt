@@ -63,6 +63,7 @@ class FolderRecordingStore(
     // progress of the last step, so the card keeps the upload and server share between steps
     private val lastStep = ConcurrentHashMap<File, ProcessingState>()
     private val shown = MutableStateFlow<List<RecordingItem>>(emptyList())
+    private val scannedOnce = MutableStateFlow(false)
     private val scanning = Mutex()
     private val groups = MutableStateFlow<List<String>>(emptyList())
     private val problem = MutableStateFlow<String?>(null)
@@ -72,6 +73,7 @@ class FolderRecordingStore(
     override val failure: StateFlow<String?> = problem.asStateFlow()
 
     override val items: StateFlow<List<RecordingItem>> = shown.asStateFlow()
+    override val loaded: StateFlow<Boolean> = scannedOnce.asStateFlow()
 
     override fun refresh() = refresh(clearFailure = true)
 
@@ -83,6 +85,7 @@ class FolderRecordingStore(
                     if (clearFailure) problem.value = null
                     publish()
                 } catch (e: IOException) { problem.value = e.message ?: tr("Could not read the recordings") }
+                scannedOnce.value = true
             }
         }
     }

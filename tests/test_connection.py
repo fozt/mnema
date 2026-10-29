@@ -9,7 +9,7 @@ import httpx
 import pytest
 
 from mnema.client import MnemaClient
-from mnema.connection import format_connection, format_invite, parse_connection
+from mnema.connection import format_connection, format_invite, parse_connection, version_gap
 
 FIXTURE = json.loads(
     (Path(__file__).parent / "fixtures/connection-v1.json").read_text(encoding="utf-8")
@@ -50,6 +50,15 @@ def test_mnema_server_is_recognised_as_on_the_phone(case):
     answer, _ = client.probe()
     assert answer == case["answer"]
     assert (client.health() is not None) is (case["answer"] == "mnema")
+
+
+@pytest.mark.parametrize(
+    "case", FIXTURE["versions"], ids=lambda case: f"{case['server']} vs {case['app']}"
+)
+def test_versions_differing_in_major_minor_say_which_side_to_update(case):
+    """The same rule as the phone: a patch difference is fine, an unknown server version is not
+    judged."""
+    assert version_gap(case["server"], case["app"]) == case["gap"]
 
 
 def test_token_goes_only_into_the_bearer_header():

@@ -19,7 +19,6 @@ import dev.mnema.app.ui.recordings.isProcessing
 import dev.mnema.app.ui.recordings.RecordingViewModel
 import java.io.File
 import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
@@ -67,9 +66,9 @@ class RecordingViewModelTest {
         val root = tmp.newFolder("Mnema")
         val dir = File(root, "2026-10-21_14-35").apply { mkdirs() }
         WavFixture.write(File(dir, "mic.wav"), WavFixture.samples(1.0))
-        val store = FolderRecordingStore(root, CoroutineScope(Dispatchers.Unconfined), { null }, { false }, Dispatchers.Unconfined)
+        val store = FolderRecordingStore(root, backgroundScope, { null }, { false }, Dispatchers.Unconfined)
         val scheduler = Refusing()
-        val model = RecordingViewModel(store, scheduler, root, SavedStateHandle(mapOf(RecordingViewModel.FOLDER_ARG to dir.path)))
+        val model = RecordingViewModel(store, scheduler, root, SavedStateHandle(mapOf(RecordingViewModel.FOLDER_ARG to dir.path)), io = Dispatchers.Unconfined)
         backgroundScope.launch { model.state.collect {} }
         store.refresh()
         model.state.first { it is DetailState.Shown }
@@ -108,9 +107,9 @@ class RecordingViewModelTest {
         Meta.ensureRecording(dir, "run") { null }
         ProcessStateFile.write(dir, ProcessState(id = "run", stage = ProcessStage.FAILED, problem = "Mac mini недоступен",
             job = "job", key = "key", options = options, since = outcomeKey(Meta.read(dir))))
-        val store = FolderRecordingStore(root, CoroutineScope(Dispatchers.Unconfined), { null }, { false }, Dispatchers.Unconfined)
+        val store = FolderRecordingStore(root, backgroundScope, { null }, { false }, Dispatchers.Unconfined)
         val scheduler = Recorded()
-        val model = RecordingViewModel(store, scheduler, root, SavedStateHandle(mapOf(RecordingViewModel.FOLDER_ARG to dir.path)))
+        val model = RecordingViewModel(store, scheduler, root, SavedStateHandle(mapOf(RecordingViewModel.FOLDER_ARG to dir.path)), io = Dispatchers.Unconfined)
         backgroundScope.launch { model.state.collect {} }
         store.refresh()
         model.state.first { it is DetailState.Shown }
@@ -147,8 +146,8 @@ class RecordingViewModelTest {
         WavFixture.write(File(dir, "mic.wav"), WavFixture.samples(1.0, listOf(0.1 to 0.9)))
         Meta.ensureRecording(dir, "record") { Meta.isoNow(1792582500000, TimeZone.getTimeZone("GMT+03:00")) }
         var working = false
-        val store = FolderRecordingStore(root, CoroutineScope(Dispatchers.Unconfined), { null }, { working }, Dispatchers.Unconfined)
-        val model = RecordingViewModel(store, Recorded(), root, SavedStateHandle(mapOf(RecordingViewModel.FOLDER_ARG to dir.path)))
+        val store = FolderRecordingStore(root, backgroundScope, { null }, { working }, Dispatchers.Unconfined)
+        val model = RecordingViewModel(store, Recorded(), root, SavedStateHandle(mapOf(RecordingViewModel.FOLDER_ARG to dir.path)), io = Dispatchers.Unconfined)
         backgroundScope.launch { model.state.collect {} }
         store.refresh()
         model.state.first { it is DetailState.Shown }
@@ -179,8 +178,8 @@ class RecordingViewModelTest {
         val dir = File(root, "2026-10-21_14-35").apply { mkdirs() }
         WavFixture.write(File(dir, "mic.wav"), WavFixture.samples(1.0, listOf(0.1 to 0.9)))
         Meta.ensureRecording(dir, "record") { Meta.isoNow(1792582500000, TimeZone.getTimeZone("GMT+03:00")) }
-        val store = FolderRecordingStore(root, CoroutineScope(Dispatchers.Unconfined), { null }, { false }, Dispatchers.Unconfined)
-        val model = RecordingViewModel(store, Recorded(), root, SavedStateHandle(mapOf(RecordingViewModel.FOLDER_ARG to dir.path)))
+        val store = FolderRecordingStore(root, backgroundScope, { null }, { false }, Dispatchers.Unconfined)
+        val model = RecordingViewModel(store, Recorded(), root, SavedStateHandle(mapOf(RecordingViewModel.FOLDER_ARG to dir.path)), io = Dispatchers.Unconfined)
         backgroundScope.launch { model.state.collect {} }
         store.refresh()
         val shown = model.state.first { it is DetailState.Shown } as DetailState.Shown
@@ -218,7 +217,7 @@ class RecordingViewModelTest {
                 ProcessStateFile.write(dir, stopped(requireNotNull(ProcessStateFile.read(dir))))
             }
         }
-        val model = RecordingViewModel(store, scheduler, root, SavedStateHandle(mapOf(RecordingViewModel.FOLDER_ARG to dir.path)))
+        val model = RecordingViewModel(store, scheduler, root, SavedStateHandle(mapOf(RecordingViewModel.FOLDER_ARG to dir.path)), io = Dispatchers.Unconfined)
         backgroundScope.launch { model.state.collect {} }
         store.refresh()
         model.state.first { it is DetailState.Shown && it.actions.lead == DetailAction.STOP }
