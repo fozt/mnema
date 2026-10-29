@@ -27,6 +27,7 @@ import mockwebserver3.RecordedRequest
 import mockwebserver3.SocketEffect
 import org.junit.After
 import org.junit.Assert.*
+import org.junit.Assume.assumeFalse
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -726,6 +727,33 @@ class LibrarySyncTest {
         val errors = run().errors
         assertTrue(errors.toString(), "Не все локальные записи удалось прочитать; удаления отложены" in errors)
         assertEquals(2, errors.size); assertTrue(trashed.isEmpty())
+    }
+
+    @Test fun recordingLeftUnderATemporaryNameKeepsTheGeneralMessageNextToANestedOne() {
+        val (outer, _) = synced("Звонок")
+        val (inner, _) = synced("Внутри")
+        val (renaming, id) = synced("Дейли")
+        Files.move(inner.toPath(), File(outer, "Внутри").toPath())
+        Files.move(renaming.toPath(), File(root, ".mnema-rename-Дейли").toPath())
+        busy += id // its folder cannot be restored yet
+        val errors = run().errors
+        assertTrue(errors.toString(), "Не все локальные записи удалось прочитать; удаления отложены" in errors)
+        assertEquals(2, errors.size); assertTrue(trashed.isEmpty()); assertEquals(3, library.records.size)
+    }
+
+    @Test fun summaryMdThatCannotBeRenamedIsNeverDeletedAnywhere() {
+        val (folder, id) = synced()
+        Files.move(File(folder, "summary.txt").toPath(), File(folder, "summary.md").toPath())
+        checkpoint.writeText(checkpoint.readText().replace("\"summary.txt\"", "\"summary.md\""))
+        assertTrue(folder.setWritable(false))
+        try {
+            assumeFalse("root writes a read-only folder", folder.canWrite())
+            library.requests.clear()
+            assertTrue(run().errors.isNotEmpty())
+        } finally { folder.setWritable(true) }
+        assertEquals(emptyList<String>(), library.requests.map { it.method }.filter { it != "GET" })
+        assertEquals("пересказ", remote(id).files.getValue(FileName.SUMMARY).text)
+        assertEquals("пересказ", File(folder, "summary.md").readText())
     }
 
     @Test fun syncErrorsAreEnglishInAnEnglishInterface() {

@@ -1255,3 +1255,26 @@ def test_summary_md_of_an_earlier_version_becomes_summary_txt_without_changes(pa
     assert not gone.exists() and [r.path for r in pair.app.state.library.manifest().records] == [
         "record"
     ]
+
+
+@pytest.mark.parametrize("side", ["here", "server"])
+def test_summary_md_that_cannot_be_renamed_keeps_the_summary_everywhere(pair, side):
+    """A read-only folder keeps its summary.md: sync waits for it and deletes no summary on
+    either side, the server lists no recording it cannot read in full."""
+    folder, _ = synced(pair, "record")
+    remote = server_folder(pair, json.loads((folder / FileName.META).read_text())["id"])
+    for each in (folder, remote):
+        (each / FileName.SUMMARY).rename(each / "summary.md")
+    pair.checkpoint.write_text(pair.checkpoint.read_text().replace('"summary.txt"', '"summary.md"'))
+    stuck = folder if side == "here" else remote
+    stuck.chmod(0o555)
+    try:
+        if os.access(stuck, os.W_OK):
+            pytest.skip("root can write a read-only folder")
+        pair.transport.requests.clear()
+        assert run(pair).errors
+    finally:
+        stuck.chmod(0o755)
+    assert [method for method, _ in pair.transport.requests if method != "GET"] == []
+    for each in (folder, remote):
+        assert (each / FileName.SUMMARY).exists() or (each / "summary.md").exists()

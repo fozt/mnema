@@ -14,6 +14,7 @@
   "The recording has no meta": "У записи нет meta",
   "{error}: “{path}”": "{error}: «{path}»",
   "Could not read “{path}”": "Не удалось прочитать «{path}»",
+  "Couldn't rename summary.md to summary.txt": "Не удалось переименовать summary.md в summary.txt",
   "Could not get the full library list: {error}": "Не удалось получить полный список библиотеки: {error}",
   "Recording not found": "Запись не найдена",
   "A recording cannot go inside another recording": "Запись нельзя поместить внутрь другой записи",

@@ -269,6 +269,8 @@ fun scan(root: File, busy: Set<String>, sections: Set<String> = emptySet(), reco
             }
             inner(folders)?.let { nested += it; complete = false; blocked += relative; return }
             val texts = if (RecordingFolder.migrateSummary(folder)) names + FileName.SUMMARY.fileName else names
+            // listed without its summary the recording would look as if the summary was deleted
+            if (RecordingFolder.LEGACY_SUMMARY in texts && FileName.SUMMARY.fileName !in texts) throw java.io.IOException("summary.md was not renamed")
             if (texts.any { it in TEXTS } || FileName.META.fileName in names) {
                 FileName.entries.forEach { recordFile(base, relative, it) }
                 ensureIdentity(folder)
@@ -288,7 +290,7 @@ fun scan(root: File, busy: Set<String>, sections: Set<String> = emptySet(), reco
         if (base.canonicalFile != base) throw SyncException(tr("The Mnema folder was replaced with a link"))
         // a recording under a temporary name is not missing: restore it first; if it stays, the scan is incomplete and its id is kept
         restoreRenames(renamingFolders(base), busy)
-        if (renamingFolders(base).any { it.parentFile == base && Files.isDirectory(it.toPath(), NOFOLLOW_LINKS) || Files.isRegularFile(File(it, FileName.META.fileName).toPath(), NOFOLLOW_LINKS) }) complete = false
+        if (renamingFolders(base).any { it.parentFile == base && Files.isDirectory(it.toPath(), NOFOLLOW_LINKS) || Files.isRegularFile(File(it, FileName.META.fileName).toPath(), NOFOLLOW_LINKS) }) { complete = false; readable = false }
         list(base).forEach { if (!hidden(it.name) && isDirectory(it)) visit(it, 1) }
     } catch (_: java.io.IOException) { complete = false; readable = false; blocked += "." }
     Scan(Manifest(result, found), complete, blocked, nested = nested, deep = deep, withoutFiles = withoutFiles, readable = readable)

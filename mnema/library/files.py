@@ -105,7 +105,7 @@ class LibraryFiles:
                         raise LibraryError(
                             503, _("There is another recording inside the recording")
                         )
-                    migrate_summary(path, files)
+                    migrate_summary(path, files, strict=True)
                     record = self._record(path)
                     if record.id in ids:
                         raise LibraryError(503, _("Two recordings in the library have the same id"))

@@ -188,7 +188,7 @@ def scan(
                 result.complete = False
                 result.blocked_paths.append(relative)
                 return
-            files = migrate_summary(folder, files)
+            files = migrate_summary(folder, files, strict=True)
             if files & TEXTS or FileName.META in files:
                 # Even a meta-only recording may be a download in progress; it must not be lost.
                 for name in FileName:

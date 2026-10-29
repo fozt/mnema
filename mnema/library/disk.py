@@ -110,10 +110,12 @@ def listing(folder: Path) -> tuple[set[str], list[Path]]:
     return files, folders
 
 
-def migrate_summary(folder: Path, files: set[str]) -> set[str]:
+def migrate_summary(folder: Path, files: set[str], *, strict: bool = False) -> set[str]:
     """summary.md of earlier versions becomes summary.txt the first time the recording is read;
     files are the folder's file names, returned as they are after the rename. An existing
-    summary.txt wins and the old file is left alone."""
+    summary.txt wins and the old file is left alone. strict (sync, the server library): a failed
+    rename raises LibraryError 503, since the recording listed without its summary would look
+    as if the summary was deleted."""
     target = folder / FileName.SUMMARY
     if LEGACY_SUMMARY not in files or FileName.SUMMARY in files or target.is_symlink():
         return files
@@ -122,6 +124,8 @@ def migrate_summary(folder: Path, files: set[str]) -> set[str]:
         fsync_dir(folder)
     except OSError as error:
         logger.warning("Could not rename summary.md in %s: %s", folder, error)
+        if strict:
+            raise LibraryError(503, _("Couldn't rename summary.md to summary.txt")) from error
         return files
     return files - {LEGACY_SUMMARY} | {FileName.SUMMARY}
 
