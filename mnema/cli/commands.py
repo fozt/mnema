@@ -1275,14 +1275,13 @@ def cmd_serve(args) -> None:
     root = Path(args.dir).expanduser() if args.dir else Path.cwd()
     app = create_app(root)
     shown_host = "127.0.0.1" if args.host == "0.0.0.0" else args.host
+    url = f"http://{shown_host}:{port}"
+    if Settings().container:  # devices reach the published port, not the container's own
+        from ..node import node_url
+
+        url = node_url(port) or url
     _cli.console.print(
-        _(
-            "[{accent}]Mnema server[/]: http://{host}:{port}, folder {root}",
-            accent=ACCENT,
-            host=shown_host,
-            port=port,
-            root=root,
-        )
+        _("[{accent}]Mnema server[/]: {url}, folder {root}", accent=ACCENT, url=url, root=root)
     )
     if token:
         _cli.console.print(_("[{accent}]🔒 token sign-in[/] (server token)", accent=ACCENT))

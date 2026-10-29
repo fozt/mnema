@@ -36,7 +36,7 @@
     "{n} дорожек · {size}"
   ],
   "MNEMA_TOKEN is not set — the API is open without authorization!": "MNEMA_TOKEN не задан — API открыт без авторизации!",
-  "[{accent}]Mnema server[/]: http://{host}:{port}, folder {root}": "[{accent}]Сервер Mnema[/]: http://{host}:{port}, папка {root}",
+  "[{accent}]Mnema server[/]: {url}, folder {root}": "[{accent}]Сервер Mnema[/]: {url}, папка {root}",
   "Name": "Имя",
   "Added": "Добавлено",
   "Last seen": "Последний раз",

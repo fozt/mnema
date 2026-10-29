@@ -14,7 +14,9 @@ services:
     ports:
       - "${MNEMA_PORT:-8000}:8000"
     environment:
-      # the address devices reach the server at, for invitations
+      # this computer's address for invitations (an address given with --url wins over it)
       MNEMA_URL: ${MNEMA_URL:-}
+      # the host's time zone: the time an invitation is valid until
+      TZ: ${MNEMA_TZ:-UTC}
     volumes:
       - ./data:/data

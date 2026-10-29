@@ -89,6 +89,10 @@ elif name == "mv":
     shutil.move(args[-2], args[-1])
 elif name == "chown":
     pass
+elif name == "readlink":  # the host's time zone
+    print("/usr/share/zoneinfo/Europe/Berlin")
+elif name == "systemctl":  # a server of 0.3.0 is this unit
+    sys.exit(0 if args == ["cat", "mnema.service"] and os.environ.get("FAKE_OLD_SERVICE") else 1)
 elif name == "docker":
     project = pathlib.Path(args[2]).parent if args[:2] == ["compose", "-f"] else None
     pulled = pathlib.Path(os.environ["FAKE_BIN"]).parent / "pulled"
@@ -108,15 +112,29 @@ elif name == "docker":
         print(os.environ.get("FAKE_HOST", "43117 203.0.113.7"))
     elif rest[:1] == ["config"]:
         print(settings()["MNEMA_IMAGE"])
+    elif args[:1] == ["tag"]:  # back to the previous image
+        assert args[1] == "sha256:old"
+        pulled.unlink()
     elif rest[:1] == ["up"]:
         assert settings()["MNEMA_PORT"] and (project / "data").is_dir()
-        if settings()["MNEMA_PULL"] == "always":  # compose.yaml: pull_policy
+        if settings()["MNEMA_PULL"] == "always" and "never" not in rest:  # pull_policy, --pull
             pulled.touch()
+        if pulled.exists() and os.environ.get("FAKE_BROKEN_IMAGE"):
+            sys.exit(1)  # the new image never becomes healthy
     elif rest[:1] == ["exec"]:
         command = [a for a in rest[1:] if a != "-T"]
         assert command[:2] == ["mnema", "mnema"], command
-        if command[2:4] == ["invite", "--url"]:
-            print(command[4] + "#invite=one-time-code")
+        saved = project / "data/config/mnema/server.json"
+        if command[2:4] == ["invite", "--url"]:  # remembered (install_setup.save_url)
+            saved.parent.mkdir(parents=True, exist_ok=True)
+            saved.write_text(json.dumps({"url": command[4]}))
+        if command[2:3] == ["invite"]:  # node.node_url
+            url = settings()["MNEMA_URL"]
+            if saved.exists():
+                url = json.loads(saved.read_text())["url"]
+            if not url:
+                sys.exit("Give --url")
+            print(url + "#invite=one-time-code")
         elif command[2:] == ["--version"]:
             print("mnema 9.9.9")
 elif name in ("ip", "ifconfig"):
@@ -178,6 +196,8 @@ def system(tmp_path):
         "mv",
         "docker",
         "chown",
+        "readlink",
+        "systemctl",
         "ip",
         "ifconfig",
         "xcode-select",
@@ -347,8 +367,7 @@ def test_server_runs_in_docker_and_writes_only_its_folder_and_command(system):
         ["run", "--rm", "--network", "host", image, "python", "-m", "mnema.install_setup", "host"],
         compose(system, "up", "-d", "--wait"),
         compose(system, "exec", "-T", "mnema", "mnema", "model", "--show"),
-        compose(system, "exec", "-T", "mnema", "mnema", "invite", "--url",
-                "http://203.0.113.7:43117"),
+        compose(system, "exec", "-T", "mnema", "mnema", "invite"),
     ]  # fmt: skip
     assert not [c for c in calls(system) if c[0] in ("uv", "apt-get", "sudo", "chown")]
     folder = server_dir(system)
@@ -358,6 +377,7 @@ def test_server_runs_in_docker_and_writes_only_its_folder_and_command(system):
         "MNEMA_PULL": "always",
         "MNEMA_PORT": "43117",
         "MNEMA_URL": "http://203.0.113.7:43117",
+        "MNEMA_TZ": "Europe/Berlin",
         "MNEMA_UID": "1000",
         "MNEMA_GID": "1000",
     }
@@ -371,19 +391,26 @@ def test_server_runs_in_docker_and_writes_only_its_folder_and_command(system):
     }  # fmt: skip
     assert Path(os.readlink(Path(env["HOME"]) / ".local/bin/mnema")) == folder / "mnema"
     assert "http://203.0.113.7:43117#invite=one-time-code" in done.stdout
+    assert "Сервер принимает подключения на порту 43117." in done.stdout
     assert "Модель можно выбрать позже: mnema model" in done.stdout  # no terminal to ask in
     assert "docker logs -f mnema" in done.stdout
 
 
-def test_reinstall_keeps_the_port_and_takes_a_new_address(system):
+def test_reinstall_keeps_the_port_and_the_address_given_with_url(system):
     """The port is picked once: devices keep reaching the same one. --url is the address devices
-    reach the server at (a domain, a forwarded port)."""
+    reach the server at (a domain, a forwarded port): remembered, later installs keep it, while
+    the detected address follows the network."""
     assert installer(system, "server").returncode == 0
-    system[1]["FAKE_HOST"] = "45000 203.0.113.7"
+    system[1]["FAKE_HOST"] = "45000 203.0.113.8"
     done = installer(system, "server", "--url", "http://mnema.example.org:8443")
     assert done.returncode == 0, done.stderr
+    assert "http://mnema.example.org:8443#invite=one-time-code" in done.stdout
+    assert "Сервер принимает подключения на порту 43117." in done.stdout
+    system[1]["FAKE_HOST"] = "45000 203.0.113.9"
+    done = installer(system, "server")
+    assert done.returncode == 0, done.stderr
     assert compose_env(system)["MNEMA_PORT"] == "43117"
-    assert compose_env(system)["MNEMA_URL"] == "http://mnema.example.org:8443"
+    assert compose_env(system)["MNEMA_URL"] == "http://203.0.113.9:43117"
     assert "http://mnema.example.org:8443#invite=one-time-code" in done.stdout
 
 
@@ -393,6 +420,24 @@ def test_server_without_an_address_asks_for_one_and_starts_nothing(system):
     assert done.returncode != 0
     assert "./install.sh server --url http://АДРЕС:43117" in done.stdout
     assert not [c for c in docker(system) if "up" in c]
+    assert not server_dir(system).exists()
+
+
+def test_server_without_an_address_reinstalls_with_the_remembered_one(system):
+    assert installer(system, "server", "--url", "http://mnema.example.org:8443").returncode == 0
+    system[1]["FAKE_HOST"] = "45000"
+    done = installer(system, "server")
+    assert done.returncode == 0, done.stderr
+    assert "http://mnema.example.org:8443#invite=one-time-code" in done.stdout
+
+
+def test_server_of_an_earlier_version_is_stopped_first(system):
+    """0.3.0 ran the server as the systemd service mnema: the installer starts no second one."""
+    system[1]["FAKE_OLD_SERVICE"] = "1"
+    done = installer(system, "server")
+    assert done.returncode != 0
+    assert "Сначала остановите её: sudo systemctl disable --now mnema" in done.stdout
+    assert docker(system)[-1] == ["info"]
     assert not server_dir(system).exists()
 
 
@@ -500,6 +545,28 @@ def test_host_update_pulls_the_image_and_recreates_the_container(system, built_h
         expected.insert(-1, ["image", "rm", "sha256:old"])
     assert docker(system) == expected
     assert "mnema 9.9.9" in done.stdout
+    assert ("не скачивается: сервер перезапускается с ним как есть" in done.stdout) is built_here
+
+
+def test_host_update_goes_back_when_the_new_image_does_not_start(system):
+    """A new image that never becomes healthy: the previous one is tagged back and runs again."""
+    root, env = system
+    assert installer(system, "server").returncode == 0
+    Path(env["FAKE_LOG"]).write_text("")
+    (root / "pulled").unlink(missing_ok=True)
+    env["FAKE_BROKEN_IMAGE"] = "1"
+    done = host_command(system, "update")
+    assert done.returncode != 0
+    image = "ghcr.io/fozt/mnema:latest"
+    assert docker(system) == [
+        compose(system, "config", "--images"),
+        ["image", "inspect", "-f", "{{.Id}}", image],
+        compose(system, "up", "-d", "--wait"),
+        ["image", "inspect", "-f", "{{.Id}}", image],
+        ["tag", "sha256:old", image],
+        compose(system, "up", "-d", "--wait", "--pull", "never"),
+    ]
+    assert "Новая версия не запустилась. Возвращаю прежнюю." in done.stdout
 
 
 def client_sync(*extras: str) -> list[str]:
@@ -943,6 +1010,17 @@ def test_install_links_the_mnema_command(system, args):
     assert done.returncode == 0, done.stderr
     command = server_dir(system) / "mnema" if args[0] == "server" else app_env(system) / "bin/mnema"
     assert Path(os.readlink(link)) == command
+
+
+def test_client_on_the_server_machine_leaves_the_servers_command(system):
+    """One machine, both roles: mnema stays the server's command (mnema invite, mnema devices);
+    the app's command is run by its full path."""
+    assert installer(system, "server").returncode == 0
+    done = installer(system, "client")
+    assert done.returncode == 0, done.stderr
+    link = Path(system[1]["HOME"]) / ".local/bin/mnema"
+    assert Path(os.readlink(link)) == server_dir(system) / "mnema"
+    assert f"Запускайте Mnema так: {app_env(system) / 'bin/mnema'}" in done.stdout
 
 
 def test_server_leaves_a_foreign_mnema_command_alone(system):

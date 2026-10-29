@@ -42,8 +42,9 @@ usage() {
 ghcr.io/fozt/mnema:latest и ставит команду mnema: она выполняет mnema model, mnema invite и
 mnema devices в контейнере, а mnema update скачивает новый образ и пересоздаёт контейнер.
 Порт выбирается один раз и сохраняется для последующих установок.
---url: адрес, по которому сервер видят устройства, например домен или проброшенный порт. Без него
-приглашение ведёт на адрес этого компьютера в сети: Tailscale, публичный, домашний.
+--url: адрес, по которому сервер видят устройства, например домен или проброшенный порт; он
+запоминается для следующих установок и приглашений. Без него приглашение ведёт на адрес этого
+компьютера в сети: Tailscale, публичный, домашний.
 --build: собрать образ из этой папки, а не скачивать.
 --swap-size: создать swap от 1G до 64G (G = GiB), только на Linux.
 Команда mnema — ссылка ~/.local/bin/mnema на эту установку.
@@ -73,8 +74,9 @@ from the image ghcr.io/fozt/mnema:latest and adds the mnema command: it runs mne
 mnema invite and mnema devices in the container, and mnema update pulls the new image and
 recreates the container.
 The port is picked once and kept for later installs.
---url: the address devices reach the server at, such as a domain or a forwarded port. Without it
-the invitation leads to this computer's network address: Tailscale, public, home.
+--url: the address devices reach the server at, such as a domain or a forwarded port; it is
+remembered for later installs and invitations. Without it the invitation leads to this
+computer's network address: Tailscale, public, home.
 --build: build the image from this folder instead of pulling it.
 --swap-size: create swap of 1G to 64G (G = GiB), Linux only.
 The mnema command is the link ~/.local/bin/mnema to this installation.
@@ -140,6 +142,12 @@ if [ "$MODE" = server ]; then
       "Docker не запущен, или этому пользователю он недоступен: https://docs.docker.com/engine/install/linux-postinstall/"
     exit 1
   fi
+  # 0.3.0 ran the server as this systemd service; two servers would share nothing but the name
+  if command -v systemctl >/dev/null && systemctl cat mnema.service >/dev/null 2>&1; then
+    say "A server of an earlier Mnema runs here as the systemd service mnema. Stop it first: sudo systemctl disable --now mnema" \
+      "Здесь работает сервер прежней Mnema, служба systemd mnema. Сначала остановите её: sudo systemctl disable --now mnema"
+    exit 1
+  fi
   if [ -n "$SWAP_SIZE" ]; then
     if [ "$OS" != Linux ]; then
       say "--swap-size is for Linux." "--swap-size только для Linux."
@@ -162,13 +170,15 @@ if [ "$MODE" = server ]; then
   fi
 
   # The port is picked once; the image tells a free one and this computer's address, looked up
-  # on the host's network by the same rule as mnema invite (node.node_address).
-  PORT="" FREE="" ADDRESS=""
+  # on the host's network by the same rule as mnema invite (node.node_address). The detected
+  # address goes to MNEMA_URL on every install; --url is remembered by mnema invite --url and
+  # wins over it (node.node_url).
+  PORT="" FREE="" ADDRESS="" DETECTED=""
   if [ -f "$DIR/.env" ]; then PORT="$(sed -n 's/^MNEMA_PORT=//p' "$DIR/.env" | tail -n 1)"; fi
   read -r FREE ADDRESS < <(docker run --rm --network host "$IMAGE" python -m mnema.install_setup host) || true
   PORT="${PORT:-$FREE}"
-  if [ -z "$URL" ] && [ -n "$ADDRESS" ]; then URL="http://$ADDRESS:$PORT"; fi
-  if [ -z "$URL" ] || [ -z "$PORT" ]; then
+  if [ -n "$ADDRESS" ]; then DETECTED="http://$ADDRESS:$PORT"; fi
+  if [ -z "$PORT" ] || { [ -z "$URL" ] && [ -z "$DETECTED" ] && ! [ -f "$DIR/data/config/mnema/server.json" ]; }; then
     say "The server's network address wasn't found. Give it: ./install.sh server --url http://ADDRESS:${PORT:-PORT}" \
       "Адрес сервера в сети не найден. Укажите его: ./install.sh server --url http://АДРЕС:${PORT:-ПОРТ}"
     exit 1
@@ -183,8 +193,10 @@ if [ "$MODE" = server ]; then
     chown -R "$uid:$gid" "$DIR/data"
   fi
   cp "$PWD/compose.yaml" "$DIR/compose.yaml"
+  # the host's time zone: invitations say until when they are valid in local time
+  ZONE="$(readlink /etc/localtime 2>/dev/null | sed -n 's|.*/zoneinfo/||p')"
   printf '%s\n' "MNEMA_NAME=$NAME" "MNEMA_IMAGE=$IMAGE" "MNEMA_PULL=$PULL" "MNEMA_PORT=$PORT" \
-    "MNEMA_URL=$URL" "MNEMA_UID=$uid" "MNEMA_GID=$gid" > "$DIR/.env"
+    "MNEMA_URL=$DETECTED" "MNEMA_TZ=$ZONE" "MNEMA_UID=$uid" "MNEMA_GID=$gid" > "$DIR/.env"
   { sed -n 1p "$PWD/scripts/server-command.sh"; printf 'DIR=%q\n' "$DIR"; sed 1d "$PWD/scripts/server-command.sh"; } > "$DIR/mnema"
   chmod 755 "$DIR/mnema"
   docker compose -f "$DIR/compose.yaml" up -d --wait
@@ -210,7 +222,8 @@ if [ "$MODE" = server ]; then
     *) "$mnema" model || true;;
   esac
   echo
-  "$mnema" invite --url "$URL"
+  say "The server listens on port $PORT." "Сервер принимает подключения на порту $PORT."
+  if [ -n "$URL" ]; then "$mnema" invite --url "$URL"; else "$mnema" invite; fi
   say "Commands: mnema invite, mnema devices, mnema model, mnema update. Log: docker logs -f $NAME" \
     "Команды: mnema invite, mnema devices, mnema model, mnema update. Журнал: docker logs -f $NAME"
   exit 0

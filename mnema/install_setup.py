@@ -55,9 +55,11 @@ def cli_link() -> Path:
 
 def link_cli(venv: Path) -> bool:
     """Point ~/.local/bin/mnema at the mnema command of the environment ``venv``, replacing the
-    previous link atomically. A file that is not a link is someone else's: left alone, False."""
+    previous link atomically. A file that is not a link is someone else's, a link to the command
+    of the server in Docker (./install.sh server) is the server's: both are left alone, False."""
     link = cli_link()
-    if link.exists() and not link.is_symlink():
+    server = Path.home() / "mnema-server/mnema"
+    if link.exists() and (not link.is_symlink() or link.resolve() == server.resolve()):
         return False
     link.parent.mkdir(parents=True, exist_ok=True)
     draft = link.with_name(f".{link.name}.{os.getpid()}")
