@@ -200,10 +200,11 @@ if [ "$MODE" = server ]; then
   docker compose -f "$DIR/compose.yaml" up -d --wait
   # the command of 0.3.1, $DIR/mnema, and its link; never a file or link of someone else
   link="$HOME/.local/bin/mnema"
-  if [ -L "$link" ]; then
-    case "$(readlink "$link")" in "$DIR"/*) rm -f "$link";; esac
+  if [ -L "$link" ] && [ "$(readlink "$link")" = "$DIR/mnema" ]; then rm -f "$link"; fi
+  if [ -f "$DIR/mnema" ] && ! [ -L "$DIR/mnema" ] \
+    && grep -q "^# The mnema command on the server's machine" "$DIR/mnema"; then
+    rm -f "$DIR/mnema"
   fi
-  if [ -f "$DIR/mnema" ]; then rm -f "$DIR/mnema"; fi
 
   ./mnema.sh model --show
   answer=n

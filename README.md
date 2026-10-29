@@ -247,7 +247,7 @@ claude mcp add mnema -- "$(dirname "$(readlink ~/.local/bin/mnema)")/mnema-mcp"
 
 ## Troubleshooting
 
-- **Log:** `~/.cache/mnema/bar.log` on a computer, `docker logs mnema` on the server.
+- **Log:** `~/.cache/mnema/bar.log` on a computer, `./mnema.sh logs` on the server.
 - **No notifications on a Mac:** allow Mnema in *System Settings → Notifications*.
 - **No microphone or call audio:** allow Mnema in *System Settings → Privacy & Security →
   Microphone* and *Screen & System Audio Recording*.

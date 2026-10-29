@@ -131,8 +131,9 @@ elif name == "docker":
         project = pathlib.Path(
             os.environ.get("MNEMA_SERVER_DIR") or pathlib.Path(os.environ["HOME"]) / "mnema-server"
         )
-        command = [a for a in args[1:] if a != "-it"]
+        command = [a for a in args[1:] if a not in ("-i", "-it")]
         assert command[:2] == [settings()["MNEMA_NAME"], "mnema"], command
+        attached = any(a in ("-i", "-it") for a in args[1:3])  # without -i stdin stays out
         saved = project / "data/config/mnema/server.json"
         if command[2:4] == ["invite", "--url"]:  # remembered (install_setup.save_url)
             saved.parent.mkdir(parents=True, exist_ok=True)
@@ -146,6 +147,8 @@ elif name == "docker":
             print(url + "#invite=one-time-code")
         elif command[2:] == ["--version"]:
             print("mnema 9.9.9")
+        elif command[2:] == ["model"]:  # asks for the key
+            print("key: " + (sys.stdin.readline().strip() if attached else ""))
 elif name in ("ip", "ifconfig"):
     print("1: lo    inet 127.0.0.1/8 scope host lo")
     print("2: eth0    inet 203.0.113.7/24 brd 203.0.113.255 scope global eth0")
@@ -377,8 +380,8 @@ def test_server_runs_in_docker_and_writes_only_its_folder(system):
         ["pull", image],
         ["run", "--rm", "--network", "host", image, "python", "-m", "mnema.install_setup", "host"],
         compose(system, "up", "-d", "--wait"),
-        ["exec", "mnema", "mnema", "model", "--show"],
-        ["exec", "mnema", "mnema", "invite"],
+        ["exec", "-i", "mnema", "mnema", "model", "--show"],
+        ["exec", "-i", "mnema", "mnema", "invite"],
     ]  # fmt: skip
     assert not [c for c in calls(system) if c[0] in ("uv", "apt-get", "sudo", "chown")]
     folder = server_dir(system)
@@ -515,8 +518,19 @@ def test_server_swap_only_when_asked_and_only_on_linux(system, os_name, ok):
     assert len([c for c in calls(system) if c[:2] == ["sudo", "bash"]]) == int(ok)
 
 
-def host_command(system, *args: str, tty: bool = False) -> subprocess.CompletedProcess:
-    """./mnema.sh in the folder of install.sh, from a terminal or from a script."""
+# the head of ~/mnema-server/mnema as ./install.sh server of 0.3.1 wrote it
+OLD_SERVER_COMMAND = """#!/usr/bin/env bash
+DIR=/home/me/mnema-server
+# The mnema command on the server's machine. ./install.sh server copies it to ~/mnema-server/mnema,
+set -euo pipefail
+"""
+
+
+def host_command(
+    system, *args: str, tty: bool = False, given: str | None = None
+) -> subprocess.CompletedProcess:
+    """./mnema.sh in the folder of install.sh, from a terminal or from a script (given — what is
+    piped into it)."""
     root, env = system
     if not (root / "mnema.sh").exists():
         shutil.copy(REPO / "mnema.sh", root / "mnema.sh")
@@ -527,7 +541,8 @@ def host_command(system, *args: str, tty: bool = False) -> subprocess.CompletedP
             env=env,
             capture_output=True,
             text=True,
-            stdin=subprocess.DEVNULL,
+            input=given,
+            stdin=None if given is not None else subprocess.DEVNULL,
         )
     leader, terminal = os.openpty()
     try:
@@ -553,8 +568,16 @@ def test_host_command_runs_mnema_in_the_container(system, tty):
     Path(system[1]["FAKE_LOG"]).write_text("")
     done = host_command(system, "devices", "revoke", "a b", tty=tty)
     assert done.returncode == 0, done.stderr
-    flags = ["-it"] if tty else []
+    flags = ["-it"] if tty else ["-i"]
     assert docker(system) == [["exec", *flags, "mnema", "mnema", "devices", "revoke", "a b"]]
+
+
+def test_host_command_passes_piped_answers_to_the_container(system):
+    """Without a terminal what is piped into ./mnema.sh still reaches the command."""
+    assert installer(system, "server").returncode == 0
+    done = host_command(system, "model", given="AIza-piped\n")
+    assert done.returncode == 0, done.stderr
+    assert done.stdout == "key: AIza-piped\n"
 
 
 def test_host_command_finds_the_server_where_the_installer_put_it(system):
@@ -566,14 +589,16 @@ def test_host_command_finds_the_server_where_the_installer_put_it(system):
     done = installer(system, "server", "--url", "http://127.0.0.1:43117")
     assert done.returncode == 0, done.stderr
     assert not (root / "home/mnema-server").exists()
-    assert ["exec", "mnema-try", "mnema", "invite", "--url", "http://127.0.0.1:43117"] in docker(
-        system
-    )
+    invite = ["exec", "-i", "mnema-try", "mnema", "invite", "--url", "http://127.0.0.1:43117"]
+    assert invite in docker(system)
     del env["MNEMA_NAME"]  # the container's name is the installed one
     Path(env["FAKE_LOG"]).write_text("")
     assert "http://127.0.0.1:43117#invite=" in host_command(system, "invite").stdout
     assert host_command(system, "logs").returncode == 0
-    assert docker(system) == [["exec", "mnema-try", "mnema", "invite"], ["logs", "-f", "mnema-try"]]
+    assert docker(system) == [
+        ["exec", "-i", "mnema-try", "mnema", "invite"],
+        ["logs", "-f", "mnema-try"],
+    ]
 
 
 def test_host_command_without_a_server_says_to_install_it(system):
@@ -1080,12 +1105,27 @@ def test_server_removes_the_command_of_0_3_1(system):
     link = Path(system[1]["HOME"]) / ".local/bin/mnema"
     link.parent.mkdir(parents=True)
     server_dir(system).mkdir()
-    (server_dir(system) / "mnema").write_text("#!/usr/bin/env bash\n")
+    (server_dir(system) / "mnema").write_text(OLD_SERVER_COMMAND)
     link.symlink_to(server_dir(system) / "mnema")
     done = installer(system, "server")
     assert done.returncode == 0, done.stderr
     assert not link.is_symlink()
     assert not (server_dir(system) / "mnema").exists()
+
+
+def test_server_keeps_other_files_in_its_folder_and_links_into_it(system):
+    """Only the command of 0.3.1 and the link to it go: someone's own mnema file in the server's
+    folder and a link to another file there stay."""
+    link = Path(system[1]["HOME"]) / ".local/bin/mnema"
+    link.parent.mkdir(parents=True)
+    server_dir(system).mkdir()
+    (server_dir(system) / "mnema").write_text("#!/bin/sh\necho mine\n")
+    (server_dir(system) / "tool").write_text("#!/bin/sh\n")
+    link.symlink_to(server_dir(system) / "tool")
+    done = installer(system, "server")
+    assert done.returncode == 0, done.stderr
+    assert (server_dir(system) / "mnema").read_text() == "#!/bin/sh\necho mine\n"
+    assert Path(os.readlink(link)) == server_dir(system) / "tool"
 
 
 @pytest.mark.parametrize("foreign", ["file", "link"])

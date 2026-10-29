@@ -60,6 +60,6 @@ elif [ "$1" = update ]; then
   docker exec "$NAME" mnema --version
 elif [ -t 0 ] && [ -t 1 ]; then
   exec docker exec -it "$NAME" mnema "$@"
-else
-  exec docker exec "$NAME" mnema "$@"
+else  # stdin still reaches the command: piped answers to mnema model
+  exec docker exec -i "$NAME" mnema "$@"
 fi
