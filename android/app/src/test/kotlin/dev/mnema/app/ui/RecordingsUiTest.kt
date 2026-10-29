@@ -79,7 +79,6 @@ import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.ZoneId
 import java.util.TimeZone
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
@@ -611,14 +610,14 @@ class RecordingsUiTest {
                 val settings = settingsFor("http://chosen-node:9000")
                 var offline = false
                 val choices = listOf(AsrOption("node-asr-new", "Новый движок узла"))
-                val store = FolderRecordingStore(root, CoroutineScope(Dispatchers.Unconfined), { null }, { false }, Dispatchers.Unconfined)
+                val store = FolderRecordingStore(root, backgroundScope, { null }, { false }, Dispatchers.Unconfined)
                 val model = RecordingViewModel(store, scheduler, root,
                     SavedStateHandle(mapOf(RecordingViewModel.FOLDER_ARG to dir.path)), flowOf(settings),
                     loadAsr = { current ->
                         assertEquals(settings.connection, current.connection)
                         if (offline) throw IOException("нет ответа")
                         choices
-                    })
+                    }, io = Dispatchers.Unconfined)
                 backgroundScope.launch { model.state.collect {} }
                 store.refresh()
                 val shown = model.state.first { it is DetailState.Shown } as DetailState.Shown
@@ -655,8 +654,8 @@ class RecordingsUiTest {
                     override fun reprocess(dir: File, options: ReprocessOptions): File? = dir
                     override fun cancel(dir: File) = Unit
                 }
-                val store = FolderRecordingStore(root, CoroutineScope(Dispatchers.Unconfined), { null }, { false }, Dispatchers.Unconfined)
-                val model = RecordingViewModel(store, scheduler, root, SavedStateHandle(mapOf(RecordingViewModel.FOLDER_ARG to dir.path)))
+                val store = FolderRecordingStore(root, backgroundScope, { null }, { false }, Dispatchers.Unconfined)
+                val model = RecordingViewModel(store, scheduler, root, SavedStateHandle(mapOf(RecordingViewModel.FOLDER_ARG to dir.path)), io = Dispatchers.Unconfined)
                 backgroundScope.launch { model.state.collect {} }
                 store.refresh()
                 model.state.first { it is DetailState.Shown }
@@ -713,7 +712,7 @@ class RecordingsUiTest {
                 Meta.appendRun(dir, JsonObject(mapOf("status" to JsonPrimitive("ok"))))
                 val trashed = mutableListOf<String>()
                 var onServer = false
-                val store = FolderRecordingStore(root, CoroutineScope(Dispatchers.Unconfined), { null }, { false }, Dispatchers.Unconfined,
+                val store = FolderRecordingStore(root, backgroundScope, { null }, { false }, Dispatchers.Unconfined,
                     trash = { trashed += it.name; it.delete() }, textsOnServer = { { onServer } })
                 val model = RecordingsViewModel(store, zone)
 
@@ -773,8 +772,8 @@ class RecordingsUiTest {
 
             override fun cancel(dir: File) = Unit
         }
-        val store = FolderRecordingStore(root, CoroutineScope(Dispatchers.Unconfined), { null }, { false }, Dispatchers.Unconfined)
-        val model = RecordingViewModel(store, scheduler, root, SavedStateHandle(mapOf(RecordingViewModel.FOLDER_ARG to dir.path)))
+        val store = FolderRecordingStore(root, backgroundScope, { null }, { false }, Dispatchers.Unconfined)
+        val model = RecordingViewModel(store, scheduler, root, SavedStateHandle(mapOf(RecordingViewModel.FOLDER_ARG to dir.path)), io = Dispatchers.Unconfined)
         backgroundScope.launch { model.state.collect {} }
         store.refresh()
         model.state.first { it is DetailState.Shown }

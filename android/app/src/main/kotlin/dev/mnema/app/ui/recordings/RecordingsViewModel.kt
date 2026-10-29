@@ -41,6 +41,7 @@ import java.time.ZoneId
 import java.util.Locale
 import kotlin.math.roundToInt
 import kotlin.math.roundToLong
+import kotlin.coroutines.CoroutineContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -202,6 +203,7 @@ class RecordingViewModel(
     private val handle: SavedStateHandle,
     settings: Flow<Settings> = flowOf(Settings()),
     private val loadAsr: suspend (Settings) -> List<AsrOption> = { fallbackAsrChoices() },
+    private val io: CoroutineContext = Dispatchers.IO,
 ) : ViewModel() {
     private val follower = FolderFollower(root, File(handle.get<String>(FOLDER_ARG).orEmpty()), recording = handle[IDENTITY_ARG])
     private val _deleted = MutableStateFlow(false)
@@ -246,7 +248,7 @@ class RecordingViewModel(
         val item = (state.value as? DetailState.Shown)?.detail?.item ?: return
         if (item.recordingNow || !isProcessing(item.state)) return
         viewModelScope.launch {
-            withContext(Dispatchers.IO) { processing.cancel(item.dir) }
+            withContext(io) { processing.cancel(item.dir) }
             store.refresh()
         }
     }
@@ -254,7 +256,7 @@ class RecordingViewModel(
     fun reprocess(options: ReprocessOptions) {
         val dir = (state.value as? DetailState.Shown)?.detail?.item?.dir ?: return
         viewModelScope.launch {
-            val target = withContext(Dispatchers.IO) { processing.reprocess(dir, options) }
+            val target = withContext(io) { processing.reprocess(dir, options) }
             when {
                 target == null -> _failure.value = REPROCESS_FAILED
                 target.absoluteFile != dir.absoluteFile -> _opened.value = target
@@ -312,7 +314,7 @@ class RecordingViewModel(
     private fun schedule(summaryOnly: Boolean) {
         val dir = (state.value as? DetailState.Shown)?.detail?.item?.dir ?: return
         viewModelScope.launch {
-            val accepted = withContext(Dispatchers.IO) { processing.enqueue(dir, summaryOnly) }
+            val accepted = withContext(io) { processing.enqueue(dir, summaryOnly) }
             if (!accepted) _failure.value = NOT_ACCEPTED
             store.refresh()
         }
@@ -321,7 +323,7 @@ class RecordingViewModel(
     // a recording deleted from here stays on screen while the screen leaves
     private suspend fun load(settings: Settings): DetailState {
         currentSettings = settings
-        val dir = withContext(Dispatchers.IO) { follower.current() }
+        val dir = withContext(io) { follower.current() }
         val detail = dir?.let { store.detail(it) } ?: return lastShown?.takeIf { _deleted.value } ?: DetailState.Gone
         handle[FOLDER_ARG] = detail.item.dir.path
         handle[IDENTITY_ARG] = detail.item.id
