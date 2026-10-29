@@ -17,70 +17,72 @@ done
 # say ENGLISH RUSSIAN
 say() { if [ -n "$RU" ]; then printf '%s\n' "$2"; else printf '%s\n' "$1"; fi; }
 
+# usage [server|client]: the short overview, or one mode's options
 usage() {
   if [ -n "$RU" ]; then
-    cat <<'HELP'
+    case "${1:-}" in
+      server) cat <<'HELP'
+Использование: ./install.sh server [--url http://адрес:порт] [--build] [--swap-size 4G]
+
+Ставит сервер Mnema в Docker (нужен Docker Engine с Compose). Настройки и данные — в
+~/mnema-server, команда mnema выполняет там mnema model, invite, devices и update.
+
+  --url АДРЕС      адрес, по которому сервер видят устройства, например домен; запоминается.
+                   Без него — адрес этого компьютера в сети
+  --build          собрать образ из этой папки, а не скачивать
+  --swap-size 4G   добавить swap, от 1G до 64G
+HELP
+      ;;
+      client) cat <<'HELP'
+Использование: ./install.sh client [ПРИГЛАШЕНИЕ]
+
+Ставит приложение Mnema. ПРИГЛАШЕНИЕ — ссылка, которую напечатал сервер, в кавычках:
+  ./install.sh client 'http://server:12345#invite=…'
+Его можно вставить и позже, в настройках приложения: «Сервер».
+HELP
+      ;;
+      *) cat <<'HELP'
 Использование:
-  ./install.sh client [ПРИГЛАШЕНИЕ]
-  ./install.sh server [--url http://адрес:порт] [--build] [--swap-size 4G]
+  ./install.sh server    сервер Mnema на Linux, в Docker
+  ./install.sh client    приложение Mnema на Linux (на Mac проще поставить DMG)
 
-Клиент на Mac обрабатывает записи сам. Модель для названия и пересказа выбирают в настройках
-приложения: «Запись», «Выбрать модель…». С сервером записи видны на телефоне и других
-устройствах, а при «Где обрабатывать» → «На сервере» Mac отправляет записи на подключённый
-сервер, как Linux.
-Клиент на Linux отправляет записи на сервер: распознаёт и пересказывает сервер. Движков у клиента
-нет.
-Приложение ставится в своё окружение ~/.local/share/mnema/app/.venv, а не в .venv этой папки.
-Приглашение, которое напечатал сервер, вставьте в кавычках:
-  ./install.sh client 'http://server:12345#invite=…'
-Приглашение подключает одно устройство и действует 6 часов. Новое выдаёт сам сервер:
-  mnema invite
-Приглашение можно вставить и позднее, в настройках приложения: «Сервер».
-
-Сервер работает в Docker, нужен Docker Engine с Compose. Установщик кладёт compose.yaml и
-настройки в ~/mnema-server, данные в ~/mnema-server/data, запускает контейнер из образа
-ghcr.io/fozt/mnema:latest и ставит команду mnema: она выполняет mnema model, mnema invite и
-mnema devices в контейнере, а mnema update скачивает новый образ и пересоздаёт контейнер.
-Порт выбирается один раз и сохраняется для последующих установок.
---url: адрес, по которому сервер видят устройства, например домен или проброшенный порт; он
-запоминается для следующих установок и приглашений. Без него приглашение ведёт на адрес этого
-компьютера в сети: Tailscale, публичный, домашний.
---build: собрать образ из этой папки, а не скачивать.
---swap-size: создать swap от 1G до 64G (G = GiB), только на Linux.
-Команда mnema — ссылка ~/.local/bin/mnema на эту установку.
+Подробнее: ./install.sh server --help, ./install.sh client --help
+и https://github.com/fozt/mnema#install
 HELP
+      ;;
+    esac
   else
-    cat <<'HELP'
-Usage:
-  ./install.sh client [INVITATION]
-  ./install.sh server [--url http://address:port] [--build] [--swap-size 4G]
+    case "${1:-}" in
+      server) cat <<'HELP'
+Usage: ./install.sh server [--url http://address:port] [--build] [--swap-size 4G]
 
-The Mac client processes recordings itself. The model for titles and summaries is chosen in the
-app settings: "Recording", "Choose model…". With a server the recordings show up on the phone and
-other devices, and with "Where to process" set to "On the server" the Mac sends recordings to the
-connected server, as Linux does.
-The Linux client sends recordings to the server, which transcribes and summarizes them. The
-client has no engines.
-The app goes into its own environment ~/.local/share/mnema/app/.venv, not this folder's .venv.
-Paste the invitation the server printed, in quotes:
-  ./install.sh client 'http://server:12345#invite=…'
-An invitation connects one device and is valid for 6 hours. The server issues new ones:
-  mnema invite
-The invitation can also be pasted later in the app settings: "Server".
+Installs the Mnema server in Docker (Docker Engine with Compose is needed). Settings and data go
+to ~/mnema-server, and the mnema command runs mnema model, invite, devices and update there.
 
-The server runs in Docker and needs Docker Engine with Compose. The installer puts compose.yaml
-and its settings into ~/mnema-server, the data into ~/mnema-server/data, starts the container
-from the image ghcr.io/fozt/mnema:latest and adds the mnema command: it runs mnema model,
-mnema invite and mnema devices in the container, and mnema update pulls the new image and
-recreates the container.
-The port is picked once and kept for later installs.
---url: the address devices reach the server at, such as a domain or a forwarded port; it is
-remembered for later installs and invitations. Without it the invitation leads to this
-computer's network address: Tailscale, public, home.
---build: build the image from this folder instead of pulling it.
---swap-size: create swap of 1G to 64G (G = GiB), Linux only.
-The mnema command is the link ~/.local/bin/mnema to this installation.
+  --url URL        the address devices use to reach the server, such as a domain; remembered.
+                   Without it, this machine's network address
+  --build          build the image from this folder instead of pulling it
+  --swap-size 4G   add swap, 1G to 64G
 HELP
+      ;;
+      client) cat <<'HELP'
+Usage: ./install.sh client [INVITATION]
+
+Installs the Mnema app. INVITATION is the link the server printed, in quotes:
+  ./install.sh client 'http://server:12345#invite=…'
+It can also be pasted later in the app settings: "Server".
+HELP
+      ;;
+      *) cat <<'HELP'
+Usage:
+  ./install.sh server    the Mnema server on Linux, in Docker
+  ./install.sh client    the Mnema app on Linux (on a Mac the DMG is simpler)
+
+More: ./install.sh server --help, ./install.sh client --help
+and https://github.com/fozt/mnema#install
+HELP
+      ;;
+    esac
   fi
 }
 
@@ -94,7 +96,7 @@ BUILD=""
 CONNECTION=""
 while [ $# -gt 0 ]; do
   case "$1" in
-    --help|-h) usage; exit 0;;
+    --help|-h) usage "$MODE"; exit 0;;
     --swap-size)
       if [ $# -lt 2 ] || ! [[ "$2" =~ ^([1-9]|[1-5][0-9]|6[0-4])[Gg]$ ]]; then
         say "--swap-size: 1G to 64G, for example --swap-size 4G" \
@@ -103,24 +105,24 @@ while [ $# -gt 0 ]; do
       fi
       SWAP_SIZE="${2%[Gg]}"; shift 2;;
     --url)
-      if [ "$MODE" != server ] || [ $# -lt 2 ]; then usage; exit 1; fi
+      if [ "$MODE" != server ] || [ $# -lt 2 ]; then usage "$MODE"; exit 1; fi
       if ! [[ "$2" =~ ^https?://[^[:space:]#\$\"\'\\]+$ ]]; then
         say "--url: an address like http://203.0.113.5:38837" "--url: адрес вроде http://203.0.113.5:38837"
         exit 1
       fi
       URL="$2"; shift 2;;
     --build)
-      if [ "$MODE" != server ]; then usage; exit 1; fi
+      if [ "$MODE" != server ]; then usage "$MODE"; exit 1; fi
       BUILD=1; shift;;
-    -*) usage; exit 1;;
-    *) [ -z "$CONNECTION" ] || { usage; exit 1; }; CONNECTION="$1"; shift;;
+    -*) usage "$MODE"; exit 1;;
+    *) [ -z "$CONNECTION" ] || { usage "$MODE"; exit 1; }; CONNECTION="$1"; shift;;
   esac
 done
 if [ "$MODE" != server ] && [ -n "$SWAP_SIZE" ]; then
-  usage; exit 1
+  usage "$MODE"; exit 1
 fi
 if [ "$MODE" != client ] && [ -n "$CONNECTION" ]; then
-  usage; exit 1
+  usage "$MODE"; exit 1
 fi
 
 as_root() {
