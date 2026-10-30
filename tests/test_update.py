@@ -87,7 +87,7 @@ def release(monkeypatch, tmp_path):
 
 def test_check_shows_only_application_version_without_git_or_dependency_resolution(release):
     found = update.check()
-    assert found.any and found.text() == "Mnema 99.0.0"
+    assert found.any and found.release is not None and found.release.version == "99.0.0"
     assert release["commands"] == []
     assert release["calls"] == ["/latest"]
 
@@ -392,6 +392,88 @@ def test_github_release_assets_are_followed_to_their_host_over_https(release, mo
         "https://release-assets.githubusercontent.com/asset/mnema-release.json?sp=r&sig=signed",
         "https://release-assets.githubusercontent.com/asset/mnema-99.0.0.tar.gz?sp=r&sig=signed",
     ]
+
+
+def _refused(request):
+    raise httpx.ConnectError("offline", request=request)
+
+
+@pytest.mark.parametrize(
+    ("answer", "reason"),
+    [
+        (_refused, "Нет связи с сервером обновлений"),
+        (lambda r: httpx.Response(500), "Сервер обновлений ответил ошибкой"),
+        (lambda r: httpx.Response(200, json={"version": "latest"}), "Сервер обновлений ответил"),
+        (lambda r: httpx.Response(404), "Обновления сейчас недоступны"),
+    ],
+)
+def test_failed_check_says_why(release, monkeypatch, answer, reason):
+    monkeypatch.setattr(update, "TRANSPORT", httpx.MockTransport(answer))
+    with pytest.raises(MediaError, match=reason):
+        update.check()
+
+
+def _in_chunks(state, count):
+    """The archive arrives in pieces with its Content-Length, as from the release host."""
+    data = state["archive"]
+    size = -(-len(data) // count)
+    pieces = [data[i : i + size] for i in range(0, len(data), size)]
+    return httpx.Response(200, headers={"content-length": str(len(data))}, content=iter(pieces))
+
+
+def test_download_reports_its_share_and_the_steps_after_it_have_none(release, monkeypatch):
+    handler = update.TRANSPORT.handler
+
+    def chunked(request):
+        if request.url.path == "/archive":
+            return _in_chunks(release, 4)
+        return handler(request)
+
+    monkeypatch.setattr(update, "TRANSPORT", httpx.MockTransport(chunked))
+    steps = []
+
+    update.apply(on=lambda share, message: steps.append((share, message)))
+
+    downloading = "Скачиваю Mnema 99.0.0…"
+    shares = [share for share, message in steps if message == downloading]
+    assert shares[0] is None and shares[-1] == 1.0
+    assert shares[1:] == sorted(shares[1:]) and len(shares) == 5  # a share per piece
+    after = steps[len(shares) :]
+    assert [m for _s, m in after] == ["Готовлю новую версию…", "Устанавливаю…"]
+    assert all(share is None for share, _m in after)
+
+
+def test_download_without_a_size_has_no_share(release, monkeypatch):
+    handler = update.TRANSPORT.handler
+
+    def unsized(request):
+        if request.url.path == "/archive":
+            return httpx.Response(200, content=iter([release["archive"]]))
+        return handler(request)
+
+    monkeypatch.setattr(update, "TRANSPORT", httpx.MockTransport(unsized))
+    steps = []
+
+    update.apply(on=lambda share, message: steps.append((share, message)))
+
+    assert steps and all(share is None for share, _m in steps)
+
+
+def test_terminal_prints_each_step_once(release, monkeypatch, capsys):
+    handler = update.TRANSPORT.handler
+    monkeypatch.setattr(
+        update,
+        "TRANSPORT",
+        httpx.MockTransport(
+            lambda r: _in_chunks(release, 10) if r.url.path == "/archive" else handler(r)
+        ),
+    )
+    monkeypatch.setattr(install_setup, "link_cli", lambda venv: None)
+
+    update.main()
+
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[:3] == ["Скачиваю Mnema 99.0.0…", "Готовлю новую версию…", "Устанавливаю…"]
 
 
 def test_update_texts_follow_the_interface_language(monkeypatch):

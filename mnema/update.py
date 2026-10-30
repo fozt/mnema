@@ -48,6 +48,8 @@ RELEASES_PAGE = "https://github.com/fozt/mnema/releases/latest"
 PREVIOUS_BUNDLE = ".Mnema-previous.app"
 _ATTEMPT = ".mnema-update-"
 
+Progress = Callable[[float | None, str], None]  # (share of the step 0..1 or None, step text)
+
 
 def _version(value: str) -> tuple[int, ...]:
     if not _VERSION.fullmatch(value):
@@ -106,9 +108,6 @@ class Available(BaseModel):
     @property
     def any(self) -> bool:
         return self.release is not None and _version(self.release.version) > _version(self.current)
-
-    def text(self) -> str:
-        return f"Mnema {self.release.version}" if self.any and self.release else ""
 
 
 class Result(BaseModel):
@@ -176,8 +175,10 @@ def check(*, current: str = __version__) -> Available:
             if release.mac is None and app_bundle() is not None:
                 return Available(current=current)  # a release without the Mac app
             return Available(current=current, release=release)
+    except httpx.TransportError as exc:
+        raise MediaError(_("No connection to the update server")) from exc
     except (httpx.HTTPError, ValueError, KeyError, TypeError, AttributeError) as exc:
-        raise MediaError(_("Couldn't check for updates. Try again later")) from exc
+        raise MediaError(_("The update server answered with an error")) from exc
 
 
 def _env() -> dict[str, str]:
@@ -220,13 +221,27 @@ def _release_root() -> Path:
     return data_dir() / "releases"
 
 
-def _fetch(url: str, sha256: str, destination: Path, *, limit: int) -> None:
+def _fetch(
+    url: str,
+    sha256: str,
+    destination: Path,
+    *,
+    limit: int,
+    on: Callable[[float], None] = lambda _f: None,
+    total: int | None = None,
+) -> None:
+    """on: the downloaded share, once per whole percent; total: the expected size, else the
+    response's Content-Length (without either the share is unknown)."""
     digest = hashlib.sha256()
     size = 0
+    shown = -1
     with _client() as client, client.stream("GET", url) as response:
         response.raise_for_status()
         if response.url.scheme != "https":
             raise MediaError(_("The update package isn't available over a secure connection"))
+        if total is None:
+            length = response.headers.get("content-length", "")
+            total = int(length) if length.isascii() and length.isdigit() else None
         with destination.open("wb") as out:
             for chunk in response.iter_bytes():
                 size += len(chunk)
@@ -234,12 +249,19 @@ def _fetch(url: str, sha256: str, destination: Path, *, limit: int) -> None:
                     raise MediaError(_("The update package is larger than allowed"))
                 digest.update(chunk)
                 out.write(chunk)
+                if total:
+                    percent = min(100, size * 100 // total)
+                    if percent != shown:
+                        shown = percent
+                        on(percent / 100)
     if digest.hexdigest() != sha256:
         raise MediaError(_("The update didn't download correctly. Try again"))
 
 
-def _download(release: Release, destination: Path) -> None:
-    _fetch(release.archive, release.sha256, destination, limit=_MAX_ARCHIVE)
+def _download(
+    release: Release, destination: Path, on: Callable[[float], None] = lambda _f: None
+) -> None:
+    _fetch(release.archive, release.sha256, destination, limit=_MAX_ARCHIVE, on=on)
 
 
 def _unpack(archive: Path, destination: Path, version: str) -> None:
@@ -363,7 +385,7 @@ def _app_not_running() -> None:
         )
 
 
-def _apply_bundle(bundle: Path, release: Release, on: Callable[[str], None]) -> Result:
+def _apply_bundle(bundle: Path, release: Release, on: Progress) -> Result:
     """Replace the running Mnema.app: download and check the new bundle next to it, then swap
     the folders; the old bundle stays as .Mnema-previous.app until the next start."""
     mac = release.mac
@@ -401,10 +423,14 @@ def _apply_bundle(bundle: Path, release: Release, on: Callable[[str], None]) -> 
         )
     work = Path(tempfile.mkdtemp(prefix=_ATTEMPT, dir=folder))  # same volume: rename works
     try:
-        on(_("Downloading Mnema {version}…", version=release.version))
+        downloading = _("Downloading Mnema {version}…", version=release.version)
+        on(None, downloading)
         archive = work / "Mnema.zip"
-        _fetch(mac.archive, mac.sha256, archive, limit=mac.size)
-        on(_("Checking the new version…"))
+        _fetch(
+            mac.archive, mac.sha256, archive, limit=mac.size, total=mac.size,
+            on=lambda share: on(share, downloading),
+        )  # fmt: skip
+        on(None, _("Checking the new version…"))
         unpacked = work / "unpacked"
         _system_tool(
             "/usr/bin/ditto", "-x", "-k", str(archive), str(unpacked),
@@ -420,7 +446,7 @@ def _apply_bundle(bundle: Path, release: Release, on: Callable[[str], None]) -> 
             capture_output=True, check=False, stdin=subprocess.DEVNULL,
         )  # fmt: skip
         _checked_bundle(app, release.version)
-        on(_("Installing the app…"))
+        on(None, _("Installing…"))
         _app_not_running()
         previous = folder / PREVIOUS_BUNDLE
         if previous.is_dir() and not previous.is_symlink():
@@ -459,7 +485,7 @@ def drop_previous_bundle() -> None:
         logger.info("previous app bundle not removed", exc_info=True)
 
 
-def apply(on: Callable[[str], None] = lambda _m: None, *, terminal: bool = False) -> Result:
+def apply(on: Progress = lambda _f, _m: None, *, terminal: bool = False) -> Result:
     """Prepare one locked release and switch the app to it.
     terminal: a command runs the update, so a refusal may name the command that helps; otherwise
     it is an app notice without commands, and the command goes to the log."""
@@ -513,12 +539,13 @@ def apply(on: Callable[[str], None] = lambda _m: None, *, terminal: bool = False
         # The folder gets its final name at once: a venv cannot be moved after installing.
         destination = Path(tempfile.mkdtemp(prefix=f"{release.version}-", dir=root))
         try:
-            on(_("Downloading Mnema {version}…", version=release.version))
+            downloading = _("Downloading Mnema {version}…", version=release.version)
+            on(None, downloading)
             with tempfile.TemporaryDirectory() as temp:
                 archive = Path(temp) / "mnema.tar.gz"
-                _download(release, archive)
+                _download(release, archive, lambda share: on(share, downloading))
                 _unpack(archive, destination, release.version)
-            on(_("Preparing the new version…"))
+            on(None, _("Preparing the new version…"))
             extras = [arg for extra in _extras() for arg in ("--extra", extra)]
             _run(uv, "sync", "--locked", "--no-dev", "--python", "3.12", *extras,
                  cwd=destination, what=_("Couldn't prepare the new Mnema version"))  # fmt: skip
@@ -529,7 +556,7 @@ def apply(on: Callable[[str], None] = lambda _m: None, *, terminal: bool = False
             (destination / ".mnema-installed.json").write_text(
                 json.dumps({"version": release.version})
             )
-            on(_("Installing the app…"))
+            on(None, _("Installing…"))
             _run(
                 python,
                 "-c",
@@ -558,12 +585,24 @@ def apply(on: Callable[[str], None] = lambda _m: None, *, terminal: bool = False
             raise MediaError(_("Couldn't update Mnema. The previous version is in place")) from exc
 
 
+def _print_steps() -> Progress:
+    """The terminal gets each step once, without its percent."""
+    said: list[str] = []
+
+    def on(_share: float | None, message: str) -> None:
+        if said[-1:] != [message]:
+            said.append(message)
+            print(message, flush=True)
+
+    return on
+
+
 def main() -> None:
     from .config import load_env
 
     load_env()
     try:
-        result = apply(on=lambda message: print(message, flush=True), terminal=True)
+        result = apply(on=_print_steps(), terminal=True)
     except MediaError as exc:
         print(str(exc) or _("Couldn't update Mnema"), file=sys.stderr)
         raise SystemExit(1) from None

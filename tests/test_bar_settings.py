@@ -521,33 +521,48 @@ def test_invite_with_line_breaks_is_refused_before_any_request(monkeypatch, env_
     assert ask is not None and ask.error and "abc" not in ask.error and sent == []
 
 
-def test_general_tab_checks_and_applies_updates() -> None:
-    """General → Updates: what is newer and "Check for updates"; "Update" only when there is
+def test_general_tab_shows_the_update_state_and_its_actions() -> None:
+    """General → Updates: the state now, never when it was checked; "Update" only when there is
     something to install, and not while recording, processing or updating."""
     from mnema import __version__
 
-    what = "Mnema 0.2.0"
     title = f"Mnema {__version__}"
 
     def section(env: MenuEnv, idle: bool = True):
         [tab] = [t for t in settings_model(BarPrefs(), env, idle=idle).tabs if t.id == "general"]
         return {f.title: f for f in tab.sections[-1].fields}
 
-    never = section(MenuEnv(mac=True))
-    assert never[title].value == "" and "Обновить" not in never
-    fresh = section(MenuEnv(mac=True, update_checked=True))
-    assert fresh[title].value == "Последняя версия"
-    found = section(MenuEnv(mac=True, update=what, update_checked=True))
-    status = found[title]
-    assert (status.value, status.detail, status.tone) == ("Доступно обновление", what, Tone.WARN)
+    def row(env: MenuEnv):
+        status = section(env)[title]
+        return status.value, status.detail, status.progress
+
+    assert row(MenuEnv(mac=True)) == ("", "", None)
+    assert "Обновить" not in section(MenuEnv(mac=True))
+    assert row(MenuEnv(mac=True, update_checked=True)) == ("Последняя версия", "", None)
+    checking = section(MenuEnv(mac=True, update_checked=True, update_checking=True))
+    assert checking[title].value == "Проверяю…" and checking[title].tone == Tone.BUSY
+    assert not checking["Проверить обновления"].enabled
+    found = section(MenuEnv(mac=True, update="0.4.0", update_checked=True))
+    assert (found[title].value, found[title].tone) == ("Доступна версия 0.4.0", Tone.WARN)
     assert found["Обновить"].key == "update" and found["Обновить"].enabled
-    assert not section(MenuEnv(mac=True, update=what), idle=False)["Обновить"].enabled
-    going = section(MenuEnv(mac=True, update=what, update_step="Готовлю новую версию…"))
-    assert going[title].value == "Готовлю новую версию…"
+    assert not section(MenuEnv(mac=True, update="0.4.0"), idle=False)["Обновить"].enabled
+    downloading = MenuEnv(
+        mac=True, update="0.4.0", update_step="Скачиваю Mnema 0.4.0…", update_progress=0.42
+    )
+    assert row(downloading) == ("Скачиваю Mnema 0.4.0… 42\u00a0%", "", 0.42)
+    going = section(MenuEnv(mac=True, update="0.4.0", update_step="Устанавливаю…"))
+    assert (going[title].value, going[title].progress) == ("Устанавливаю…", None)
     assert not going["Обновить"].enabled and not going["Проверить обновления"].enabled
     unavailable = section(MenuEnv(update_checked=True, update_error="Канал ещё не опубликован"))
-    assert unavailable[title].value == "Не удалось проверить"
-    assert unavailable[title].detail == "Канал ещё не опубликован"
+    assert row(MenuEnv(update_checked=True, update_error="Канал ещё не опубликован")) == (
+        "Не удалось проверить",
+        "Канал ещё не опубликован",
+        None,
+    )
+    assert unavailable["Проверить снова"].key == "update_check"
+    failed = MenuEnv(update="0.4.0", update_checked=True, update_error="Нет места на диске")
+    assert row(failed) == ("Не удалось обновить", "Нет места на диске", None)
+    assert section(failed)["Обновить"].enabled
 
 
 def test_processing_tab_offers_local_and_cloud_speech_models() -> None:

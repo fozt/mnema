@@ -70,7 +70,6 @@
   "The server runs Mnema {server}. Update the app": "На сервере новая версия Mnema {server}. Обновите приложение",
   "Today": "Сегодня",
   "Update": "Обновить",
-  "Update available: {version}": "Доступно обновление: {version}",
   "Writing the summary and title…": "Составляю пересказ и название…",
   "Yesterday": "Вчера",
   "paused": "пауза",
@@ -83,5 +82,6 @@
   "{n} s": "{n} с",
   "{server} is unavailable": "{server} недоступен",
   "{server}: invitation needed": "{server}: нужно приглашение",
-  "{step} {percent}%": "{step} {percent} %"
+  "{step} {percent}%": "{step} {percent} %",
+  "Mnema {version} available": "Доступна Mnema {version}"
 }

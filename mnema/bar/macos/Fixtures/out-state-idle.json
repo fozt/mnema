@@ -13,7 +13,7 @@
     "where_state": "ok",
     "notices": [
       {
-        "text": "Доступно обновление: Mnema 0.3.0",
+        "text": "Доступна Mnema 0.3.0",
         "buttons": [
           {
             "key": "update",
@@ -27,7 +27,8 @@
             "children": []
           }
         ],
-        "kind": "info"
+        "kind": "info",
+        "progress": null
       }
     ],
     "idle": {
@@ -93,7 +94,8 @@
             "enabled": true
           }
         ],
-        "tone": "none"
+        "tone": "none",
+        "progress": null
       }
     },
     "recording": null,
@@ -676,7 +678,8 @@
                   "error": "",
                   "role": "normal",
                   "choices": [],
-                  "tone": "none"
+                  "tone": "none",
+                  "progress": null
                 },
                 {
                   "kind": "toggle",
@@ -690,7 +693,8 @@
                   "error": "",
                   "role": "normal",
                   "choices": [],
-                  "tone": "none"
+                  "tone": "none",
+                  "progress": null
                 }
               ]
             },
@@ -724,7 +728,8 @@
                       "enabled": true
                     }
                   ],
-                  "tone": "none"
+                  "tone": "none",
+                  "progress": null
                 },
                 {
                   "kind": "choice",
@@ -767,7 +772,8 @@
                       "enabled": true
                     }
                   ],
-                  "tone": "none"
+                  "tone": "none",
+                  "progress": null
                 },
                 {
                   "kind": "status",
@@ -781,7 +787,8 @@
                   "error": "",
                   "role": "normal",
                   "choices": [],
-                  "tone": "ok"
+                  "tone": "ok",
+                  "progress": null
                 },
                 {
                   "kind": "button",
@@ -795,7 +802,8 @@
                   "error": "",
                   "role": "normal",
                   "choices": [],
-                  "tone": "none"
+                  "tone": "none",
+                  "progress": null
                 },
                 {
                   "kind": "toggle",
@@ -809,7 +817,8 @@
                   "error": "",
                   "role": "normal",
                   "choices": [],
-                  "tone": "none"
+                  "tone": "none",
+                  "progress": null
                 },
                 {
                   "kind": "choice",
@@ -845,7 +854,8 @@
                       "enabled": true
                     }
                   ],
-                  "tone": "none"
+                  "tone": "none",
+                  "progress": null
                 }
               ]
             }
@@ -871,7 +881,8 @@
                   "error": "",
                   "role": "normal",
                   "choices": [],
-                  "tone": "ok"
+                  "tone": "ok",
+                  "progress": null
                 },
                 {
                   "kind": "status",
@@ -885,7 +896,8 @@
                   "error": "",
                   "role": "normal",
                   "choices": [],
-                  "tone": "none"
+                  "tone": "none",
+                  "progress": null
                 },
                 {
                   "kind": "button",
@@ -899,7 +911,8 @@
                   "error": "",
                   "role": "normal",
                   "choices": [],
-                  "tone": "none"
+                  "tone": "none",
+                  "progress": null
                 },
                 {
                   "kind": "button",
@@ -913,7 +926,8 @@
                   "error": "",
                   "role": "destructive",
                   "choices": [],
-                  "tone": "none"
+                  "tone": "none",
+                  "progress": null
                 }
               ]
             }
@@ -939,7 +953,8 @@
                   "error": "",
                   "role": "normal",
                   "choices": [],
-                  "tone": "none"
+                  "tone": "none",
+                  "progress": null
                 },
                 {
                   "kind": "toggle",
@@ -953,7 +968,8 @@
                   "error": "",
                   "role": "normal",
                   "choices": [],
-                  "tone": "none"
+                  "tone": "none",
+                  "progress": null
                 },
                 {
                   "kind": "toggle",
@@ -967,7 +983,8 @@
                   "error": "",
                   "role": "normal",
                   "choices": [],
-                  "tone": "none"
+                  "tone": "none",
+                  "progress": null
                 },
                 {
                   "kind": "button",
@@ -981,7 +998,58 @@
                   "error": "",
                   "role": "normal",
                   "choices": [],
-                  "tone": "none"
+                  "tone": "none",
+                  "progress": null
+                }
+              ]
+            },
+            {
+              "title": "Обновления",
+              "fields": [
+                {
+                  "kind": "status",
+                  "title": "Mnema 0.2.0",
+                  "key": null,
+                  "checked": false,
+                  "enabled": true,
+                  "value": "Доступна версия 0.3.0",
+                  "detail": "",
+                  "placeholder": "",
+                  "error": "",
+                  "role": "normal",
+                  "choices": [],
+                  "tone": "warn",
+                  "progress": null
+                },
+                {
+                  "kind": "button",
+                  "title": "Проверить обновления",
+                  "key": "update_check",
+                  "checked": false,
+                  "enabled": true,
+                  "value": "",
+                  "detail": "",
+                  "placeholder": "",
+                  "error": "",
+                  "role": "normal",
+                  "choices": [],
+                  "tone": "none",
+                  "progress": null
+                },
+                {
+                  "kind": "button",
+                  "title": "Обновить",
+                  "key": "update",
+                  "checked": false,
+                  "enabled": true,
+                  "value": "",
+                  "detail": "",
+                  "placeholder": "",
+                  "error": "",
+                  "role": "normal",
+                  "choices": [],
+                  "tone": "none",
+                  "progress": null
                 }
               ]
             }

@@ -194,6 +194,11 @@ private struct NoticeRow: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.trailing, close == nil ? 0 : 20)
+                if let progress = notice.progress {
+                    ProgressBar(value: progress)
+                        .accessibilityHidden(true)  // the share is in the text
+                        .padding(.vertical, 2)
+                }
                 let buttons = notice.buttons.filter { !$0.compact }
                 if !buttons.isEmpty {
                     HStack(spacing: 8) {

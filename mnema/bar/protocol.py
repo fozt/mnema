@@ -58,6 +58,7 @@ class Notice(BaseModel):
     text: str
     buttons: list[Button] = Field(default_factory=list)
     kind: Literal["warn", "info"] = "warn"  # info: news, not trouble (an update is available)
+    progress: float | None = None  # a bar under the text, 0..1 (the update download); None — none
 
 
 class Source(BaseModel):
@@ -151,6 +152,7 @@ class SettingsField(BaseModel):
     role: Role = Role.NORMAL
     choices: list[Choice] = Field(default_factory=list)
     tone: Tone = Tone.NONE  # status: the dot before value
+    progress: float | None = None  # status: a bar under the value, 0..1; None — none
 
 
 class SettingsSection(BaseModel):
@@ -405,7 +407,22 @@ def decode_incoming(line: str) -> ActionMsg | AnswerMsg | FormEventMsg | PanelMs
 _HOME = "/Users/me/mnema"
 
 
-def _settings_sample(*, idle: bool = True) -> SettingsModel:
+def _updates(status: SettingsField) -> SettingsSection:
+    buttons = [
+        SettingsField(kind=FieldKind.BUTTON, title="Проверить обновления", key="update_check"),
+        SettingsField(kind=FieldKind.BUTTON, title="Обновить", key="update"),
+    ]
+    for button in buttons:  # not while an update is running
+        button.enabled = status.progress is None
+    return SettingsSection(title="Обновления", fields=[status, *buttons])
+
+
+_UPDATE_FOUND = SettingsField(
+    kind=FieldKind.STATUS, title="Mnema 0.2.0", value="Доступна версия 0.3.0", tone=Tone.WARN
+)
+
+
+def _settings_sample(*, idle: bool = True, update: SettingsField = _UPDATE_FOUND) -> SettingsModel:
     """Mac settings with the server "Дом" connected and a model chosen."""
     f, c = SettingsField, Choice
     model = SettingsModel(
@@ -544,7 +561,8 @@ def _settings_sample(*, idle: bool = True) -> SettingsModel:
                             ),
                             f(kind=FieldKind.BUTTON, title="Завершить Mnema", key="quit"),
                         ]
-                    )
+                    ),
+                    _updates(update),
                 ],
             ),
         ]
@@ -926,10 +944,28 @@ def _samples() -> dict[str, BaseModel]:
                 notices=[
                     Notice(
                         kind="info",
-                        text="Доступно обновление: Mnema 0.3.0",
+                        text="Доступна Mnema 0.3.0",
                         buttons=[Button(key="update", title="Обновить")],
                     )
                 ],
+            )
+        ),
+        "out-state-updating": StateMsg(  # the download of a new version: a bar under the text
+            panel=_panel(
+                screen="idle",
+                status=StatusItem(icon="idle"),
+                idle=idle,
+                notices=[
+                    Notice(kind="info", text="Скачиваю Mnema 0.3.0… 42\u00a0%", progress=0.42)
+                ],
+                settings=_settings_sample(
+                    update=SettingsField(
+                        kind=FieldKind.STATUS,
+                        title="Mnema 0.2.0",
+                        value="Скачиваю Mnema 0.3.0… 42\u00a0%",
+                        progress=0.42,
+                    )
+                ),
             )
         ),
         "out-state-empty": StateMsg(
