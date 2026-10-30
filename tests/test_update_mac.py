@@ -131,7 +131,7 @@ def test_update_swaps_the_bundle_and_keeps_the_previous_until_next_start(mac):
     assert _version_of(bundle.parent / ".Mnema-previous.app") == __version__
     assert _left_over(bundle.parent) == [".Mnema-previous.app"]  # no download folders left
     assert mac["calls"][-1] == f"/fozt/mnema/releases/download/v{NEW}/Mnema-{NEW}-mac.zip"
-    assert "codesign" in mac["commands"] and steps[-1] == (None, "Устанавливаю…")
+    assert "codesign" in mac["commands"] and steps[-1] == (None, f"Устанавливаю Mnema {NEW}…")
 
     (bundle.parent / ".mnema-update-abc").mkdir()  # an interrupted attempt
     update.drop_previous_bundle()
@@ -267,7 +267,9 @@ def test_app_shows_the_download_share_then_relaunches(mac, monkeypatch, tmp_path
 
     downloading = [e.update_progress for e in seen if e.update_step == f"Скачиваю Mnema {NEW}…"]
     assert downloading[0] is None and downloading[-1] == 1.0 and len(downloading) == 4
-    assert [e.update_progress for e in seen if e.update_step == "Устанавливаю…"] == [None]
+    assert [e.update_progress for e in seen if e.update_step == f"Устанавливаю Mnema {NEW}…"] == [
+        None
+    ]
     assert bar.quit_requested and _version_of(mac["bundle"]) == NEW
     assert bar.menu_env().update_step == "" and bar.menu_env().update_progress is None
 

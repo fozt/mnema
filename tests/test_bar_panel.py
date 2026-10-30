@@ -817,10 +817,12 @@ def test_panel_offers_update_and_shows_its_progress() -> None:
     ):  # waits for both the recording and the queue
         [busy] = _panel(state, env=MenuEnv(mac=True, update=what)).notices
         assert not busy.buttons[0].enabled
-    [going] = _panel(env=MenuEnv(mac=True, update=what, update_step="Устанавливаю…")).notices
+    [going] = _panel(
+        env=MenuEnv(mac=True, update=what, update_step="Устанавливаю Mnema 0.4.0…")
+    ).notices
     assert (going.kind, going.text, going.buttons, going.progress) == (
         "info",
-        "Устанавливаю…",
+        "Устанавливаю Mnema 0.4.0…",
         [],
         None,
     )

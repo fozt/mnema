@@ -300,7 +300,7 @@ def settings_model(
                 kind=FieldKind.BUTTON,
                 title=_("Update"),
                 key="update",
-                enabled=idle and not env.update_step,
+                enabled=idle and not (env.update_step or env.update_checking),
             )
         )
     return SettingsModel(

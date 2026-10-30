@@ -439,7 +439,7 @@ def test_download_reports_its_share_and_the_steps_after_it_have_none(release, mo
     assert shares[0] is None and shares[-1] == 1.0
     assert shares[1:] == sorted(shares[1:]) and len(shares) == 5  # a share per piece
     after = steps[len(shares) :]
-    assert [m for _s, m in after] == ["Готовлю новую версию…", "Устанавливаю…"]
+    assert [m for _s, m in after] == ["Готовлю новую версию…", "Устанавливаю Mnema 99.0.0…"]
     assert all(share is None for share, _m in after)
 
 
@@ -473,7 +473,11 @@ def test_terminal_prints_each_step_once(release, monkeypatch, capsys):
     update.main()
 
     lines = capsys.readouterr().out.splitlines()
-    assert lines[:3] == ["Скачиваю Mnema 99.0.0…", "Готовлю новую версию…", "Устанавливаю…"]
+    assert lines[:3] == [
+        "Скачиваю Mnema 99.0.0…",
+        "Готовлю новую версию…",
+        "Устанавливаю Mnema 99.0.0…",
+    ]
 
 
 def test_update_texts_follow_the_interface_language(monkeypatch):

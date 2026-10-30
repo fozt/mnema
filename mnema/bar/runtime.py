@@ -70,6 +70,7 @@ logger = logging.getLogger(__name__)
 
 _HISTORY = 6  # points in a source level meter
 _UPDATE_EVERY = 12 * 3600  # Mnema update check interval, s (as on the phone)
+_UPDATE_RETRY = 3600  # the check failed (no network yet after login): try again after, s
 _REPING_EVERY = 30.0  # the server did not answer: ask again at most this often, s
 # English source strings, translated where shown
 QUEUED_ALREADY = "This recording is already queued"
@@ -396,7 +397,9 @@ class BarRuntime:
         self._update_step = ""  # an update is running: its step
         self._update_progress: float | None = None  # the step's share (the download)
         self._update_checking = False  # a check is running
-        self._update_at = float("-inf")  # when updates were checked (monotonic)
+        # when the next update check is due; wall clock: monotonic time stops while the Mac sleeps
+        self._update_next = 0.0
+        self._update_checked = False  # a check has finished at least once
         self._update_busy = False  # a check or an update is running
         self.quit_requested = False
         self.library_rev = 0
@@ -558,7 +561,7 @@ class BarRuntime:
             update_step=self._update_step,
             update_progress=self._update_progress,
             update_checking=self._update_checking,
-            update_checked=self._update_at > float("-inf"),
+            update_checked=self._update_checked,
         )
 
     def _server_records(self) -> int | None:
@@ -687,6 +690,7 @@ class BarRuntime:
         def work() -> None:
             from .. import update
 
+            wait = _UPDATE_EVERY
             try:
                 found = update.check()
                 self._update = found.release.version if found.any and found.release else ""
@@ -694,9 +698,11 @@ class BarRuntime:
             except Exception as e:  # noqa: BLE001 - no network, not from the registry: quietly
                 self._update = ""  # the earlier find is stale: no "Update" without a check
                 self._update_error = str(e)
+                wait = _UPDATE_RETRY
                 logger.info("updates not checked: %s", e)
             finally:
-                self._update_at = time.monotonic()
+                self._update_next = time.time() + wait
+                self._update_checked = True
                 self._update_busy = self._update_checking = False
                 self._env_changed()
 
@@ -730,7 +736,7 @@ class BarRuntime:
                 result = None
             with self._lock:
                 self._update_step, self._update_progress, self._update_busy = "", None, False
-                self._update_at = time.monotonic()
+                self._update_next = time.time() + _UPDATE_EVERY
                 self._update_error = failure
                 if result is not None:
                     self._update = ""
@@ -2317,7 +2323,9 @@ class BarRuntime:
         """Every ~0.5 s from the GUI timer: the recording timer and source meters; how long
         processing runs (the menu's "N min" shows it is alive); when idle, a 12-hourly update
         check; the server does not answer — ask it again every 30 s."""
-        if self.state.phase == Phase.IDLE and time.monotonic() - self._update_at > _UPDATE_EVERY:
+        # due, or the clock was set back more than an interval
+        wait = self._update_next - time.time()
+        if self.state.phase == Phase.IDLE and not 0 < wait <= _UPDATE_EVERY:
             self._check_updates()
         now = time.monotonic()
         if not self.server_ok and self.server_auth and now - self._ping_at > _REPING_EVERY:

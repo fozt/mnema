@@ -446,7 +446,7 @@ def _apply_bundle(bundle: Path, release: Release, on: Progress) -> Result:
             capture_output=True, check=False, stdin=subprocess.DEVNULL,
         )  # fmt: skip
         _checked_bundle(app, release.version)
-        on(None, _("Installing…"))
+        on(None, _("Installing Mnema {version}…", version=release.version))
         _app_not_running()
         previous = folder / PREVIOUS_BUNDLE
         if previous.is_dir() and not previous.is_symlink():
@@ -556,7 +556,7 @@ def apply(on: Progress = lambda _f, _m: None, *, terminal: bool = False) -> Resu
             (destination / ".mnema-installed.json").write_text(
                 json.dumps({"version": release.version})
             )
-            on(None, _("Installing…"))
+            on(None, _("Installing Mnema {version}…", version=release.version))
             _run(
                 python,
                 "-c",

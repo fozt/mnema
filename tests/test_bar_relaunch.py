@@ -107,7 +107,7 @@ def test_update_does_not_restart_busy_app_or_schedule_restart_when_idle(
     calls = []
     monkeypatch.setattr(subprocess, "Popen", lambda *a, **kw: calls.append((a, kw)))
     bar = BarRuntime(prefs_file=tmp_path / "bar.json")
-    bar._update_at = time.monotonic()
+    bar._update_next = time.time() + 3600
     if busy == "recording":
         bar.state.phase = Phase.RECORDING
     else:

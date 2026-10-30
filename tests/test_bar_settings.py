@@ -7,6 +7,7 @@ import json
 import queue
 import re
 import threading
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -546,12 +547,14 @@ def test_general_tab_shows_the_update_state_and_its_actions() -> None:
     assert (found[title].value, found[title].tone) == ("Доступна версия 0.4.0", Tone.WARN)
     assert found["Обновить"].key == "update" and found["Обновить"].enabled
     assert not section(MenuEnv(mac=True, update="0.4.0"), idle=False)["Обновить"].enabled
+    rechecking = MenuEnv(mac=True, update="0.4.0", update_checked=True, update_checking=True)
+    assert not section(rechecking)["Обновить"].enabled  # the click would be dropped
     downloading = MenuEnv(
         mac=True, update="0.4.0", update_step="Скачиваю Mnema 0.4.0…", update_progress=0.42
     )
     assert row(downloading) == ("Скачиваю Mnema 0.4.0… 42\u00a0%", "", 0.42)
-    going = section(MenuEnv(mac=True, update="0.4.0", update_step="Устанавливаю…"))
-    assert (going[title].value, going[title].progress) == ("Устанавливаю…", None)
+    going = section(MenuEnv(mac=True, update="0.4.0", update_step="Устанавливаю Mnema 0.4.0…"))
+    assert (going[title].value, going[title].progress) == ("Устанавливаю Mnema 0.4.0…", None)
     assert not going["Обновить"].enabled and not going["Проверить обновления"].enabled
     unavailable = section(MenuEnv(update_checked=True, update_error="Канал ещё не опубликован"))
     assert row(MenuEnv(update_checked=True, update_error="Канал ещё не опубликован")) == (
@@ -563,6 +566,47 @@ def test_general_tab_shows_the_update_state_and_its_actions() -> None:
     failed = MenuEnv(update="0.4.0", update_checked=True, update_error="Нет места на диске")
     assert row(failed) == ("Не удалось обновить", "Нет места на диске", None)
     assert section(failed)["Обновить"].enabled
+
+
+def test_updates_are_checked_every_12_hours_of_the_clock_and_an_hour_after_a_failure(
+    monkeypatch, tmp_path
+) -> None:
+    """The app checks for updates on its own: at start, then every 12 hours by the wall clock (it
+    runs on while the Mac sleeps); a failed check, such as no network right after login, is
+    retried in an hour; a clock set back does not stop the checks."""
+    from mnema import update
+
+    asked = []
+    online = threading.Event()
+
+    def manifest(request: httpx.Request) -> httpx.Response:
+        asked.append(request.url.path)
+        if not online.is_set():
+            raise httpx.ConnectError("no network", request=request)
+        return httpx.Response(200, json={"version": "0.0.1", "archive": "https://r.test/a",
+                                         "sha256": "0" * 64})  # fmt: skip
+
+    monkeypatch.setenv("MNEMA_UPDATE_URL", "https://r.test/latest")
+    monkeypatch.setattr(update, "TRANSPORT", httpx.MockTransport(manifest))
+    clock = [1_000_000.0]
+    monkeypatch.setattr(time, "time", lambda: clock[0])
+    rt = BarRuntime(prefs_file=tmp_path / "bar.json")
+
+    def tick(hours: float = 0) -> int:
+        clock[0] += hours * 3600
+        rt.tick()
+        _join("mnema-bar-update-check")
+        return len(asked)
+
+    assert tick() == 1  # at start, and the network is not up yet
+    assert rt.menu_env().update_error == "Нет связи с сервером обновлений"
+    assert tick(0.5) == 1
+    online.set()
+    assert tick(0.6) == 2  # an hour after the failure
+    assert rt.menu_env().update_checked and not rt.menu_env().update_error
+    assert tick(11) == 2
+    assert tick(1.1) == 3  # 12 hours after the answer
+    assert tick(-48) == 4  # the clock went back
 
 
 def test_processing_tab_offers_local_and_cloud_speech_models() -> None:
@@ -804,7 +848,7 @@ def test_mac_on_server_while_the_server_is_away(monkeypatch, tmp_path) -> None:
         lambda url, *, token=None: real(url, token=token, transport=transport),
     )
     rt = BarRuntime(prefs_file=tmp_path / "bar.json")
-    rt._update_at = float("inf")  # update checks are not this test's business
+    rt._update_next = time.time() + 3600  # update checks are not this test's business
     _settled()
     rows = _processing(rt)
     assert rows["Модель"].value != "Не настроена на сервере"

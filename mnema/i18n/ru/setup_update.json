@@ -38,7 +38,7 @@
   "Couldn't update Mnema": "Не удалось обновить Mnema",
   "Mnema {version} installed. Restart the app.": "Установлена Mnema {version}. Перезапустите приложение.",
   "Mnema {version}: no new versions": "Mnema {version}: новых версий нет",
-  "Installing…": "Устанавливаю…",
+  "Installing Mnema {version}…": "Устанавливаю Mnema {version}…",
   "No connection to the update server": "Нет связи с сервером обновлений",
   "The update server answered with an error": "Сервер обновлений ответил ошибкой"
 }

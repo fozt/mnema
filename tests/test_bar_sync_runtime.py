@@ -1,6 +1,7 @@
 """Desktop lifecycle, UUID actions and bulk choices use the file-sync controller."""
 
 import json
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
@@ -127,7 +128,7 @@ def test_busy_callback_and_completion_wakeup_do_not_follow_timer(app):
     rt._prepared = SimpleNamespace(base=root / "Renamed")
     assert rt._sync.callbacks["busy"]() == {str(root / "Renamed")}
     rt._prepared = rt._active = None
-    rt._update_at = float("inf")
+    rt._update_next = time.time() + 3600
     rt.tick()
     assert rt._sync.wakes == 0
     rt._library_changed()
