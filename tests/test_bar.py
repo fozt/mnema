@@ -1535,6 +1535,21 @@ def test_linux_panel_label_and_saving_menu_change_rarely() -> None:
     assert title(BarState(phase=Phase.RECORDING), discreet=True, coarse=True).text == ""
 
 
+def test_linux_tray_shows_the_running_update_in_5_percent_steps() -> None:
+    def titles(share: float | None) -> list[str]:
+        env = MenuEnv(update="0.4.0", update_step="Скачиваю Mnema 0.4.0…", update_progress=share)
+        return [i.title for i in menu(BarState(), BarPrefs(), env) if not i.separator]
+
+    assert "Скачиваю Mnema 0.4.0… 40\u00a0%" in titles(0.43)
+    assert titles(0.41) == titles(0.44)  # one 5% step: the open menu is not rebuilt
+    assert "Скачиваю Mnema 0.4.0…" in titles(None)
+    assert not any("Скачиваю" in t for t in menu_titles_without_update())
+
+
+def menu_titles_without_update() -> list[str]:
+    return [i.title for i in menu(BarState(), BarPrefs(), MenuEnv()) if not i.separator]
+
+
 def test_menu_while_processing_shows_language_and_offers_the_other() -> None:
     """The tray menu during processing matches the panel: the language already applied to
     the recording and a choice of another one to redo it in."""

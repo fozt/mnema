@@ -233,9 +233,11 @@ class MenuEnv(BaseModel):
     model: str | None = None  # this Mac's model without the key; None — not set (or not a Mac)
     mac: bool = False  # standalone Mac (base.STANDALONE)
     asr_choices: list[tuple[str, str]] = Field(default_factory=list)
-    update: str = ""  # what is newer (update.Available.text); empty — nothing or not checked
-    update_error: str = ""  # the channel is unreachable: not "up to date"
+    update: str = ""  # the newer version, "0.4.0"; empty — nothing or not checked
+    update_error: str = ""  # the last check or update failed: the reason
     update_step: str = ""  # an update is running: its step
+    update_progress: float | None = None  # the step's share 0..1 (the download); None — unknown
+    update_checking: bool = False  # a check is running
     update_checked: bool = False  # an update check has finished at least once
 
 
@@ -344,6 +346,16 @@ def step_line(job: Job, *, coarse: bool = False) -> str:
         return stage
     percent = int(int(local * 20) / 20 * 100) if coarse else int(local * 100)
     return _("{step} {percent}%", step=stage, percent=percent)
+
+
+def update_line(env: MenuEnv, *, coarse: bool = False) -> str:
+    """The running update's step with its share, "Downloading Mnema 0.4.0… 40%"; coarse — 5%
+    steps, as in step_line."""
+    share = env.update_progress
+    if share is None:
+        return env.update_step
+    percent = int(int(share * 20) / 20 * 100) if coarse else int(share * 100)
+    return _("{step} {percent}%", step=env.update_step, percent=percent)
 
 
 def languages_label(codes: set[str] | list[str]) -> str:
@@ -546,6 +558,8 @@ def menu(
         items.append(MenuItem(title=f"⚠︎ {_sentence(state.error[:80])}", enabled=False))
     if state.notice:
         items.append(MenuItem(title=f"⚠︎ {_sentence(state.notice)}", enabled=False))
+    if env.update_step:
+        items.append(MenuItem(title=update_line(env, coarse=True), enabled=False))
     # sources of the next recording, as on the Mac panel
     items.append(MenuItem(key="toggle_mic", title=source_name("mic"), checked=prefs.mic))
     items.append(MenuItem(key="toggle_system", title=source_name("system"), checked=prefs.system))

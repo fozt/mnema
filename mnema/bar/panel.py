@@ -59,6 +59,7 @@ from .state import (
     source_name,
     step_line,
     title,
+    update_line,
 )
 
 _SYMBOLS = {
@@ -377,13 +378,13 @@ def panel_model(
             Notice(text=_("Sync: {error}", error=_after_colon(e))) for e in state.sync_errors
         )
     if env.update_step:
-        notices.append(Notice(kind="info", text=env.update_step))
+        notices.append(Notice(kind="info", text=update_line(env), progress=env.update_progress))
     elif env.update and gap is not VersionGap.APP:  # else the version notice has the button
         update = Button(key="update", title=_("Update"), enabled=not state.busy)
         notices.append(
             Notice(
                 kind="info",
-                text=_("Update available: {version}", version=env.update),
+                text=_("Mnema {version} available", version=env.update),
                 buttons=[update],
             )
         )

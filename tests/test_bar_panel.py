@@ -806,9 +806,9 @@ def test_trash_moves_recording_and_forgets_it_as_last(monkeypatch, tmp_path) -> 
 def test_panel_offers_update_and_shows_its_progress() -> None:
     """An available update is news (not a warning) with an Update button that works only
     when idle; a running update shows its step without a button."""
-    what = "Mnema 0.3.0"
+    what = "0.3.0"
     [offer] = _panel(env=MenuEnv(mac=True, update=what)).notices
-    assert (offer.kind, offer.text) == ("info", f"Доступно обновление: {what}")
+    assert (offer.kind, offer.text, offer.progress) == ("info", "Доступна Mnema 0.3.0", None)
     assert (offer.buttons[0].key, offer.buttons[0].enabled) == ("update", True)
     queued = BarState(jobs=[Job(id="r", folder=Path("/n/r"), running=True)])
     for state in (
@@ -817,8 +817,16 @@ def test_panel_offers_update_and_shows_its_progress() -> None:
     ):  # waits for both the recording and the queue
         [busy] = _panel(state, env=MenuEnv(mac=True, update=what)).notices
         assert not busy.buttons[0].enabled
-    [going] = _panel(env=MenuEnv(mac=True, update=what, update_step="Ставлю библиотеки…")).notices
-    assert (going.kind, going.text, going.buttons) == ("info", "Ставлю библиотеки…", [])
+    [going] = _panel(env=MenuEnv(mac=True, update=what, update_step="Устанавливаю…")).notices
+    assert (going.kind, going.text, going.buttons, going.progress) == (
+        "info",
+        "Устанавливаю…",
+        [],
+        None,
+    )
+    downloading = MenuEnv(update=what, update_step="Скачиваю Mnema 0.3.0…", update_progress=0.07)
+    [bar] = _panel(env=downloading).notices
+    assert (bar.text, bar.progress, bar.buttons) == ("Скачиваю Mnema 0.3.0… 7\u00a0%", 0.07, [])
     assert _panel().notices == []
 
 

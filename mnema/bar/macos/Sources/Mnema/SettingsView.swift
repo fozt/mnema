@@ -165,6 +165,12 @@ private struct SettingsRow: View {
                         if !field.detail.isEmpty {
                             Text(field.detail).font(.caption).foregroundStyle(.secondary)
                         }
+                        if let progress = field.progress {
+                            ProgressBar(value: progress)
+                                .frame(width: 160)
+                                .accessibilityHidden(true)  // the share is in the value
+                                .padding(.top, 2)
+                        }
                     }
                 }
             case .hotkey:

@@ -64,6 +64,24 @@ func fixture(_ name: String) throws -> Data {
     #expect(recording.screen == .recording && recording.cards.first?.busy == true)
 }
 
+/// A running update download carries its share to the panel notice and to the settings row; an
+/// offered update has no bar.
+@Test func updateDownloadCarriesItsShare() throws {
+    guard case .state(let panel) = try Wire.decode(line: fixture("out-state-updating")) else {
+        Issue.record("not a state")
+        return
+    }
+    #expect(panel.notices.map(\.progress) == [0.42])
+    let general = try #require(panel.settings.tabs.first { $0.id == "general" })
+    let status = try #require(general.sections.last?.fields.first)
+    #expect(status.kind == .status && status.progress == 0.42)
+    guard case .state(let idle) = try Wire.decode(line: fixture("out-state-idle")) else {
+        Issue.record("not a state")
+        return
+    }
+    #expect(idle.notices.map(\.progress) == [nil])
+}
+
 /// Move to section is a submenu of the recording menu with the recording's section checked;
 /// VoiceOver gets each option but the checked one as a separate action.
 @Test func cardMenuCarriesMoveToSectionSubmenu() throws {

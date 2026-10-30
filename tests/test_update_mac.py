@@ -10,6 +10,7 @@ import plistlib
 import shutil
 import subprocess
 import sys
+import threading
 import zipfile
 from pathlib import Path
 
@@ -123,14 +124,14 @@ def test_update_swaps_the_bundle_and_keeps_the_previous_until_next_start(mac):
     bundle = mac["bundle"]
     steps = []
 
-    result = update.apply(on=steps.append)
+    result = update.apply(on=lambda share, message: steps.append((share, message)))
 
     assert result.changed and result.version == NEW and result.bundle == str(bundle)
     assert _version_of(bundle) == NEW
     assert _version_of(bundle.parent / ".Mnema-previous.app") == __version__
     assert _left_over(bundle.parent) == [".Mnema-previous.app"]  # no download folders left
     assert mac["calls"][-1] == f"/fozt/mnema/releases/download/v{NEW}/Mnema-{NEW}-mac.zip"
-    assert "codesign" in mac["commands"] and steps[-1] == "Устанавливаю приложение…"
+    assert "codesign" in mac["commands"] and steps[-1] == (None, "Устанавливаю…")
 
     (bundle.parent / ".mnema-update-abc").mkdir()  # an interrupted attempt
     update.drop_previous_bundle()
@@ -238,6 +239,37 @@ def test_bundled_cli_finds_its_bundle_without_the_app_environment(mac, monkeypat
 
     assert update.apply().bundle == str(mac["bundle"])
     assert _version_of(mac["bundle"]) == NEW
+
+
+def test_app_shows_the_download_share_then_relaunches(mac, monkeypatch, tmp_path):
+    """The Mac zip arrives in pieces: the app's environment carries the share of each, the
+    steps after the download carry none."""
+    data = mac["zip"]
+    pieces = [data[i : i + len(data) // 3 + 1] for i in range(0, len(data), len(data) // 3 + 1)]
+    handler = update.TRANSPORT.handler
+
+    def chunked(request):
+        if request.url.path.endswith("-mac.zip"):
+            return httpx.Response(200, content=iter(pieces))
+        return handler(request)
+
+    monkeypatch.setattr(update, "TRANSPORT", httpx.MockTransport(chunked))
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **kw: None)
+    seen = []
+    bar = BarRuntime(
+        on_change=lambda: seen.append(bar.menu_env()), prefs_file=tmp_path / "bar.json"
+    )
+
+    bar.handle("update")
+    for thread in threading.enumerate():
+        if thread.name == "mnema-bar-update":
+            thread.join(timeout=10)
+
+    downloading = [e.update_progress for e in seen if e.update_step == f"Скачиваю Mnema {NEW}…"]
+    assert downloading[0] is None and downloading[-1] == 1.0 and len(downloading) == 4
+    assert [e.update_progress for e in seen if e.update_step == "Устанавливаю…"] == [None]
+    assert bar.quit_requested and _version_of(mac["bundle"]) == NEW
+    assert bar.menu_env().update_step == "" and bar.menu_env().update_progress is None
 
 
 def test_relaunch_opens_the_bundle_that_holds_the_new_version(monkeypatch, tmp_path):

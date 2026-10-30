@@ -20,7 +20,6 @@
   "The update channel redirected to an insecure address": "Канал обновлений перенаправил запрос на незащищённый адрес",
   "Updates are unavailable right now": "Обновления сейчас недоступны",
   "The update channel address must start with https://": "Адрес канала обновлений должен начинаться с https://",
-  "Couldn't check for updates. Try again later": "Не удалось проверить обновления. Повторите позже",
   "The update package isn't available over a secure connection": "Пакет обновления недоступен по защищённому соединению",
   "The update package is larger than allowed": "Пакет обновления превышает допустимый размер",
   "The update didn't download correctly. Try again": "Обновление скачалось с ошибкой. Повторите",
@@ -34,10 +33,12 @@
   "Downloading Mnema {version}…": "Скачиваю Mnema {version}…",
   "Preparing the new version…": "Готовлю новую версию…",
   "Couldn't prepare the new Mnema version": "Не удалось подготовить новую версию Mnema",
-  "Installing the app…": "Устанавливаю приложение…",
   "Couldn't install the new app version": "Не удалось установить новую версию приложения",
   "Couldn't update Mnema. The previous version is in place": "Не удалось обновить Mnema. Прежняя версия на месте",
   "Couldn't update Mnema": "Не удалось обновить Mnema",
   "Mnema {version} installed. Restart the app.": "Установлена Mnema {version}. Перезапустите приложение.",
-  "Mnema {version}: no new versions": "Mnema {version}: новых версий нет"
+  "Mnema {version}: no new versions": "Mnema {version}: новых версий нет",
+  "Installing…": "Устанавливаю…",
+  "No connection to the update server": "Нет связи с сервером обновлений",
+  "The update server answered with an error": "Сервер обновлений ответил ошибкой"
 }

@@ -88,12 +88,14 @@
   "Audio sources": "Источники звука",
   "Processing": "Обработка",
   "Could not check": "Не удалось проверить",
-  "Update available": "Доступно обновление",
-  "Up to date": "Последняя версия",
   "General": "Общие",
   "Microphone": "Микрофон",
   "System audio": "Системный звук",
   "Connection": "Подключение",
   "Updates": "Обновление",
-  "Section name": "Название"
+  "Section name": "Название",
+  "Latest version": "Последняя версия",
+  "Version {version} available": "Доступна версия {version}",
+  "Could not update": "Не удалось обновить",
+  "Check again": "Проверить снова"
 }

@@ -69,7 +69,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _HISTORY = 6  # points in a source level meter
-_UPDATE_EVERY = 24 * 3600  # Mnema update check interval, s
+_UPDATE_EVERY = 12 * 3600  # Mnema update check interval, s (as on the phone)
 _REPING_EVERY = 30.0  # the server did not answer: ask again at most this often, s
 # English source strings, translated where shown
 QUEUED_ALREADY = "This recording is already queued"
@@ -391,9 +391,11 @@ class BarRuntime:
         self._asr_choices: list[tuple[str, str]] = []  # recognition of this Mac or the server
         self._asr_stale = False  # the server list was not read: reread once it answers
         self._ping_at = float("-inf")  # when the server was last asked (monotonic)
-        self._update = ""  # what is newer (MenuEnv.update)
-        self._update_error = ""  # the channel is unavailable: not a "latest version" answer
+        self._update = ""  # the newer version (MenuEnv.update)
+        self._update_error = ""  # the last check or update failed: not a "latest version" answer
         self._update_step = ""  # an update is running: its step
+        self._update_progress: float | None = None  # the step's share (the download)
+        self._update_checking = False  # a check is running
         self._update_at = float("-inf")  # when updates were checked (monotonic)
         self._update_busy = False  # a check or an update is running
         self.quit_requested = False
@@ -554,6 +556,8 @@ class BarRuntime:
             update=self._update,
             update_error=self._update_error,
             update_step=self._update_step,
+            update_progress=self._update_progress,
+            update_checking=self._update_checking,
             update_checked=self._update_at > float("-inf"),
         )
 
@@ -677,14 +681,15 @@ class BarRuntime:
         with self._lock:
             if self._update_busy or self.quit_requested:
                 return
-            self._update_busy = True
+            self._update_busy = self._update_checking = True
+        self._env_changed()
 
         def work() -> None:
             from .. import update
 
             try:
                 found = update.check()
-                self._update = found.text() if found.any else ""
+                self._update = found.release.version if found.any and found.release else ""
                 self._update_error = ""
             except Exception as e:  # noqa: BLE001 - no network, not from the registry: quietly
                 self._update = ""  # the earlier find is stale: no "Update" without a check
@@ -692,7 +697,7 @@ class BarRuntime:
                 logger.info("updates not checked: %s", e)
             finally:
                 self._update_at = time.monotonic()
-                self._update_busy = False
+                self._update_busy = self._update_checking = False
                 self._env_changed()
 
         threading.Thread(target=work, daemon=True, name="mnema-bar-update-check").start()
@@ -705,25 +710,28 @@ class BarRuntime:
                 return  # the update waits for both recording and the processing queue
             self._update_busy = True
 
-        def step(message: str) -> None:
-            self._update_step = message
+        def step(share: float | None, message: str) -> None:
+            self._update_step, self._update_progress = message, share
             self._env_changed()
 
         def work() -> None:
             from .. import update
 
-            step(_("Starting the update…"))
+            step(None, _("Starting the update…"))
+            failure = ""
             try:
                 result = update.apply(on=step)
             except Exception as e:  # noqa: BLE001 - the reason goes to the user, the app lives
                 logger.warning("update not installed", exc_info=True)
-                self.state.error = _failure_text(
+                failure = _failure_text(
                     e, _("Could not update Mnema. See the Mnema log for details")
                 )
+                self.state.error = failure
                 result = None
             with self._lock:
-                self._update_step, self._update_busy = "", False
+                self._update_step, self._update_progress, self._update_busy = "", None, False
                 self._update_at = time.monotonic()
+                self._update_error = failure
                 if result is not None:
                     self._update = ""
             self._env_changed()
@@ -770,7 +778,7 @@ class BarRuntime:
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                     cwd=Path.home() if installed else None, env=env,
                 )  # fmt: skip
-                self._update_step = ""
+                self._update_step, self._update_progress = "", None
                 self.quit_requested = True
         if installed:
             self._env_changed()
@@ -2307,7 +2315,7 @@ class BarRuntime:
 
     def tick(self) -> None:
         """Every ~0.5 s from the GUI timer: the recording timer and source meters; how long
-        processing runs (the menu's "N min" shows it is alive); when idle, a daily update
+        processing runs (the menu's "N min" shows it is alive); when idle, a 12-hourly update
         check; the server does not answer — ask it again every 30 s."""
         if self.state.phase == Phase.IDLE and time.monotonic() - self._update_at > _UPDATE_EVERY:
             self._check_updates()

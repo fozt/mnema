@@ -16,7 +16,7 @@ from .protocol import (
     SettingsTab,
     Tone,
 )
-from .state import BarPrefs, MenuEnv, Where, asr_options, discreet_title
+from .state import BarPrefs, MenuEnv, Where, asr_options, discreet_title, update_line
 
 # the runtime keeps one of these as hotkey_error; settings_model translates it when shown
 HOTKEY_BUSY = "Shortcut is in use"
@@ -174,6 +174,25 @@ def _server_rows(env: MenuEnv) -> list[SettingsField]:
     return rows
 
 
+def _update_status(env: MenuEnv) -> SettingsField:
+    """The Mnema version row: what is happening with updates now, not when it was checked."""
+    status = SettingsField(kind=FieldKind.STATUS, title=f"Mnema {__version__}")
+    if env.update_step:  # the download has a bar; the steps after it a spinner
+        status.value, status.progress = update_line(env), env.update_progress
+        status.tone = Tone.NONE if env.update_progress is not None else Tone.BUSY
+    elif env.update_checking:
+        status.value, status.tone = _("Checking…"), Tone.BUSY
+    elif env.update_error:
+        status.value = _("Could not update") if env.update else _("Could not check")
+        status.detail = env.update_error
+    elif env.update:
+        status.value = _("Version {version} available", version=env.update)
+        status.tone = Tone.WARN
+    elif env.update_checked:
+        status.value = _("Latest version")
+    return status
+
+
 def settings_model(
     prefs: BarPrefs,
     env: MenuEnv,
@@ -267,21 +286,12 @@ def settings_model(
         )
         general = [hotkey, *general, f(kind=FieldKind.BUTTON, title=_("Quit Mnema"), key="quit")]
     updates = [
-        f(
-            kind=FieldKind.STATUS,
-            title=f"Mnema {__version__}",
-            value=env.update_step
-            or (_("Could not check") if env.update_error else "")
-            or (_("Update available") if env.update else "")
-            or (_("Up to date") if env.update_checked else ""),
-            detail=(env.update_error or env.update) if not env.update_step else "",
-            tone=Tone.BUSY if env.update_step else Tone.WARN if env.update else Tone.NONE,
-        ),
+        _update_status(env),
         f(
             kind=FieldKind.BUTTON,
-            title=_("Check for updates"),
+            title=_("Check again") if env.update_error else _("Check for updates"),
             key="update_check",
-            enabled=not env.update_step,
+            enabled=not (env.update_step or env.update_checking),
         ),
     ]
     if env.update:

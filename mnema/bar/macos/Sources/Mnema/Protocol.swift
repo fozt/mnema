@@ -34,6 +34,7 @@ struct Notice: Codable, Hashable {
     var text: String
     var buttons: [ButtonModel]
     var kind: String  // "warn" | "info"
+    var progress: Double?  // a bar under the text 0..1 (the update download); nil: none
 }
 
 struct Source: Codable, Hashable, Identifiable {
@@ -127,6 +128,7 @@ struct SettingsField: Codable, Hashable, Identifiable {
     var role: Role
     var choices: [Choice]
     var tone: Tone
+    var progress: Double?  // status: a bar under the value 0..1; nil: none
     var id: String { "\(kind.rawValue):\(key ?? title)" }
 }
 
