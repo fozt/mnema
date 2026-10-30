@@ -4,16 +4,12 @@ import dev.mnema.app.ui.settings.UpdateAction
 import dev.mnema.app.ui.settings.UpdateRow
 import dev.mnema.app.ui.settings.rowState
 import java.io.File
-import java.time.LocalDate
-import java.time.ZoneId
-import java.time.ZoneOffset
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class UpdateRowTest {
-    private val zone: ZoneId = ZoneOffset.UTC
-    private val today: LocalDate = LocalDate.of(2026, 10, 22)
-    private val noon = today.atTime(12, 0).toInstant(ZoneOffset.UTC).toEpochMilli()
     private val apk = File("/cache/updates/mnema-0.2.9.apk")
     private val manifest = UpdateManifest(
         version = "0.2.9",
@@ -24,23 +20,15 @@ class UpdateRowTest {
         minSdk = 34,
     )
 
-    private fun row(stage: UpdateStage, checkedAt: Long = 0, recording: Boolean = false) =
-        rowState("0.2.8", stage, checkedAt, today, zone, recording)
-
-    @Test
-    fun lastCheckDayIsShown() {
-        assertEquals("Проверено сегодня", row(UpdateStage.Idle, checkedAt = noon).subtitle)
-        assertEquals("Проверено вчера", row(UpdateStage.Idle, checkedAt = noon - 24 * 3_600_000L).subtitle)
-        assertEquals("Проверено сегодня", row(UpdateStage.UpToDate, checkedAt = noon).subtitle)
-        assertEquals(UpdateAction.CHECK, row(UpdateStage.UpToDate, checkedAt = noon).action)
-    }
+    private fun row(stage: UpdateStage, recording: Boolean = false) = rowState("0.2.8", stage, recording)
 
     @Test
     fun newerVersionShowsItsSizeAndOffersAnUpdate() {
         val rows = listOf<Pair<UpdateStage, UpdateRow>>(
             UpdateStage.Idle to UpdateRow("Версия 0.2.8", null, UpdateAction.CHECK),
             UpdateStage.Checking to UpdateRow("Версия 0.2.8", "Проверяю…", null, busy = true),
-            UpdateStage.Available(manifest) to UpdateRow("Версия 0.2.8", "Доступна 0.2.9 · 14 МБ", UpdateAction.UPDATE),
+            UpdateStage.UpToDate to UpdateRow("Версия 0.2.8", "Последняя версия", UpdateAction.CHECK),
+            UpdateStage.Available(manifest) to UpdateRow("Версия 0.2.8", "Доступна версия 0.2.9 · 14 МБ", UpdateAction.UPDATE),
             UpdateStage.Unsuitable(manifest) to UpdateRow("Версия 0.2.8", "0.2.9 не подходит этому телефону", UpdateAction.CHECK),
             UpdateStage.Downloading(manifest, 0.43f) to UpdateRow("Версия 0.2.8", "Загружаю… 43 %", null, progress = 0.43f),
             UpdateStage.NeedsPermission(manifest, apk) to
@@ -55,7 +43,9 @@ class UpdateRowTest {
 
     @Test
     fun failureRetriesTheStepThatFailed() {
-        assertEquals(UpdateRow("Версия 0.2.8", "Нет связи", UpdateAction.CHECK), row(UpdateStage.Failed("Нет связи")))
+        val failed = row(UpdateStage.Failed("Нет связи"))
+        assertEquals(UpdateRow("Версия 0.2.8", "Нет связи", UpdateAction.CHECK_AGAIN), failed)
+        assertEquals("Проверить снова", failed.action?.title)
         assertEquals(
             UpdateRow("Версия 0.2.8", "Файл обновления повреждён", UpdateAction.UPDATE),
             row(UpdateStage.Failed("Файл обновления повреждён", manifest)),
@@ -83,6 +73,29 @@ class UpdateRowTest {
             UpdateStage.NeedsPermission(manifest, apk),
             UpdateStage.Downloading(manifest, 0.43f),
         )
-        for (stage in notHeld) assertEquals("$stage", row(stage, checkedAt = noon), row(stage, checkedAt = noon, recording = true))
+        for (stage in notHeld) assertEquals("$stage", row(stage), row(stage, recording = true))
+    }
+
+    @Test
+    fun settingsTabCarriesADotWhileANewerVersionWaits() {
+        val pending = listOf(
+            UpdateStage.Available(manifest),
+            UpdateStage.Downloading(manifest, 0.43f),
+            UpdateStage.NeedsPermission(manifest, apk),
+            UpdateStage.Ready(manifest, apk),
+            UpdateStage.Installing(manifest, apk, 6),
+            UpdateStage.Confirm(manifest, apk, 6),
+            UpdateStage.Failed("Файл обновления повреждён", manifest),
+        )
+        val none = listOf(
+            UpdateStage.Idle,
+            UpdateStage.Checking,
+            UpdateStage.UpToDate,
+            UpdateStage.Unsuitable(manifest),
+            UpdateStage.Failed("Нет связи"),
+        )
+
+        for (stage in pending) assertTrue("$stage", updatePending(stage))
+        for (stage in none) assertFalse("$stage", updatePending(stage))
     }
 }

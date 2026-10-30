@@ -128,12 +128,10 @@ class EnglishUiTest {
     fun settingsAreEnglish() {
         val manifest = dev.mnema.app.update.UpdateManifest(version = "0.2.9", versionCode = 209, apk = "https://x/a.apk", sha256 = "c".repeat(64),
             size = 14_680_064, minSdk = 34)
-        val noon = today.atTime(12, 0).atZone(zone).toInstant().toEpochMilli()
-        assertEquals("Version 0.2.8", rowState("0.2.8", UpdateStage.Idle, noon, today, zone, false).title)
-        assertEquals("Checked today", rowState("0.2.8", UpdateStage.Idle, noon, today, zone, false).subtitle)
-        assertEquals("Checked Oct 3", rowState("0.2.8", UpdateStage.Idle, at("2026-10-03T12:00:00"), today, zone, false).subtitle)
-        assertEquals("0.2.9 available · 14 MB", rowState("0.2.8", UpdateStage.Available(manifest), noon, today, zone, false).subtitle)
-        assertEquals("Downloading… 40%", rowState("0.2.8", UpdateStage.Downloading(manifest, 0.4f), noon, today, zone, false).subtitle)
+        assertEquals("Version 0.2.8", rowState("0.2.8", UpdateStage.Idle, false).title)
+        assertEquals("Latest version", rowState("0.2.8", UpdateStage.UpToDate, false).subtitle)
+        assertEquals("Version 0.2.9 available · 14 MB", rowState("0.2.8", UpdateStage.Available(manifest), false).subtitle)
+        assertEquals("Downloading… 40%", rowState("0.2.8", UpdateStage.Downloading(manifest, 0.4f), false).subtitle)
         assertEnglish(UpdateAction.entries.map { it.title })
         val steps = onboardingSteps(files = false, notifications = true, battery = false, paired = false, server = false)
         assertEquals("All files access", steps.first().title)

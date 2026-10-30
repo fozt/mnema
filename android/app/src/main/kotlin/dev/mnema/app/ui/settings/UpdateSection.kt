@@ -26,20 +26,16 @@ import dev.mnema.app.ui.components.SettingsGroup
 import dev.mnema.app.ui.components.SettingsRow
 import dev.mnema.app.ui.onboarding.open
 import dev.mnema.app.ui.record.helperClient
-import dev.mnema.app.ui.recordings.dayLabel
 import dev.mnema.app.update.UpdateStage
 import dev.mnema.app.update.installPermissionIntent
-import java.time.Instant
-import java.time.LocalDate
-import java.time.ZoneId
 import kotlin.math.max
 import kotlin.math.roundToInt
 import kotlin.math.roundToLong
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.map
 
 private val TITLE: String get() = tr("Updates")
 private val CHECKING: String get() = tr("Checking…")
+private val LATEST: String get() = tr("Latest version")
 private val NEEDS_PERMISSION: String get() = tr("Allow Mnema to install apps")
 private val INSTALLING: String get() = tr("Installing…")
 private val CONFIRM: String get() = tr("Confirm the installation")
@@ -53,6 +49,7 @@ private val TEXT_INSET = 72.dp
 
 enum class UpdateAction {
     CHECK,
+    CHECK_AGAIN,
     UPDATE,
     INSTALL,
     ALLOW,
@@ -61,6 +58,7 @@ enum class UpdateAction {
     val title: String
         get() = when (this) {
             CHECK -> tr("Check")
+            CHECK_AGAIN -> tr("Check again")
             UPDATE -> tr("Update")
             INSTALL -> tr("Install")
             ALLOW -> tr("Allow")
@@ -81,21 +79,20 @@ data class UpdateRow(
 )
 
 /** [recording]: the helper is recording, so update and install are only possible after it. */
-fun rowState(version: String, stage: UpdateStage, checkedAt: Long, today: LocalDate, zone: ZoneId, recording: Boolean): UpdateRow {
-    val row = stageRow(tr("Version {version}", "version" to version), stage, checkedAt, today, zone)
+fun rowState(version: String, stage: UpdateStage, recording: Boolean): UpdateRow {
+    val row = stageRow(tr("Version {version}", "version" to version), stage)
     return if (recording && row.action in WAITS_FOR_RECORDING) row.copy(subtitle = AFTER_RECORDING, enabled = false) else row
 }
 
-private fun stageRow(title: String, stage: UpdateStage, checkedAt: Long, today: LocalDate, zone: ZoneId): UpdateRow {
+private fun stageRow(title: String, stage: UpdateStage): UpdateRow {
     return when (stage) {
-        UpdateStage.Idle -> UpdateRow(title, checked(checkedAt, today, zone), UpdateAction.CHECK)
+        UpdateStage.Idle -> UpdateRow(title, null, UpdateAction.CHECK)
         UpdateStage.Checking -> UpdateRow(title, CHECKING, null, busy = true)
-        UpdateStage.UpToDate ->
-            UpdateRow(title, checked(checkedAt, today, zone) ?: checked(today, today), UpdateAction.CHECK)
+        UpdateStage.UpToDate -> UpdateRow(title, LATEST, UpdateAction.CHECK)
         is UpdateStage.Unsuitable -> UpdateRow(title, tr("{version} is not compatible with this phone", "version" to stage.manifest.version), UpdateAction.CHECK)
         is UpdateStage.Available -> UpdateRow(
             title,
-            tr("{version} available · {size} MB", "version" to stage.manifest.version, "size" to megabytes(stage.manifest.size)),
+            tr("Version {version} available · {size} MB", "version" to stage.manifest.version, "size" to megabytes(stage.manifest.size)),
             UpdateAction.UPDATE,
         )
         is UpdateStage.Downloading -> UpdateRow(
@@ -115,17 +112,7 @@ private fun stageRow(title: String, stage: UpdateStage, checkedAt: Long, today: 
 private fun retry(failed: UpdateStage.Failed): UpdateAction = when {
     failed.apk != null -> UpdateAction.INSTALL
     failed.manifest != null -> UpdateAction.UPDATE
-    else -> UpdateAction.CHECK
-}
-
-private fun checked(at: Long, today: LocalDate, zone: ZoneId): String? =
-    if (at <= 0) null else checked(Instant.ofEpochMilli(at).atZone(zone).toLocalDate(), today)
-
-// "today" and "yesterday" go lower case after the verb; a date stays as written ("Oct 21")
-private fun checked(day: LocalDate, today: LocalDate): String {
-    val label = dayLabel(day, today)
-    val relative = day == today || day == today.minusDays(1)
-    return tr("Checked {day}", "day" to if (relative) label.replaceFirstChar { it.lowercase() } else label)
+    else -> UpdateAction.CHECK_AGAIN
 }
 
 private fun megabytes(size: Long): Long = max(1, (size / BYTES_IN_MB).roundToLong())
@@ -135,7 +122,6 @@ fun UpdateGroup(graph: AppGraph, modifier: Modifier = Modifier) {
     val updates = graph.updates
     val context = LocalContext.current
     val stage by updates.stage.collectAsStateWithLifecycle()
-    val checkedAt by remember(graph) { graph.settings.settings.map { it.updateCheckedAt } }.collectAsStateWithLifecycle(0L)
     val helper by remember(graph) {
         helperClient(graph).getOrNull()?.state ?: MutableStateFlow(HelperState.NotRunning)
     }.collectAsStateWithLifecycle()
@@ -145,14 +131,13 @@ fun UpdateGroup(graph: AppGraph, modifier: Modifier = Modifier) {
         onPauseOrDispose {}
     }
     val notice by graph.serverNotice.collectAsStateWithLifecycle(null)
-    val zone = ZoneId.systemDefault()
-    val row = rowState(updates.versionName, stage, checkedAt, LocalDate.now(zone), zone, recording)
+    val row = rowState(updates.versionName, stage, recording)
     SettingsGroup(TITLE, modifier) {
         SettingsRow(Icons.Rounded.SystemUpdate, MaterialTheme.colorScheme.primary, row.title, row.subtitle) {
             row.action?.let { action ->
                 ActionButton(action, row.enabled) {
                     when (action) {
-                        UpdateAction.CHECK -> updates.check()
+                        UpdateAction.CHECK, UpdateAction.CHECK_AGAIN -> updates.check()
                         UpdateAction.UPDATE -> updates.update()
                         UpdateAction.INSTALL -> updates.install()
                         UpdateAction.ALLOW -> open(context, installPermissionIntent(context))
@@ -173,7 +158,7 @@ fun UpdateGroup(graph: AppGraph, modifier: Modifier = Modifier) {
 
 @Composable
 private fun ActionButton(action: UpdateAction, enabled: Boolean, onClick: () -> Unit) {
-    if (action == UpdateAction.CHECK) {
+    if (action == UpdateAction.CHECK || action == UpdateAction.CHECK_AGAIN) {
         TextButton(onClick = onClick, enabled = enabled) { Text(action.title) }
     } else {
         FilledTonalButton(onClick = onClick, enabled = enabled) { Text(action.title) }

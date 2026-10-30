@@ -26,12 +26,28 @@ internal val NO_NETWORK: String get() = tr("No connection")
 internal val NOT_PUBLISHED: String get() = tr("Updates are unavailable right now")
 internal val INSTALL_FAILED: String get() = tr("Couldn't install the update")
 
-private const val CHECK_EVERY_MS = 24 * 60 * 60 * 1000L
+private const val CHECK_EVERY_MS = 12 * 60 * 60 * 1000L
 private const val MAX_MANIFEST_BYTES = 64L * 1024
 private const val LOG_TAG = "MnemaUpdate"
 
-/** Time to check: never checked, a day has passed, or the clock was set back. */
+/** Time to check: never checked, 12 hours have passed, or the clock was set back. */
 fun due(checkedAt: Long, now: Long): Boolean = checkedAt <= 0 || now - checkedAt !in 0 until CHECK_EVERY_MS
+
+/** The app came to the foreground: check when it is due and nothing is being downloaded or installed. */
+fun checksOnForeground(stage: UpdateStage, checkedAt: Long, now: Long): Boolean = due(checkedAt, now) && when (stage) {
+    UpdateStage.Idle, UpdateStage.UpToDate, is UpdateStage.Unsuitable, is UpdateStage.Available -> true
+    is UpdateStage.Failed -> stage.manifest == null
+    else -> false
+}
+
+/** A newer version waits to be installed: the Settings tab carries a dot. */
+fun updatePending(stage: UpdateStage): Boolean = when (stage) {
+    is UpdateStage.Available, is UpdateStage.Downloading, is UpdateStage.NeedsPermission,
+    is UpdateStage.Ready, is UpdateStage.Installing, is UpdateStage.Confirm,
+    -> true
+    is UpdateStage.Failed -> stage.manifest != null
+    else -> false
+}
 
 /** The manifest of the latest release, by an anonymous GET. */
 suspend fun fetchManifest(http: OkHttpClient, url: String = MANIFEST_URL): UpdateManifest = withContext(Dispatchers.IO) {
@@ -86,12 +102,12 @@ class UpdateChecker(
 
     val versionName: String by lazy { packageInfo()?.versionName.orEmpty() }
 
-    /** At start: check at most once a day, without notifications; otherwise the outcome of the previous check. */
+    /** The app came to the foreground: check every 12 hours, without notifications; at start, the outcome of the previous check. */
     fun checkIfDue() = launchOnce {
-        if (state.value != UpdateStage.Idle) return@launchOnce
-        if (due(settings.current().updateCheckedAt, System.currentTimeMillis())) {
+        val now = state.value
+        if (checksOnForeground(now, settings.current().updateCheckedAt, System.currentTimeMillis())) {
             runCheck()
-        } else {
+        } else if (now == UpdateStage.Idle) {
             val saved = withContext(Dispatchers.IO) { loadManifest(lastManifest) } ?: return@launchOnce
             state.value = decide(installedCode(), saved, Build.VERSION.SDK_INT)
         }

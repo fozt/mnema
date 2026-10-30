@@ -5,6 +5,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -20,6 +22,8 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -35,6 +39,7 @@ import androidx.navigation.compose.rememberNavController
 import dev.mnema.app.AppGraph
 import dev.mnema.app.helper.HelperClient
 import dev.mnema.app.helper.HelperStatus
+import dev.mnema.app.i18n.tr
 import dev.mnema.app.ui.components.NowPlayingModel
 import dev.mnema.app.ui.components.TrackPlayer
 import dev.mnema.app.ui.onboarding.OnboardingScreen
@@ -45,6 +50,7 @@ import dev.mnema.app.ui.recordings.OpenRequestedRecordings
 import dev.mnema.app.ui.recordings.recordingsGraph
 import dev.mnema.app.ui.settings.SettingsScreen
 import dev.mnema.app.ui.theme.MnemaMotion
+import dev.mnema.app.update.updatePending
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -62,6 +68,7 @@ fun MnemaNav(graph: AppGraph) {
     // while settings load the screen is empty, so the first launch does not flash the Record tab
     val done = onboardingDone ?: return
     val nowPlaying = rememberNowPlaying(graph)
+    val update by graph.updates.stage.collectAsStateWithLifecycle()
     val start = rememberSaveable { if (done) Tab.RECORD.route else ONBOARDING_ROUTE }
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
@@ -80,7 +87,7 @@ fun MnemaNav(graph: AppGraph) {
                         ShortNavigationBarItem(
                             selected = destination?.hierarchy?.any { it.route == tab.route } == true,
                             onClick = { navController.showTab(tab) },
-                            icon = { Icon(tab.icon, contentDescription = null) },
+                            icon = { TabIcon(tab, dot = tab == Tab.SETTINGS && updatePending(update)) },
                             label = { Text(tab.title) },
                         )
                     }
@@ -119,6 +126,14 @@ fun MnemaNav(graph: AppGraph) {
             composable(Tab.SETTINGS.route) { SettingsScreen(graph) }
         }
         OpenRequestedRecordings(navController)
+    }
+}
+
+@Composable
+private fun TabIcon(tab: Tab, dot: Boolean) {
+    val available = tr("Update available")
+    BadgedBox(badge = { if (dot) Badge(Modifier.semantics { contentDescription = available }) }) {
+        Icon(tab.icon, contentDescription = null)
     }
 }
 

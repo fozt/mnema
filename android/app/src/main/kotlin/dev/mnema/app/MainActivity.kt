@@ -55,8 +55,6 @@ class MainActivity : ComponentActivity() {
             }
         }
         if (savedInstanceState == null) openRecordingFrom(intent)
-        // also after the process died; in a live process a repeat changes nothing
-        graph.updates.checkIfDue()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -67,6 +65,7 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         Notifications.syncWithStatus(this)
+        MnemaApp.graph(this).updates.checkIfDue()
     }
 
     // Recording notification; from Recents the old intent arrives again — it is not opened

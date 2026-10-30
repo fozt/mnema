@@ -82,14 +82,44 @@ class UpdateCheckerTest {
     }
 
     @Test
-    fun checkIsDueOncePerDay() {
-        val day = 24 * 60 * 60 * 1000L
+    fun checkIsDueEveryTwelveHours() {
+        val hours12 = 12 * 60 * 60 * 1000L
         val now = 1_800_000_000_000L
 
         assertTrue(due(checkedAt = 0, now = now))
         assertFalse(due(checkedAt = now - 1000, now = now))
-        assertFalse(due(checkedAt = now - day + 1, now = now))
-        assertTrue(due(checkedAt = now - day, now = now))
-        assertTrue(due(checkedAt = now + day, now = now))
+        assertFalse(due(checkedAt = now - hours12 + 1, now = now))
+        assertTrue(due(checkedAt = now - hours12, now = now))
+        assertTrue(due(checkedAt = now + hours12, now = now))
+    }
+
+    @Test
+    fun foregroundChecksWhenDueAndNothingIsUnderWay() {
+        val hours12 = 12 * 60 * 60 * 1000L
+        val checkedAt = 1_800_000_000_000L
+        val manifest = parseManifest(body)
+        val apk = java.io.File("/cache/updates/mnema-0.2.9.apk")
+        val resting = listOf(
+            UpdateStage.Idle,
+            UpdateStage.UpToDate,
+            UpdateStage.Unsuitable(manifest),
+            UpdateStage.Available(manifest),
+            UpdateStage.Failed("Нет связи"),
+        )
+        val busy = listOf(
+            UpdateStage.Checking,
+            UpdateStage.Downloading(manifest, 0.5f),
+            UpdateStage.Ready(manifest, apk),
+            UpdateStage.NeedsPermission(manifest, apk),
+            UpdateStage.Installing(manifest, apk),
+            UpdateStage.Confirm(manifest, apk, 6),
+            UpdateStage.Failed("Файл обновления повреждён", manifest),
+        )
+
+        for (stage in resting) {
+            assertFalse("$stage", checksOnForeground(stage, checkedAt, now = checkedAt + hours12 - 1))
+            assertTrue("$stage", checksOnForeground(stage, checkedAt, now = checkedAt + hours12))
+        }
+        for (stage in busy) assertFalse("$stage", checksOnForeground(stage, checkedAt, now = checkedAt + hours12))
     }
 }
