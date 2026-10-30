@@ -2149,7 +2149,7 @@ class BarRuntime:
             message,
             _("Quit"),
             lambda yes: self._quit_now() if yes else None,
-            cancel=_("Don't quit"),
+            cancel=_("Cancel"),
         )
 
     def _quit_now(self) -> None:

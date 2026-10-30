@@ -7,5 +7,5 @@
   "The update package isn't the Mnema app": "В пакете обновления не приложение Mnema",
   "The update package holds another Mnema version": "В пакете обновления другая версия Mnema",
   "The new Mnema version isn't signed correctly": "Подпись новой версии Mnema не прошла проверку",
-  "Mnema is running. Quit it and update again, or update from the app: Settings → General → Check for updates": "Mnema запущена. Выйдите из неё и обновите ещё раз или обновите из приложения: «Настройки → Общие → Проверить обновления»"
+  "Mnema is running. Quit it and update again, or update from the app: Settings → General → Check for updates": "Mnema запущена. Завершите её и обновите ещё раз или обновите из приложения: «Настройки → Общие → Проверить обновления»"
 }

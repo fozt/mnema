@@ -113,6 +113,6 @@ class ApkDownloaderTest {
 
         val gone = manifest()
         server.close()
-        assertEquals("Нет связи", failure { downloader().download(gone) {} })
+        assertEquals("Нет связи с сервером обновлений", failure { downloader().download(gone) {} })
     }
 }

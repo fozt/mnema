@@ -118,7 +118,7 @@ internal val RU_SYSTEM: Map<String, Any> = mapOf(
 
     // update
     "The update file is damaged" to "Файл обновления повреждён",
-    "Couldn't download the update. Try again later" to "Не удалось загрузить обновление. Повторите позже",
+    "Couldn't download the update" to "Не удалось скачать обновление",
     "Couldn't save the update" to "Не удалось сохранить обновление",
     "The update is signed with a different key. It must be signed with the same key as the installed Mnema" to
         "Обновление подписано другим ключом. Нужен пакет с подписью установленной Mnema",
@@ -129,9 +129,9 @@ internal val RU_SYSTEM: Map<String, Any> = mapOf(
     "The update isn't compatible with this phone" to "Обновление не подходит этому телефону",
     "Not enough space to install" to "Не хватает места для установки",
     "Installation didn't finish in time" to "Установка не завершилась вовремя",
-    "No connection" to "Нет связи",
+    "No connection to the update server" to "Нет связи с сервером обновлений",
     "Updates are unavailable right now" to "Обновления сейчас недоступны",
     "Couldn't install the update" to "Не удалось установить обновление",
-    "Couldn't check for updates. Try again later" to "Не удалось проверить обновления. Повторите позже",
+    "Couldn't check for updates" to "Не удалось проверить обновления",
     "Manifest not saved: {file}" to "Манифест не сохранён: {file}",
 )

@@ -75,7 +75,7 @@ def ensure_identity(folder: Path) -> str:
         expected = stamp(path)
         data = json.loads(read_file(path)[0]) if expected else {}
         if not isinstance(data, dict):
-            raise SyncError(_("Could not read the recording meta"))
+            raise SyncError(_("Could not read the recording details"))
         before = dict(data)
         if "id" in data:
             recording_id(data["id"])
@@ -100,7 +100,7 @@ def renew_identity(folder: Path) -> str:
         raw, expected = read_file(path)
         data = json.loads(raw)
         if not isinstance(data, dict):
-            raise SyncError(_("Could not read the recording meta"))
+            raise SyncError(_("Could not read the recording details"))
         data["id"] = str(uuid4())
         write_file(
             path,
@@ -179,7 +179,7 @@ def scan(
                 raw = read_file(inside(safe_path(root, relative, base) / FileName.META, base))[0]
                 data = json.loads(raw)
                 if not isinstance(data, dict):
-                    raise SyncError(_("Cannot read the recording meta"))
+                    raise SyncError(_("Cannot read the recording details"))
                 if data.get("id") in busy:
                     result.blocked_paths.append(relative)
                     return

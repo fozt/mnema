@@ -414,7 +414,9 @@ def build_live(
                 lang=lang,
                 label=s.name,
             )
-        status = _("ASR on server {url}, connecting in the background", url=connection.url)
+        status = _(
+            "Recognition on the server {url}, connecting in the background", url=connection.url
+        )
 
     prepared = PreparedLive(
         config=config,

@@ -30,10 +30,10 @@ class UpdateRowTest {
             UpdateStage.UpToDate to UpdateRow("Версия 0.2.8", "Последняя версия", UpdateAction.CHECK),
             UpdateStage.Available(manifest) to UpdateRow("Версия 0.2.8", "Доступна версия 0.2.9 · 14 МБ", UpdateAction.UPDATE),
             UpdateStage.Unsuitable(manifest) to UpdateRow("Версия 0.2.8", "0.2.9 не подходит этому телефону", UpdateAction.CHECK),
-            UpdateStage.Downloading(manifest, 0.43f) to UpdateRow("Версия 0.2.8", "Загружаю… 43 %", null, progress = 0.43f),
+            UpdateStage.Downloading(manifest, 0.43f) to UpdateRow("Версия 0.2.8", "Скачиваю… 43 %", null, progress = 0.43f),
             UpdateStage.NeedsPermission(manifest, apk) to
                 UpdateRow("Версия 0.2.8", "Разрешите Mnema устанавливать приложения", UpdateAction.ALLOW),
-            UpdateStage.Ready(manifest, apk) to UpdateRow("Версия 0.2.8", "Загружена 0.2.9", UpdateAction.INSTALL),
+            UpdateStage.Ready(manifest, apk) to UpdateRow("Версия 0.2.8", "Скачана версия 0.2.9", UpdateAction.INSTALL),
             UpdateStage.Confirm(manifest, apk, 6) to UpdateRow("Версия 0.2.8", "Подтвердите установку", UpdateAction.INSTALL),
             UpdateStage.Installing(manifest, apk, 6) to UpdateRow("Версия 0.2.8", "Устанавливаю…", null, busy = true),
         )

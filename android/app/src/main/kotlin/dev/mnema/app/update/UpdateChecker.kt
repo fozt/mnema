@@ -22,7 +22,7 @@ import okhttp3.Request
 
 const val MANIFEST_URL = "https://github.com/fozt/mnema/releases/latest/download/mnema-android.json"
 
-internal val NO_NETWORK: String get() = tr("No connection")
+internal val NO_NETWORK: String get() = tr("No connection to the update server")
 internal val NOT_PUBLISHED: String get() = tr("Updates are unavailable right now")
 internal val INSTALL_FAILED: String get() = tr("Couldn't install the update")
 

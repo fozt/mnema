@@ -14,7 +14,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 
 internal val CORRUPT: String get() = tr("The update file is damaged")
-internal val DOWNLOAD_FAILED: String get() = tr("Couldn't download the update. Try again later")
+internal val DOWNLOAD_FAILED: String get() = tr("Couldn't download the update")
 private val NOT_SAVED: String get() = tr("Couldn't save the update")
 
 private const val CHUNK = 64 * 1024

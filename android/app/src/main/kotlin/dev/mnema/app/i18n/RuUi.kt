@@ -277,8 +277,8 @@ internal val RU_UI: Map<String, Any> = mapOf(
     "Version {version}" to "Версия {version}",
     "{version} is not compatible with this phone" to "{version} не подходит этому телефону",
     "Version {version} available · {size} MB" to "Доступна версия {version} · {size} МБ",
-    "Downloading… {percent}%" to "Загружаю… {percent} %",
-    "{version} downloaded" to "Загружена {version}",
+    "Downloading… {percent}%" to "Скачиваю… {percent} %",
+    "{version} downloaded" to "Скачана версия {version}",
     // WavyPlayer
     "Seek" to "Перемотать",
     "Back 15 seconds" to "Назад на 15 секунд",

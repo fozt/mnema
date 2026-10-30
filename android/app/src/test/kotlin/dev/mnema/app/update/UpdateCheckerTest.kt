@@ -67,10 +67,10 @@ class UpdateCheckerTest {
     @Test
     fun serverErrorOrBrokenManifestCannotBeChecked() {
         server.enqueue(MockResponse.Builder().code(500).build())
-        assertEquals("Не удалось проверить обновления. Повторите позже", failure())
+        assertEquals("Не удалось проверить обновления", failure())
 
         server.enqueue(MockResponse.Builder().code(200).body("<html>").build())
-        assertEquals("Не удалось проверить обновления. Повторите позже", failure())
+        assertEquals("Не удалось проверить обновления", failure())
     }
 
     @Test
@@ -78,7 +78,7 @@ class UpdateCheckerTest {
         val gone = url()
         server.close()
 
-        assertEquals("Нет связи", failure(gone))
+        assertEquals("Нет связи с сервером обновлений", failure(gone))
     }
 
     @Test

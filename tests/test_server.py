@@ -476,7 +476,7 @@ def test_restart_closes_each_job_in_its_own_language(tmp_path):
     fresh = SqliteJobStore(tmp_path / "jobs.db")
     assert (fresh.get(english.id) or pytest.fail()).error == RESTARTED
     assert (fresh.get(russian.id) or pytest.fail()).error == (
-        "Раннер перезапустился во время задачи — повторите запуск."
+        "Сервер перезапустился во время задачи. Запустите её снова"
     )
 
 

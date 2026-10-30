@@ -293,7 +293,7 @@ class RunnerClientTest {
                     """"message":"Распознаю","result":null,"error":null}""",
             ),
         )
-        val text = "Раннер перезапустился во время задачи — повторите запуск."
+        val text = "Сервер перезапустился во время задачи. Запустите её снова"
         server.enqueue(reply(200, """{"id":"j1","status":"error","message":"","result":null,"error":"$text"}"""))
 
         val job = client("t").nodeJob("j1")

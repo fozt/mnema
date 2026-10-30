@@ -7,7 +7,7 @@ let ruStrings: [String: String] = [
     "Quit Mnema": "Завершить Mnema",
     "App is out of date": "Приложение устарело",
     "Quit Mnema and open it again. If that doesn't help, reinstall Mnema":
-        "Закройте Mnema и откройте снова. Не помогло, установите Mnema заново",
+        "Завершите Mnema и откройте снова. Если не поможет, установите Mnema заново",
 
     // `Mnema notify-test`
     "Notifications work": "Уведомления работают",

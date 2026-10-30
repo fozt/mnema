@@ -316,7 +316,7 @@ def test_session_announces_drop_episode_once_and_splits_utterance() -> None:
 
     texts = [s.text for s in tracks[0].committed]
     assert texts[0] == "до разрыва"  # force flush before the marker: the line is closed separately
-    assert _drop_markers(texts) == ["[пропущено ~5 с — транскрибация не поспевала]"]
+    assert _drop_markers(texts) == ["[пропущено ~5 с — распознавание не успевало]"]
     assert texts.index(_drop_markers(texts)[0]) == 1  # the marker between the pieces
     assert "после разрыва." in texts[-1]
     assert len(_drop_markers([t for _, t, _ in view.committed])) == 1  # and exactly one in the view
@@ -325,7 +325,7 @@ def test_session_announces_drop_episode_once_and_splits_utterance() -> None:
 @pytest.mark.parametrize(
     ("drop", "markers"),
     [
-        (3.0, ["[пропущено ~3 с — транскрибация не поспевала]"]),
+        (3.0, ["[пропущено ~3 с — распознавание не успевало]"]),
         (0.4, []),  # under a second: a marker would be noise
     ],
 )
@@ -518,7 +518,7 @@ def test_session_survives_feed_failure_and_keeps_wav_recording(tmp_path) -> None
     tracks = sess.run()  # does not raise
 
     assert "движок умер" in sess.asr_failures["mic"]
-    assert any("транскрибация недоступна" in t for _, t, _ in view.committed)
+    assert any("распознавание недоступно" in t for _, t, _ in view.committed)
     assert tracks[0].committed == []  # nothing was recognized, but the session survived
     with wave.open(str(tmp_path / "s.mic.wav"), "rb") as r:
         assert r.getnframes() == 800 * 3  # every frame, including those read after the failure
@@ -549,7 +549,7 @@ def test_session_survives_warmup_failure_as_dictaphone() -> None:
 
     assert "нет модели" in sess.asr_failures["mic"]
     assert rec.started and rec.stopped  # recording started and closed properly
-    assert any("транскрибация недоступна" in t for _, t, _ in view.committed)
+    assert any("распознавание недоступно" in t for _, t, _ in view.committed)
     assert tracks[0].committed == []
 
 
@@ -579,7 +579,7 @@ def test_session_marks_interrupted_transcript_in_track() -> None:
 
     texts = [s.text for s in tracks[0].committed]
     assert texts[0] == "привет."
-    assert "транскрибация недоступна" in texts[1] and "пайплайн умер" in texts[1]
+    assert "распознавание недоступно" in texts[1] and "пайплайн умер" in texts[1]
 
 
 def test_session_survives_finish_failure() -> None:
@@ -841,7 +841,7 @@ def test_stall_watchdog_announces_frozen_asr() -> None:
     sess.run()
 
     statuses = [txt for _, txt in view.statuses]
-    assert any("застопорился" in t for t in statuses)  # an honest status instead of silence
+    assert any("распознавание встало" in t for t in statuses)  # an honest status instead of silence
     assert any("rec" in t for t in statuses)  # points to the reliable path without streaming
 
 
@@ -857,7 +857,7 @@ def test_stall_watchdog_quiet_while_commits_flow() -> None:
 
     sess.run()
 
-    assert not any("застопорился" in t for _, t in view.statuses)
+    assert not any("распознавание встало" in t for _, t in view.statuses)
 
 
 def test_draft_tail_capped_on_screen() -> None:

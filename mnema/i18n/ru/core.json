@@ -44,7 +44,7 @@
   "Preparing recognition…": "Подготавливаю распознавание…",
   "Unknown reply from the recognition process": "Неизвестный ответ процесса распознавания",
   "Unknown recognition process operation: {operation}": "Неизвестная операция процесса распознавания: {operation}",
-  "Downloading the recognition model (only once)…": "Скачиваю модель распознавания, это один раз…",
+  "Downloading the recognition model, only the first time…": "Скачиваю модель распознавания, только в первый раз…",
   "huggingface_hub is missing — reinstall mlx-whisper.": "Нет huggingface_hub — переустановите mlx-whisper.",
   "The model {repo} did not finish downloading — check the network and try again.": "Модель {repo} не докачалась — проверьте сеть и повторите.",
   "Recognizing…": "Распознаю…",

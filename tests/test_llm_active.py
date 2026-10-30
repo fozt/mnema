@@ -353,7 +353,7 @@ def test_summary_stops_when_model_does_not_shorten_parts(monkeypatch) -> None:
     calls = _litellm(monkeypatch, lambda kw: kw["messages"][1]["content"])
     result = claude.title_summary_ex("system: " + "обсудили задачу " * 4000)
     assert result.engine == "none" and not result.points and not result.title
-    assert result.note and "сократить пересказ" in result.note.cloud_detail
+    assert result.note and "сократить текст" in result.note.cloud_detail
     assert len(calls) < 10
     assert not any("ПОЛНУЮ" in c["messages"][0]["content"] for c in calls)
 

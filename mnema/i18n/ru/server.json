@@ -47,7 +47,7 @@
   "The operation failed": "Операция завершилась с ошибкой",
   "The operation takes another kind of input": "Операция принимает другой вид входа",
   "The path is outside the working folder: {path}": "Путь вне рабочей папки: {path}",
-  "The previous hash is needed; sync again": "Нужен прежний хеш; повторите сверку",
+  "The previous hash is needed; sync again": "Нужен прежний хеш; повторите синхронизацию",
   "The previous hash or a file-absent condition is needed": "Нужен прежний хеш или условие отсутствия файла",
   "The recognition model did not start in {minutes} min. Try again later": "Модель распознавания не запустилась за {minutes} мин. Повторите позже",
   "The retry key is taken by another job": "Ключ повтора занят другой задачей",
@@ -56,7 +56,7 @@
   "The server is busy: the queue is full. Try again later": "Сервер занят: очередь заполнена. Повторите позже",
   "The server is restarting or unavailable": "Сервер перезапускается или недоступен",
   "The server refused the invitation": "Сервер отклонил приглашение",
-  "The server restarted during the job — start it again.": "Раннер перезапустился во время задачи — повторите запуск.",
+  "The server restarted during the job. Start it again": "Сервер перезапустился во время задачи. Запустите её снова",
   "The server returned error {code}": "Сервер ответил ошибкой {code}",
   "The server took all the bytes but did not finish the upload": "Сервер принял все байты, но не завершил загрузку",
   "The title has characters that are not allowed": "В названии есть недопустимые знаки",
@@ -66,12 +66,12 @@
   "The upload is not finished": "Загрузка не завершена",
   "The uploaded file is already deleted; upload the file again.": "Загруженный файл уже удалён; загрузите файл заново.",
   "Track paths must differ": "Пути дорожек должны различаться",
-  "Transcribing first…": "Сначала транскрибирую…",
+  "Recognizing speech first…": "Сначала распознаю речь…",
   "Translation failed: {reason}": "Перевод не получился: {reason}",
   "Unknown language": "Неизвестный язык",
   "Unknown operation: {op}": "Неизвестная операция: {op}",
   "Unknown recognition method": "Неизвестный способ распознавания",
   "Upload not found": "Загрузка не найдена",
   "Uploading to the server…": "Отправляю на сервер…",
-  "serve on {host} without MNEMA_TOKEN is unsafe: set MNEMA_TOKEN or listen on 127.0.0.1": "serve на {host} без MNEMA_TOKEN небезопасно: задай MNEMA_TOKEN или слушай 127.0.0.1"
+  "serve on {host} without MNEMA_TOKEN is unsafe: set MNEMA_TOKEN or listen on 127.0.0.1": "serve на {host} без MNEMA_TOKEN небезопасно: задайте MNEMA_TOKEN или слушайте 127.0.0.1"
 }

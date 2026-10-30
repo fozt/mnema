@@ -138,7 +138,7 @@ def resolve_model_path(repo: str, on: Progress = noop) -> str:
     snap = local_snapshot_dir(repo)
     if snap is not None:
         return str(snap)
-    on(None, _("Downloading the recognition model (only once)…"))
+    on(None, _("Downloading the recognition model, only the first time…"))
     try:
         from huggingface_hub import snapshot_download
     except ImportError as e:

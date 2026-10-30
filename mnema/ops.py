@@ -333,7 +333,7 @@ def _transcript_text(path: Path, on: Progress) -> str:
     txt = path.with_suffix(".txt")
     if txt.exists():
         return txt.read_text(encoding="utf-8")
-    on(None, _("Transcribing first…"))
+    on(None, _("Recognizing speech first…"))
     return _mc.transcribe(path, on=on).text
 
 

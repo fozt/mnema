@@ -340,7 +340,7 @@ def test_recognition_setting_applies_to_records_that_have_not_started(setup, tmp
 
 
 def test_quit_with_queue_asks_and_keeps_records_unprocessed(setup, tmp_path) -> None:
-    """Quitting Mnema during processing asks; "Don't quit" lets everything go on; "Quit" drops the
+    """Quitting Mnema during processing asks; "Cancel" lets everything go on; "Quit" drops the
     queue (the waiting one stays "Not processed") and the app can exit at once."""
     rt, _captured, gate, app = setup
     notes = tmp_path / "notes"
@@ -351,10 +351,10 @@ def test_quit_with_queue_asks_and_keeps_records_unprocessed(setup, tmp_path) -> 
     rt.handle("quit")
     assert app.questions == [
         (
-            "Выйти из Mnema?",
+            "Завершить Mnema?",
             "Обработка прервётся. Обработать записи можно после запуска.",
-            "Выйти",
-            "Не выходить",
+            "Завершить",
+            "Отменить",
         )
     ]
     assert not rt.quit_requested and len(rt.state.jobs) == 2
@@ -418,7 +418,7 @@ def test_queue_and_quit_questions_are_english_in_english(setup, tmp_path) -> Non
             "The recording will stop and be saved, and processing will be interrupted. "
             "You can process the recordings after the next launch.",
             "Quit",
-            "Don't quit",
+            "Cancel",
         ),
     ]
     assert not [t for q in app.questions for t in q if re.search("[А-Яа-яЁё]", t)]

@@ -33,7 +33,7 @@ from .library.files import LibraryFiles
 from .repo import create_repos
 
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
-RESTARTED = "The server restarted during the job — start it again."
+RESTARTED = "The server restarted during the job. Start it again"
 
 
 def require_safe_bind(host: str, token: str | None) -> None:

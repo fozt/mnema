@@ -253,7 +253,7 @@ def snapshot_dir(on: Progress = noop) -> Path:
     cached = _cached_snapshot()
     if cached is not None:
         return cached
-    on(None, _("Downloading the recognition model (only once)…"))
+    on(None, _("Downloading the recognition model, only the first time…"))
     try:
         from huggingface_hub import snapshot_download
     except ImportError as e:

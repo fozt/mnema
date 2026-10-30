@@ -587,7 +587,7 @@ def title_summary_ex(text: str, *, lang: str | None = None, on: Progress = noop)
         # Never cut the end of the call or send a final request that is surely too big; if the
         # model does not shorten the text, more paid requests will not help.
         if len(reduced) > one_pass and (len(reduced) >= len(source) or passes >= 3):
-            error = ValueError(_("Could not shorten the summary to the model's input limit"))
+            error = ValueError(_("Could not shorten the text to the size the model accepts"))
             return Summary(note=_failed(error, settings.credentials()))
         source = reduced
     on(None, _("Writing the summary and title…"))

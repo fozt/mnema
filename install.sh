@@ -132,8 +132,8 @@ if [ "$MODE" = server ]; then
   if ! docker_error="$(docker info 2>&1 >/dev/null)"; then
     case "$docker_error" in
       *"permission denied"*)
-        say "This user may not use Docker. Add it to the docker group, open a new shell and install again:" \
-          "Этому пользователю нельзя пользоваться Docker. Добавьте его в группу docker, откройте новую оболочку и установите снова:"
+        say "This user has no access to Docker. Add it to the docker group, open a new shell and install again:" \
+          "У этого пользователя нет доступа к Docker. Добавьте его в группу docker, откройте новую оболочку и установите снова:"
         printf '  sudo usermod -aG docker %s\n  newgrp docker\n' "$(id -un)" ;;
       *)
         say "Docker isn't running. Start it and install again:" \

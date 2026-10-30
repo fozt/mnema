@@ -122,7 +122,7 @@ class RemoteStreamingTranscriber:
             self.start_warmup()
             if not self._ready.wait(timeout=60):
                 raise MediaError(
-                    _("The server didn't answer 'ready' (connection, authorization or model?).")
+                    _("The server isn't ready: check the connection, the token and the model.")
                 )
             if self._error is not None:
                 raise MediaError(

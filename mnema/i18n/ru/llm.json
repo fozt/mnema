@@ -38,7 +38,7 @@
   "The model's answer was cut off, retrying…": "Ответ модели оборвался, повторяю…",
   "Summarizing part {i} of {n}…": "Пересказываю часть {i} из {n}…",
   "Shortening the summary: part {i} of {n}…": "Сокращаю пересказ: часть {i} из {n}…",
-  "Could not shorten the summary to the model's input limit": "Не удалось сократить пересказ до лимита входа модели",
+  "Could not shorten the text to the size the model accepts": "Не удалось сократить текст до размера, который принимает модель",
   "Writing the summary and title…": "Составляю пересказ и название…",
-  "Translation: part {i} of {n}": "Перевод: {i}/{n} частей"
+  "Translation: part {i} of {n}": "Перевод: часть {i} из {n}"
 }

@@ -438,10 +438,10 @@ def test_quit_mid_recording_saves_it_without_processing(monkeypatch, tmp_path, q
             app.write(_line(ActionMsg(key="quit")))
             ask = out.until(lambda m: isinstance(m, AskMsg))
             assert (ask.ask.title, ask.ask.message, ask.ask.ok, ask.ask.cancel) == (
-                "Выйти из Mnema?",
+                "Завершить Mnema?",
                 "Запись остановится и сохранится. Обработать её можно после запуска.",
-                "Выйти",
-                "Не выходить",
+                "Завершить",
+                "Отменить",
             )
             app.write(_line(AnswerMsg(id=ask.id, value=True)))
             thread.join(timeout=20)

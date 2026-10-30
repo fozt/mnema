@@ -10,7 +10,7 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
-internal val BAD_MANIFEST: String get() = tr("Couldn't check for updates. Try again later")
+internal val BAD_MANIFEST: String get() = tr("Couldn't check for updates")
 
 private const val MAX_APK_BYTES = 512L * 1024 * 1024
 

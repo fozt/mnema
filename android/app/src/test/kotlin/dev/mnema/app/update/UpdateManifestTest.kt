@@ -38,7 +38,7 @@ class UpdateManifestTest {
         try {
             parseManifest(text)
         } catch (e: UpdateException) {
-            assertEquals("Не удалось проверить обновления. Повторите позже", e.message)
+            assertEquals("Не удалось проверить обновления", e.message)
             return
         }
         fail("manifest accepted: $text")
