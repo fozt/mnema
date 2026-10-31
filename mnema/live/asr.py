@@ -96,6 +96,7 @@ class PhraseTranscriber:
         self._prev_end: int | None = None  # where the previous phrase ended
         self._committed: list[Segment] = []
         self._draft = ""
+        self._odd = b""  # PCM16 is a byte stream: a chunk may end in the middle of a sample
 
     def warmup(self) -> None:
         """Load the model; the first download is the batch jobs' business, not a live wait."""
@@ -116,7 +117,10 @@ class PhraseTranscriber:
 
         from ..core import vad
 
-        samples = np.frombuffer(pcm, dtype="<i2").astype(np.float32) / 32768
+        pcm = self._odd + pcm
+        whole = len(pcm) - len(pcm) % 2
+        self._odd = pcm[whole:]
+        samples = np.frombuffer(pcm[:whole], dtype="<i2").astype(np.float32) / 32768
         self._audio = np.concatenate([self._audio, samples])
         self._fed += len(samples)
         while self._vad_at() + vad.WINDOW <= self._fed:

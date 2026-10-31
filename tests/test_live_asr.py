@@ -223,3 +223,23 @@ def test_prebuffer_is_bounded_and_drops_oldest() -> None:
     assert buf.drain() == []  # empty after draining
     # dropped audio is counted: the stream fed to ASR starts this much later
     assert buf.dropped_seconds == 1.5  # 3 pieces of 0.5 s
+
+
+def _decoded(monkeypatch, tmp_path, pieces):
+    seen: list[dict] = []
+    _models(
+        monkeypatch, tmp_path, _speech([(1.0, 2.0), (4.0, 5.0)], 6), [{15: RAZ}, {55: DVA}], seen
+    )
+    tr = _session()
+    for piece in pieces:
+        tr.feed(piece)
+    return _texts(tr.finish()), [s["length"] for s in seen]
+
+
+def test_a_chunk_split_in_the_middle_of_a_sample_loses_nothing(monkeypatch, tmp_path):
+    """The client sends a byte stream: an odd chunk keeps its last byte for the next one."""
+    pcm = _pcm(6)
+    odd = [pcm[at : at + 4001] for at in range(0, len(pcm), 4001)]
+
+    assert _decoded(monkeypatch, tmp_path, odd) == _decoded(monkeypatch, tmp_path, [pcm])
+    assert _decoded(monkeypatch, tmp_path, odd)[0] == [" раз", " два"]
