@@ -1,5 +1,5 @@
 """Cloud model providers: key check and the key's model list (`mnema model` and the Mac model
-window), recognition models, model descriptions with limits, limit reset time, litellm names.
+window), model descriptions with limits, limit reset time, litellm names.
 
 Only GET requests to provider addresses, the key in a header, never in the URL; no generation
 requests here. One httpx client, http(): tests substitute TRANSPORT (httpx.MockTransport), and
@@ -110,9 +110,6 @@ _OPENAI = "https://api.openai.com/v1/models"
 _CLAUDE = "https://api.anthropic.com/v1/models"
 _OPENROUTER = "https://openrouter.ai/api/v1"
 _GROQ = "https://api.groq.com/openai/v1"
-# cloud speech recognition: the provider's whisper and *-transcribe models
-ASR_PROVIDERS = (Provider.GROQ, Provider.OPENAI)
-_ASR = re.compile(r"whisper|transcribe")
 # dated snapshot suffix: -20250929, -2025-08-07, -09-2025, -001
 _DATED = re.compile(r"-(\d{8}|\d{4}-\d{2}-\d{2}|\d{2}-\d{4}|\d{3})$")
 _CLAUDE_SNAPSHOT = re.compile(r"-\d{8}$")
@@ -253,14 +250,6 @@ def list_models(provider: Provider, key: str, *, timeout: float = 10.0) -> list[
     if provider == Provider.OPENROUTER:
         return sorted(models, key=lambda m: not m.free)
     return _ordered(provider, models)
-
-
-def asr_models(provider: Provider, key: str, *, timeout: float = 10.0) -> list[str]:
-    """The key's speech recognition models (Groq, OpenAI): whisper and *-transcribe from the
-    provider list, a dated snapshot hidden when the undated name exists.
-    Raises ProviderError | httpx.HTTPError."""
-    ids = [m.id for m in _raw_models(provider, key, timeout) if _ASR.search(m.id)]
-    return [i for i in ids if not (_DATED.search(i) and _DATED.sub("", i) in ids)]
 
 
 def key_models(provider: Provider, key: str, *, timeout: float = 10.0) -> list[ModelInfo]:

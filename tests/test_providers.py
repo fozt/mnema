@@ -355,43 +355,18 @@ def test_provider_error_text_hides_key() -> None:
     assert secret not in str(e) and e.status_code == 400
 
 
-def test_asr_models_come_from_the_provider_list(monkeypatch) -> None:
-    """Recognition models come from the key's provider list: whisper and *-transcribe, without chat
-    models or dated snapshots of listed undated names; Groq has its own address and the litellm
-    name "groq/…"."""
-    _serve(monkeypatch, {
-        "/openai/v1/models": (200, {"data": [
-            {"id": "whisper-large-v3"}, {"id": "whisper-large-v3-turbo"},
-            {"id": "llama-3.3-70b-versatile"},
-        ]}),
-        "/v1/models": (200, {"data": [
-            {"id": "gpt-5", "created": 3}, {"id": "whisper-1", "created": 1},
-            {"id": "gpt-4o-transcribe", "created": 2},
-            {"id": "gpt-4o-mini-transcribe-2025-03-20", "created": 2},
-            {"id": "gpt-4o-mini-transcribe", "created": 2},
-        ]}),
-    })  # fmt: skip
-    assert providers.asr_models(Provider.GROQ, "gsk_x") == [
-        "whisper-large-v3", "whisper-large-v3-turbo",
-    ]  # fmt: skip
-    assert set(providers.asr_models(Provider.OPENAI, "sk-proj-x")) == {
-        "whisper-1", "gpt-4o-transcribe", "gpt-4o-mini-transcribe",
-    }  # fmt: skip
-    assert providers.litellm_model(Provider.GROQ, "whisper-large-v3") == "groq/whisper-large-v3"
-
-
 _CYRILLIC = re.compile("[а-яА-ЯёЁ]")
 
 
 def test_key_step_and_cloud_recognition_refusals_read_in_english(monkeypatch) -> None:
     """The "Key" step and cloud recognition refusals, in an English interface."""
+    from mnema import node_settings
     from mnema.core.base import MediaError
     from mnema.i18n import using
-    from mnema.llm import asr
 
     bad = {"error": {"message": "API key not valid.", "code": 401}}
     _serve(monkeypatch, {"/v1beta/models?pageSize=1000": (401, bad)})
-    monkeypatch.setenv("MNEMA_MODEL", "anthropic/claude-sonnet-5")
+    monkeypatch.delenv("MNEMA_ASR_API_KEY", raising=False)
     with using("en"):
         problems = [
             providers.key_problem(Provider.GEMINI, ""),
@@ -400,17 +375,15 @@ def test_key_step_and_cloud_recognition_refusals_read_in_english(monkeypatch) ->
         ]
         with pytest.raises(MediaError) as refused:
             providers.check_key(Provider.GEMINI, "AIza" + "x" * 35)
-        with pytest.raises(MediaError) as no_key:
-            asr.credentials("groq/whisper-large-v3")
-        with pytest.raises(MediaError) as unknown:
-            asr.credentials("deepseek/whisper")
+        no_key = node_settings.asr_problem("openai/gpt-4o-transcribe")
+        unknown = node_settings.asr_problem("deepseek/whisper")
     assert problems == [
         "A key is required",
         "The key has invalid characters. Copy it again",
         "This is a Claude key",
     ]
     assert str(refused.value) == "The model key was rejected"
-    assert str(no_key.value) == "No Groq key. Choose another recognition model"
-    assert str(unknown.value) == "Unknown recognition model: deepseek/whisper"
-    texts = [*problems, str(refused.value), str(no_key.value), str(unknown.value)]
+    assert no_key == "No OpenAI key for recognition. Set it in Mnema settings on the Mac"
+    assert unknown == "Unknown recognition method"
+    texts = [*problems, str(refused.value), no_key, unknown]
     assert not [t for t in texts if _CYRILLIC.search(t)]

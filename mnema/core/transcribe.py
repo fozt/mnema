@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from ..i18n import _
-from .backends import AUTO, engine, select_backend
+from .backends import AUTO, NO_CLOUD_KEY, CloudBackend, engine, is_cloud, select_backend
 from .base import MediaError, Progress, noop
 from .models import Transcript
 from .probe import probe
@@ -20,26 +20,28 @@ def transcribe(
     lang: str | None = None,
     on: Progress = noop,
 ) -> Transcript:
-    """Recognize in a separate process, so all ASR memory is freed before the result returns."""
+    """Recognize in a separate process, so all ASR memory is freed before the result returns.
+    The cloud key goes with the job through the pipe: the process cannot tell whose it is."""
     from .worker import run
 
+    payload = {
+        "src": str(src.resolve()),
+        "backend": str(backend),
+        "model": model,
+        "lang": lang,
+        "threads": requested_asr_threads(),
+    }
+    if is_cloud(backend):
+        from ..llm.config import LLMSettings
+
+        payload["key"] = LLMSettings().asr_api_key
+        if not payload["key"]:
+            raise MediaError(_(NO_CLOUD_KEY))
     if backend != AUTO and not select_backend(backend, model=model).available():
         found = engine(backend)
         title = found.title if found is not None else backend
         raise MediaError(_("{name} recognition is not installed on this computer", name=title))
-
-    result = run(
-        "transcribe",
-        {
-            "src": str(src.resolve()),
-            "backend": str(backend),
-            "model": model,
-            "lang": lang,
-            "threads": requested_asr_threads(),
-        },
-        on=on,
-    )
-    return Transcript.model_validate(result)
+    return Transcript.model_validate(run("transcribe", payload, on=on))
 
 
 def _transcribe(
@@ -48,6 +50,7 @@ def _transcribe(
     backend: str = AUTO,
     model: str | None = None,
     lang: str | None = None,
+    key: str | None = None,
     on: Progress = noop,
 ) -> Transcript:
     """Worker body: pick the engine and recognize.
@@ -60,6 +63,8 @@ def _transcribe(
     if not info.has_audio:
         raise MediaError(_("The file has no audio track: {name}", name=src.name))
     be = select_backend(backend, model=model, lang=lang)
+    if isinstance(be, CloudBackend):
+        be.key = key
     tr = be.run(src, lang=lang, total_duration=info.duration, on=on)
     tr.engine = be.name
     return tr

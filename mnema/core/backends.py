@@ -1,5 +1,5 @@
-"""Local transcription engines: Parakeet, GigaAM, Whisper (mlx-whisper on Apple Silicon,
-whisperX elsewhere).
+"""Transcription engines: Parakeet, GigaAM, Whisper (mlx-whisper on Apple Silicon, whisperX
+elsewhere) and OpenAI in the cloud.
 
 Heavy imports (mlx_whisper, whisperx, torch) are lazy, inside methods, so the module imports
 on any platform. ENGINES is the registry: automatic choice, CLI --backend, the app's and the
@@ -65,7 +65,7 @@ class TranscriptionBackend(Protocol):
 
 
 class Engine:
-    """A local recognition engine. A new one is a subclass listed in ENGINES plus its pyproject
+    """A recognition engine. A new one is a subclass listed in ENGINES plus its pyproject
     extra; the CLI, the app's and the server's Recognition lists follow from ENGINES."""
 
     id: ClassVar[str]  # the choice in settings, bar.json and the CLI
@@ -73,6 +73,7 @@ class Engine:
     extra: ClassVar[str]  # the pyproject extra that installs it
     langs: ClassVar[frozenset[str] | None] = None  # None: any language
     names_lang: ClassVar[bool] = True  # recognizes without a given language and names it
+    cloud: ClassVar[bool] = False  # sends the audio out: chosen only by name, never automatically
     name: str  # recorded in history as the track's engine
     model: str
 
@@ -88,6 +89,8 @@ class Engine:
     @classmethod
     def automatic_for(cls, lang: str | None) -> bool:
         """Automatic choice takes it for this language (None: not given)."""
+        if cls.cloud:
+            return False
         return cls.names_lang if lang is None else cls.supports(lang)
 
     def available(self) -> bool:
@@ -837,8 +840,177 @@ class WhisperBackend(Engine):
         return self.create().run(src, lang=lang, total_duration=total_duration, on=on)
 
 
+# OpenAI in the cloud: the user's choice is the model, the key is the user's recognition key
+CLOUD_MODELS = ("openai/gpt-4o-transcribe", "openai/gpt-4o-mini-transcribe")
+NO_CLOUD_KEY = "No OpenAI key for recognition. Set it in Mnema settings on the Mac"
+_CLOUD_PART_S = 600.0  # the API takes up to 25 MB, about 13 minutes of our WAV
+_CLOUD_PROMPT_WORDS = 200
+_CLOUD_REQUESTS = 4
+
+
+def is_cloud(choice: str | None) -> bool:
+    """Whether the choice is cloud recognition: the audio goes to OpenAI."""
+    return choice in CLOUD_MODELS
+
+
+def _is_track(src: Path) -> bool:
+    """Already PCM16 mono 16 kHz (a Mnema track): no extraction needed."""
+    import wave
+
+    try:
+        with wave.open(str(src)) as w:
+            return (w.getnchannels(), w.getsampwidth(), w.getframerate()) == (1, 2, _GIGAAM_SR)
+    except (OSError, EOFError, wave.Error):
+        return False
+
+
+def _wav_bytes(wav: Path, start: int, end: int) -> bytes:
+    """Samples [start, end) of the track as a separate in-memory WAV."""
+    import io
+    import wave
+
+    with wave.open(str(wav)) as src:
+        src.setpos(start)
+        frames = src.readframes(end - start)
+        params = src.getparams()
+    out = io.BytesIO()
+    with wave.open(out, "wb") as dst:
+        dst.setparams(params)
+        dst.writeframes(frames)
+    return out.getvalue()
+
+
+def _utterances(speech: list[dict]) -> list[list[tuple[int, int]]]:
+    """VAD speech (samples) → utterances split at pauses as for GigaAM, each in parts of at most
+    _CLOUD_PART_S; a part follows the previous one of its utterance without a pause."""
+    gap = int(_GIGAAM_MAX_GAP_S * _GIGAAM_SR)
+    out: list[list[tuple[int, int]]] = []
+    for part in _group_vad_windows(speech, int(_CLOUD_PART_S * _GIGAAM_SR), gap):
+        if out and part[0] - out[-1][-1][1] <= gap:
+            out[-1].append(part)
+        else:
+            out.append([part])
+    return out
+
+
+def _answer_text(answer: Any) -> str:
+    text = answer.get("text") if isinstance(answer, dict) else getattr(answer, "text", None)
+    return str(text or "").strip()
+
+
+class CloudBackend(Engine):
+    """OpenAI recognition: silero-vad cuts the track into utterances, each utterance is one
+    request (a long one in parts) with the track's previous text as a prompt; several requests
+    at once. A failure after retries propagates: no other engine takes over."""
+
+    id = "cloud"
+    title, extra, names_lang, cloud = "OpenAI", "parakeet", False, True
+
+    def __init__(self, model: str = CLOUD_MODELS[0], key: str | None = None):
+        self.name = self.model = model
+        self.key = key  # comes with the job through the pipe, never from this process's files
+
+    @classmethod
+    def create(cls, model: str | None = None) -> TranscriptionBackend:
+        return cls(model or CLOUD_MODELS[0])
+
+    def available(self) -> bool:
+        import importlib.util
+
+        return all(importlib.util.find_spec(m) is not None for m in ("litellm", "silero_vad"))
+
+    def run(
+        self,
+        src: Path,
+        *,
+        lang: str | None = None,
+        total_duration: float = 0.0,
+        on: Progress = noop,
+    ) -> Transcript:
+        if not self.key:
+            raise MediaError(_(NO_CLOUD_KEY))
+        with tempfile.TemporaryDirectory() as tmp:
+            wav = src if _is_track(src) else extract_audio(src, Path(tmp) / "audio.wav", on=on)
+            on(None, _("Looking for speech…"))
+            with _GIGAAM_LOCK:
+                speech = _speech_timestamps(
+                    _read_wav_tensor(wav), max_speech_duration_s=_CLOUD_PART_S
+                )
+            segments = self._recognize(wav, _utterances(speech), lang, on)
+        text = " ".join(s.text for s in segments)
+        return Transcript(text=text, segments=segments, language=lang)
+
+    def _recognize(
+        self, wav: Path, utterances: list[list[tuple[int, int]]], lang: str | None, on: Progress
+    ) -> list[Segment]:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        lock = threading.Lock()
+        done: dict[int, list[Segment]] = {}
+
+        def report(fraction: float | None, message: str) -> None:
+            with lock:
+                on(fraction, message)
+
+        def heard_before(index: int) -> list[str]:
+            """Words of the track so far: the utterances recognized in a row from the start."""
+            with lock:
+                words: list[str] = []
+                for i in range(index):
+                    if i not in done:
+                        break
+                    words += [w for s in done[i] for w in s.text.split()]
+                return words
+
+        def recognize(index: int) -> None:
+            found: list[Segment] = []
+            before = heard_before(index)
+            for s, e in utterances[index]:
+                words = before + [w for x in found for w in x.text.split()]
+                prompt = " ".join(words[-_CLOUD_PROMPT_WORDS:]) or None
+                text = self._ask(_wav_bytes(wav, s, e), lang, prompt, report)
+                if text:
+                    found.append(Segment(start=s / _GIGAAM_SR, end=e / _GIGAAM_SR, text=text))
+            with lock:
+                done[index] = found
+
+        on(0.0, _("Recognizing…"))
+        pool = ThreadPoolExecutor(_CLOUD_REQUESTS, thread_name_prefix="cloud-asr")
+        try:
+            futures = [pool.submit(recognize, i) for i in range(len(utterances))]
+            for count, future in enumerate(as_completed(futures), 1):
+                future.result()
+                report(count / len(futures), _("Recognizing…"))
+        finally:
+            pool.shutdown(wait=False, cancel_futures=True)
+        return [s for i in range(len(utterances)) for s in done[i]]
+
+    def _ask(self, data: bytes, lang: str | None, prompt: str | None, on: Progress) -> str:
+        """One request; overload, 5xx and timeouts are retried as for text models."""
+        import litellm
+
+        from ..llm.claude import _pause, _retry_wait
+
+        litellm.suppress_debug_info = True
+        retries = 0
+        while True:
+            try:
+                answer = litellm.transcription(
+                    model=self.model, file=("utterance.wav", data), api_key=self.key,
+                    language=lang, prompt=prompt,
+                )  # fmt: skip
+            except Exception as e:
+                wait = _retry_wait(e, retries, live=False, started=False)
+                if wait is None:
+                    raise
+                retries += 1
+                _pause(wait, on)
+                continue
+            return _answer_text(answer)
+
+
 # The registry, in the order automatic choice tries them.
-ENGINES: tuple[type[Engine], ...] = (ParakeetBackend, GigaAmBackend, WhisperBackend)
+ENGINES: tuple[type[Engine], ...] = (ParakeetBackend, GigaAmBackend, WhisperBackend, CloudBackend)
 # Whisper variants, also chosen by name (CLI --backend mlx | whisperx)
 _VARIANTS: dict[str, type[MlxBackend] | type[WhisperXBackend]] = {
     "mlx": MlxBackend,
@@ -859,18 +1031,20 @@ def _no_engine() -> str:
 
 
 def engine(choice: str) -> type[Engine] | None:
-    """The registered engine with this id, or None (auto, a variant, cloud, unknown)."""
-    return next((e for e in ENGINES if e.id == choice), None)
+    """The registered engine of this choice, or None (auto, a variant, unknown)."""
+    if is_cloud(choice):
+        return next((e for e in ENGINES if e.cloud), None)
+    return next((e for e in ENGINES if not e.cloud and e.id == choice), None)
 
 
 def installed_engines() -> list[type[Engine]]:
-    """Registered engines this machine can run (packages only, no models)."""
-    return [e for e in ENGINES if e().available()]
+    """Registered local engines this machine can run (packages only, no models)."""
+    return [e for e in ENGINES if not e.cloud and e().available()]
 
 
 def backend_choices() -> list[str]:
-    """CLI --backend: automatic, every registered engine and the whisper variants."""
-    return [AUTO, *(e.id for e in ENGINES), *_VARIANTS]
+    """CLI --backend: automatic, every local engine, the whisper variants and the cloud models."""
+    return [AUTO, *(e.id for e in ENGINES if not e.cloud), *_VARIANTS, *CLOUD_MODELS]
 
 
 def engines_available() -> bool:
@@ -896,7 +1070,7 @@ def select_backend(
         return _variant(name, model)
     found = engine(name)
     if found is not None:
-        return found.create(model)
+        return found.create(name if found.cloud else model)
     if name != AUTO:
         allowed = ", ".join(backend_choices())
         raise MediaError(_("Unknown backend: {name} ({allowed})", name=name, allowed=allowed))

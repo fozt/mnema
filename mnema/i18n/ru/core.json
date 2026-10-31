@@ -58,5 +58,6 @@
   "The Parakeet weights do not match the encoder: {name} is missing": "Веса Parakeet не подходят к энкодеру: нет {name}",
   "The MLX engine does not support this Parakeet configuration": "Конфигурация Parakeet не поддерживается MLX-движком",
   "Unknown Parakeet weight: {name}": "Неизвестный вес Parakeet: {name}",
-  "{name} recognition is not installed on this computer": "Распознавание {name} не установлено на этом компьютере"
+  "{name} recognition is not installed on this computer": "Распознавание {name} не установлено на этом компьютере",
+  "No OpenAI key for recognition. Set it in Mnema settings on the Mac": "Нет ключа OpenAI для распознавания. Задайте его в настройках Mnema на Mac"
 }
