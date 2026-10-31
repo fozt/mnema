@@ -499,30 +499,9 @@ def _link(name: str) -> tarfile.TarInfo:
     return info
 
 
-@pytest.mark.parametrize(
-    ("damage", "error"),
-    [
-        ("checksum", "скачалось с ошибкой"),
-        ("connection", "Нет связи с сервером обновлений"),
-        ("server error", "Прежняя версия на месте"),
-        ("not a tar", "Неверное содержимое"),
-        ("outside the code", "Неверное содержимое"),
-        ("parent folder", "Неверное содержимое"),
-        ("absolute path", "Неверное содержимое"),
-        ("link", "Неверное содержимое"),
-        ("no clone copy", "Прежняя версия на месте"),
-        ("signing", "Подпись новой версии"),
-    ],
-)
-def test_a_failing_code_update_says_why_and_keeps_the_running_bundle(mac, tmp_path, damage, error):
-    """Only a code update that does not fit takes the whole app: a broken download, package or
-    disk would fail the zip the same way."""
-    bundle = mac["bundle"]
-    _code_release(mac, tmp_path)
+def _damage_code(mac, damage: str) -> None:
     if damage == "checksum":
         mac["code_sha256"] = "0" * 64
-    elif damage == "connection":
-        mac["code_status"] = "drop"
     elif damage == "server error":
         mac["code_status"] = 503
     elif damage == "not a tar":
@@ -538,9 +517,45 @@ def test_a_failing_code_update_says_why_and_keeps_the_running_bundle(mac, tmp_pa
     elif damage == "no clone copy":
         mac["clone_copy_fails"] = True
     else:
+        assert damage == "signing"
         mac["sign"] = 1
 
-    with pytest.raises(MediaError, match=error):
+
+CODE_DAMAGE = [
+    "checksum",
+    "server error",
+    "not a tar",
+    "outside the code",
+    "parent folder",
+    "absolute path",
+    "link",
+    "no clone copy",
+    "signing",
+]
+
+
+@pytest.mark.parametrize("damage", CODE_DAMAGE)
+def test_a_failing_code_update_takes_the_whole_app(mac, tmp_path, damage):
+    """Any failure after the code archive was fetched takes the zip: a bundle that refuses the
+    code update every time must still get the new version."""
+    bundle = mac["bundle"]
+    _code_release(mac, tmp_path)
+    _damage_code(mac, damage)
+
+    assert update.apply().bundle == str(bundle) and _version_of(bundle) == NEW
+
+    assert CODE_TAR in mac["calls"] and mac["calls"][-1] == FULL_ZIP
+    assert not (bundle / SITE / "mnema").exists()  # the whole app of the zip
+    assert _left_over(bundle.parent) == [".Mnema-previous.app"]
+
+
+def test_no_connection_for_the_code_archive_stops_without_the_zip(mac, tmp_path):
+    """The zip would not download either: the user hears why and the running bundle stays."""
+    bundle = mac["bundle"]
+    _code_release(mac, tmp_path)
+    mac["code_status"] = "drop"
+
+    with pytest.raises(MediaError, match="Нет связи с сервером обновлений"):
         update.apply()
 
     assert FULL_ZIP not in mac["calls"]
@@ -559,14 +574,34 @@ def test_code_release_takes_only_a_small_archive_over_https():
         )
 
 
-def test_when_both_packages_fail_the_running_bundle_stays(mac, tmp_path):
-    _code_release(mac, tmp_path, asr="asr 2")
-    mac["runtime"] = _runtime_of(mac["bundle"])  # built for another runtime: the zip is taken
-    mac["codesign"] = 3
+@pytest.mark.parametrize(
+    ("damage", "error"),
+    [
+        ("built for another", "Подпись новой версии"),
+        ("signing", "Подпись новой версии"),
+        ("checksum", "скачалось с ошибкой"),
+        ("no clone copy", "не приложение Mnema"),
+    ],
+)
+def test_when_both_packages_fail_the_running_bundle_stays(mac, tmp_path, damage, error):
+    """The user hears what failed in the zip, the last package taken."""
+    if damage == "built for another":
+        _code_release(mac, tmp_path, asr="asr 2")
+        mac["runtime"] = _runtime_of(mac["bundle"])  # the manifest names the installed runtime
+    else:
+        _code_release(mac, tmp_path)
+        _damage_code(mac, damage)
+    if error == "Подпись новой версии":
+        mac["codesign"] = 3
+    elif error == "скачалось с ошибкой":
+        mac["sha256"] = "0" * 64
+    else:
+        mac["zip"] = _zip(NEW, bundle_id="com.other.app")
 
-    with pytest.raises(MediaError, match="Подпись новой версии"):
+    with pytest.raises(MediaError, match=error):
         update.apply()
 
+    assert CODE_TAR in mac["calls"] and mac["calls"][-1] == FULL_ZIP
     assert _version_of(mac["bundle"]) == __version__ and _left_over(mac["bundle"].parent) == []
     assert _runtime_of(mac["bundle"]) == codesign.runtime_key(mac["bundle"])
 

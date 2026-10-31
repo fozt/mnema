@@ -280,6 +280,7 @@ def test_mac_without_the_app_bundle_is_sent_to_the_dmg(release, tmp_path, monkey
     """On a Mac there is no app built from the sources: an update outside Mnema.app downloads
     nothing and names the DMG."""
     monkeypatch.setattr(update.sys, "platform", "darwin")
+    monkeypatch.setattr("platform.machine", lambda: "arm64")
     monkeypatch.setattr(
         update.importlib.util, "find_spec", lambda name: object() if name == "AppKit" else None
     )
@@ -314,6 +315,40 @@ def test_command_of_uv_tool_is_told_how_to_update_itself(release, uv_tool, capsy
         f'Вышла Mnema {NEWER}. Обновите команду: uv tool install --force "mnema[cli] @ {wheel}"\n'
     )
     assert release["calls"] == ["/latest"] and release["commands"] == []
+
+
+def test_intel_mac_is_not_sent_to_the_arm64_dmg(release, monkeypatch):
+    """The DMG holds an Apple silicon app: an Intel Mac gets the command with a server."""
+    monkeypatch.setattr(update.sys, "platform", "darwin")
+    monkeypatch.setattr("platform.machine", lambda: "x86_64")
+    monkeypatch.setattr(
+        update.importlib.util, "find_spec", lambda name: object() if name == "AppKit" else None
+    )
+    with pytest.raises(MediaError) as refused:
+        update.apply()
+    assert str(refused.value) == (
+        "Приложению Mnema нужен Mac с чипом Apple. На этом Mac команда mnema работает с "
+        "сервером: https://github.com/fozt/mnema#install"
+    )
+    assert "DMG" not in str(refused.value) and release["calls"] == []
+
+
+def test_command_of_uv_tool_installs_with_the_locked_versions(release, uv_tool):
+    wheel = f"https://releases.test/v{NEWER}/mnema-{NEWER}-py3-none-any.whl"
+    pins = f"https://releases.test/v{NEWER}/mnema-{NEWER}-constraints.txt"
+    release["manifest"] = {"cli": {"wheel": wheel, "sha256": "a" * 64, "constraints": pins}}
+    with pytest.raises(MediaError) as refused:
+        update.apply(terminal=True)
+    assert str(refused.value) == (
+        f"Вышла Mnema {NEWER}. Обновите команду: uv tool install --force --constraints {pins} "
+        f'"mnema[cli] @ {wheel}"'
+    )
+
+
+def test_cli_constraints_come_only_over_https():
+    wheel = "https://releases.test/mnema.whl"
+    with pytest.raises(ValueError, match="HTTPS"):
+        update.CliRelease(wheel=wheel, sha256="a" * 64, constraints="http://releases.test/c.txt")
 
 
 def test_command_of_uv_tool_gets_the_release_page_without_a_wheel(release, uv_tool):

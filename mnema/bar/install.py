@@ -27,15 +27,21 @@ from ..i18n import _
 
 # English sources of the refusals below; the texts are read in the current language
 _FROM_DMG = "Mnema for Mac installs from the DMG: {url}"
+_NEEDS_APPLE_SILICON = (
+    "The Mnema app needs a Mac with Apple silicon. On this Mac, the mnema command works with a "
+    "server: {url}"
+)
 _NOT_IN_UV_TOOL = "The mnema command has no app. Install Mnema: {url}"
 INSTALL_PAGE = "https://github.com/fozt/mnema#install"
 _EXTRA_PATH = ("/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin")
 
 
 def from_dmg() -> str:
-    """The refusal of every source install of the Mac app."""
+    """The refusal of every source install of the Mac app; the DMG is arm64 only."""
     from ..update import RELEASES_PAGE
 
+    if platform.machine() != "arm64":
+        return _(_NEEDS_APPLE_SILICON, url=INSTALL_PAGE)
     return _(_FROM_DMG, url=RELEASES_PAGE)
 
 
