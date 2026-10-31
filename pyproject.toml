@@ -1,6 +1,6 @@
 [project]
 name = "mnema"
-version = "0.4.1"
+version = "0.5.0"
 description = "Meeting recordings: transcription, translation, summaries, merging, compression"
 requires-python = ">=3.12"
 # The core is what the Mac app ships: recording, sync, the server connection and summaries

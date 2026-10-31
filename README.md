@@ -317,8 +317,8 @@ uv tool install "mnema[cli] @ https://github.com/fozt/mnema/releases/download/vX
 ```
 
 The constraints file holds the versions of the dependencies the release was tested with. The
-command installs `mnema` and `mnema-mcp` into `~/.local/bin`; add that folder to `PATH` if your shell
-doesn't have it. Update with the same command and `--force` (`mnema update` prints it). On a Mac
+command installs `mnema` and `mnema-mcp` into `~/.local/bin`; add that folder to `PATH` if your
+shell doesn't have it. Update with the same command and `--force` (`mnema update` prints it). On a Mac
 the command recognizes through the installed Mnema app, so install the app too, or connect a
 server; on Linux it recognizes on the CPU with Parakeet or on a server. The Linux app installer
 adds the command itself.
