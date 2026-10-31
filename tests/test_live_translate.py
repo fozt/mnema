@@ -2,25 +2,18 @@
 
 from __future__ import annotations
 
-import httpx
-import pytest
-
-from mnema.live.translate import DeepLTranslator, LiveTranslator
+from mnema.live.translate import LiveTranslator
 from mnema.llm import claude
 
 
 def test_live_translate_available(monkeypatch) -> None:
-    """Live translation is available with DeepL or a configured model, otherwise not."""
+    """Live translation is available with a configured model, otherwise not."""
     from mnema.live.translate import live_translate_available
 
-    monkeypatch.delenv("DEEPL_API_KEY", raising=False)
     monkeypatch.delenv("MNEMA_MODEL", raising=False)
     assert live_translate_available() is False
     monkeypatch.setenv("MNEMA_MODEL", "anthropic/claude-haiku-4-5")
-    assert live_translate_available() is True  # model only
-    monkeypatch.delenv("MNEMA_MODEL", raising=False)
-    monkeypatch.setenv("DEEPL_API_KEY", "dk")
-    assert live_translate_available() is True  # DeepL only
+    assert live_translate_available() is True
 
 
 def test_push_uses_rolling_context_window(monkeypatch) -> None:
@@ -43,15 +36,9 @@ def test_push_uses_rolling_context_window(monkeypatch) -> None:
     assert "A." not in last_system  # fell out of the window (context=2)
 
 
-@pytest.mark.parametrize(
-    "make", [lambda: LiveTranslator("ru"), lambda: DeepLTranslator("en", api_key="k:fx")]
-)
-def test_push_empty_returns_empty(monkeypatch, make) -> None:
-    import mnema.live.translate as tr_mod
-
+def test_push_empty_returns_empty(monkeypatch) -> None:
     monkeypatch.setattr(claude, "_stream_text", lambda *a, **k: "should-not-call")
-    monkeypatch.setattr(tr_mod.httpx, "post", _fake_httpx_post([], reply="should-not-call"))
-    assert make().push("   ") == ""
+    assert LiveTranslator("ru").push("   ") == ""
 
 
 def test_push_streams_growing_translation_via_on_partial(monkeypatch) -> None:
@@ -205,132 +192,3 @@ def test_dialog_context_is_shared_across_directions(monkeypatch) -> None:
     system = captured[-1][0]
     # the other direction's line is in the context with its translation
     assert "они: How long will it take? ⟶ <How long will it take?>" in system
-
-
-def _fake_httpx_post(captured: list, reply: str = "translated"):
-    class Resp:
-        def raise_for_status(self):
-            pass
-
-        def json(self):
-            return {"translations": [{"text": reply}]}
-
-    def post(url, *, json=None, headers=None, timeout=None):
-        captured.append({"url": url, "json": json, "headers": headers})
-        return Resp()
-
-    return post
-
-
-@pytest.mark.parametrize(
-    ("key", "host", "lang", "target"),
-    [
-        ("k:fx", "https://api-free.deepl.com/", "en", "EN-US"),  # ":fx" is the Free plan
-        ("k", "https://api.deepl.com/", "ru", "RU"),
-    ],
-)
-def test_deepl_free_key_routes_to_free_host_and_maps_lang(monkeypatch, key, host, lang, target):
-    import mnema.live.translate as tr_mod
-
-    captured: list = []
-    monkeypatch.setattr(tr_mod.httpx, "post", _fake_httpx_post(captured))
-
-    out = DeepLTranslator(lang, api_key=key).push("Привет.")
-    assert out == "translated"
-    assert captured[0]["url"].startswith(host)
-    assert captured[0]["json"]["target_lang"] == target
-    assert captured[0]["headers"]["Authorization"] == f"DeepL-Auth-Key {key}"
-
-
-def test_deepl_context_carries_previous_pairs(monkeypatch) -> None:
-    """The second phrase goes with the first one's "line ⟶ translation" as context."""
-    import mnema.live.translate as tr_mod
-    from mnema.live.translate import DeepLTranslator
-
-    captured: list = []
-    monkeypatch.setattr(tr_mod.httpx, "post", _fake_httpx_post(captured, reply="one"))
-    d = DeepLTranslator("en", api_key="k:fx")
-    d.push("Первая.")
-    d.push("Вторая.")
-    assert "Первая. ⟶ one" in captured[1]["json"]["context"]
-
-
-def test_make_live_translator_prefers_deepl_when_key_set(monkeypatch) -> None:
-    """DeepL and a model → fallback; DeepL alone → plain DeepL; no DeepL → LiveTranslator."""
-    from mnema.live.translate import (
-        DeepLTranslator,
-        LiveTranslator,
-        _FallbackTranslator,
-        make_live_translator,
-    )
-
-    monkeypatch.setenv("DEEPL_API_KEY", "k:fx")  # conftest sets a model → fallback
-    assert isinstance(make_live_translator("en"), _FallbackTranslator)
-    monkeypatch.delenv("MNEMA_MODEL", raising=False)  # no model → plain DeepL
-    assert isinstance(make_live_translator("en"), DeepLTranslator)
-    monkeypatch.delenv("DEEPL_API_KEY")
-    assert isinstance(make_live_translator("en"), LiveTranslator)
-
-
-def _status_error(status: int, url: str = "https://api-free.deepl.com/v2/translate"):
-    req = httpx.Request("POST", url)
-    return httpx.HTTPStatusError("err", request=req, response=httpx.Response(status, request=req))
-
-
-def test_deepl_retries_once_on_transient(monkeypatch) -> None:
-    """429 (overload or rate limit) → one retry → success, the phrase is not lost."""
-    import mnema.live.translate as tr_mod
-
-    monkeypatch.setattr(tr_mod.time, "sleep", lambda s: None)
-    n = {"calls": 0}
-
-    class Resp:
-        def raise_for_status(self):
-            n["calls"] += 1
-            if n["calls"] == 1:
-                raise _status_error(429)
-
-        def json(self):
-            return {"translations": [{"text": "ok"}]}
-
-    monkeypatch.setattr(tr_mod.httpx, "post", lambda *a, **k: Resp())
-    assert tr_mod.DeepLTranslator("en", api_key="k:fx").push("Привет.") == "ok"
-    assert n["calls"] == 2  # the first (429) and the retry
-
-
-def test_deepl_no_retry_on_client_error(monkeypatch) -> None:
-    """400/456 (bad request or quota): a retry will not help, it raises at once."""
-    import pytest
-
-    import mnema.live.translate as tr_mod
-
-    n = {"calls": 0}
-
-    class Resp:
-        def raise_for_status(self):
-            n["calls"] += 1
-            raise _status_error(456)  # quota exceeded is not transient
-
-        def json(self):
-            return {"translations": [{"text": "x"}]}
-
-    monkeypatch.setattr(tr_mod.httpx, "post", lambda *a, **k: Resp())
-    with pytest.raises(httpx.HTTPStatusError):
-        tr_mod.DeepLTranslator("en", api_key="k:fx").push("Привет.")
-    assert n["calls"] == 1  # no retry
-
-
-def test_fallback_translator_uses_llm_when_deepl_fails() -> None:
-    """DeepL failed even after a retry → the LLM fallback translates the phrase."""
-    from mnema.live.translate import _FallbackTranslator
-
-    class BadPrimary:
-        def push(self, s, on_partial=None):
-            raise RuntimeError("deepl down")
-
-    class Stub:
-        def push(self, s, on_partial=None):
-            return "llm:" + s
-
-    ft = _FallbackTranslator(BadPrimary(), lambda: Stub())
-    assert ft.push("привет") == "llm:привет"

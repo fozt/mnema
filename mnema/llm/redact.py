@@ -1,7 +1,7 @@
 """Keys never reach logs, remarks or history: redact and install_redaction.
 
 Known secrets are the model and recognition keys (MNEMA_API_KEY, MNEMA_ASR_API_KEY from the
-process environment and ~/.config/mnema/.env), Mnema and Hugging Face tokens and the DeepL key;
+process environment and ~/.config/mnema/.env), Mnema and Hugging Face tokens;
 plus anything that looks like a key.
 """
 
@@ -18,7 +18,7 @@ from .providers import KEY_PREFIXES
 _PATTERNS = re.compile(
     "|".join([r"(?<=key=)[\w-]{20,}", *(re.escape(p) + r"[\w-]{20,}" for p, _ in KEY_PREFIXES)])
 )
-_ENV_SECRETS = ("MNEMA_API_KEY", "MNEMA_ASR_API_KEY", "HF_TOKEN", "MNEMA_TOKEN", "DEEPL_API_KEY")
+_ENV_SECRETS = ("MNEMA_API_KEY", "MNEMA_ASR_API_KEY", "HF_TOKEN", "MNEMA_TOKEN")
 _FILE_SECRETS = ("MNEMA_API_KEY", "MNEMA_ASR_API_KEY")
 _FILE: dict[str, tuple[tuple[int, int], list[str]]] = {}  # .env path → (mtime, size), keys
 _BUSY = threading.local()  # logging while reading the file must not read it again

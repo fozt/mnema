@@ -92,8 +92,7 @@ class Transcriber(Protocol):
 
 
 class Translator(Protocol):
-    # on_partial is optional: a streaming translator (LLM) grows the translation in the view,
-    # a non-streaming one (DeepL) ignores it
+    # on_partial is optional: a streaming translator grows the translation in the view
     def push(self, sentence: str, on_partial: Callable[[str], None] | None = None) -> str: ...
 
 

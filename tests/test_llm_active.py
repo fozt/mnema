@@ -107,7 +107,7 @@ def _env_file(monkeypatch, *lines: str):
 
 def _models(monkeypatch, model: str = "gemini/gemini-flash-latest", key: str = GEMINI_KEY):
     """Model and key as .env lines (written by mnema model)."""
-    return _env_file(monkeypatch, "DEEPL_API_KEY=deepl-other", f"MNEMA_MODEL={model}",
+    return _env_file(monkeypatch, "HF_TOKEN=hf-other", f"MNEMA_MODEL={model}",
                      f"MNEMA_API_KEY={key}")  # fmt: skip
 
 
@@ -274,10 +274,10 @@ def test_process_environment_overrides_the_env_file(monkeypatch) -> None:
     creds = LLMSettings().credentials()
     assert (creds.model, creds.api_key) == ("gemini/gemini-flash-latest", GEMINI_KEY)
     monkeypatch.delenv("MNEMA_API_KEY")
-    monkeypatch.delenv("DEEPL_API_KEY", raising=False)  # the environment is restored after the test
+    monkeypatch.delenv("HF_TOKEN", raising=False)  # the environment is restored after the test
     config.load_env()
     assert {"MNEMA_MODEL", "MNEMA_API_KEY"}.isdisjoint(os.environ)
-    assert os.environ["DEEPL_API_KEY"] == "deepl-other"  # other lines are still copied
+    assert os.environ["HF_TOKEN"] == "hf-other"  # other lines are still copied
 
 
 def test_qwen_without_base_goes_to_the_international_region(monkeypatch) -> None:

@@ -67,9 +67,6 @@ def _patch_live(monkeypatch, captured: dict) -> None:
     monkeypatch.setenv("MNEMA_RUNNER", NODE)
 
     monkeypatch.delenv("MNEMA_LIVE_DIR", raising=False)  # keep artifacts in cwd
-    monkeypatch.delenv(
-        "DEEPL_API_KEY", raising=False
-    )  # the live translator goes the model path in tests
     # the final polished translation (--translate) is an external boundary, no API in tests
     monkeypatch.setattr(
         claude,

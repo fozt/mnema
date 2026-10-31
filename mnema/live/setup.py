@@ -794,8 +794,7 @@ def _finalize_live(
     translate_failed = False
     cloud_ready = claude.llm_available()
     if prepared.dialog is not None and full:
-        from ..config import Settings
-        from .translate import DeepLTranslator, detect_lang
+        from .translate import detect_lang
 
         to = prepared.dialog.my_lang
         t0 = time.monotonic()
@@ -812,15 +811,6 @@ def _finalize_live(
                     on=p_translate,
                 )
                 translate_failed = translate_failed or failed
-            elif Settings().deepl_api_key:
-                # No model, but live translation went through DeepL: translate the final text
-                # with it too, or the saved file would lose the translation. Best effort.
-                p_translate(None, _step(STEP_MESSAGES["translate"]))
-                try:
-                    final = DeepLTranslator(to, timeout=30.0).push(full)
-                except Exception:  # noqa: BLE001 - translation is best effort
-                    final = None
-                    translate_failed = True
         run.steps["translate"] = _took(t0)
     p_translate(1.0, "")
 

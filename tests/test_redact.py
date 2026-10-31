@@ -74,20 +74,19 @@ def test_log_record_with_key_in_exception_is_redacted(env_keys, caplog) -> None:
 
 
 def test_redaction_keeps_log_args_without_secrets_and_hides_env_secrets(monkeypatch) -> None:
-    """A record without a secret stays as is (formatters like uvicorn read args); the runner token,
-    the DeepL key and model keys from the process environment are known secrets."""
+    """A record without a secret stays as is (formatters like uvicorn read args); the runner token
+    and model keys from the process environment are known secrets."""
     redact.install_redaction()
     make = logging.getLogRecordFactory()
     plain = make("uvicorn.access", logging.INFO, "", 0, '%s - "%s %s"', ("1.2.3.4", "GET", "/"),
                  None)  # fmt: skip
     assert plain.args == ("1.2.3.4", "GET", "/") and plain.getMessage() == '1.2.3.4 - "GET /"'
-    token, deepl = "t" * 60 + "bZ9x", "d" * 30 + "-c0de:fx"
+    token = "t" * 60 + "bZ9x"
     monkeypatch.setenv("MNEMA_TOKEN", token)
-    monkeypatch.setenv("DEEPL_API_KEY", deepl)
     monkeypatch.setenv("MNEMA_ASR_API_KEY", ASR_KEY)
-    url = f"https://runner/api/jobs?token={token} и {deepl} и {ASR_KEY}"
+    url = f"https://runner/api/jobs?token={token} и {ASR_KEY}"
     hidden = make("httpx", logging.ERROR, "", 0, "нет связи: %s", (url,), None)
-    for secret in (token, deepl, ASR_KEY):
+    for secret in (token, ASR_KEY):
         assert secret not in hidden.getMessage()
     assert "…bZ9x" in hidden.getMessage()
 
