@@ -4,21 +4,13 @@ recognition; the model key and CPU threads are set only in the server's own conf
 
 from __future__ import annotations
 
-import hashlib
 import json
 import socket
-import threading
-import time
 import unicodedata
 from pathlib import Path
 
-import httpx
-
-from .core import base
 from .core.base import MediaError
 from .i18n import _
-from .llm import asr, providers
-from .llm.providers import TITLES, Provider
 
 NAME_MAX = 40
 UNAVAILABLE_ASR = "The selected recognition is unavailable. Choose another"
@@ -97,10 +89,6 @@ def current() -> dict:
     }
 
 
-_ASR_CACHE: dict[tuple[Provider, str], tuple[float, list[str]]] = {}
-_ASR_LOCK = threading.Lock()
-
-
 def _local_asr() -> list[dict[str, str]]:
     from .core.backends import installed_engines
 
@@ -109,61 +97,44 @@ def _local_asr() -> list[dict[str, str]]:
 
 def local_asr_choices() -> list[dict[str, str]]:
     """Recognition by this machine's engines: Automatic and the installed ones; none installed
-    gives an empty list. No network: a Mac has no cloud recognition."""
+    gives an empty list."""
     choices = _local_asr()
     return [{"id": "auto", "title": _("Automatic")}, *choices] if choices else []
 
 
-def asr_problem(choice: str, lang: str | None = None) -> str | None:
-    """The check before work (before the server claims uploads): only packages and saved keys.
-    Processing on this Mac uses only its engines: a cloud choice is refused even with a key;
-    the cloud is for the server."""
-    if "/" not in choice:
-        if choice == "auto":
-            from .core.backends import select_backend
+def _cloud_key() -> str | None:
+    """The recognition key of whoever asks (on the server, the user's own)."""
+    from .llm.config import LLMSettings
 
-            try:
-                if select_backend("auto", lang=lang).available():
-                    return None
-            except MediaError:
-                pass
-        elif any(c["id"] == choice for c in _local_asr()):
-            return None
-        return _(UNAVAILABLE_ASR)
-    if base.processed_here():
-        return _(UNAVAILABLE_ASR)
-    found = providers.provider_of(choice)
-    if found is None or found[0] not in providers.ASR_PROVIDERS or not found[1]:
+    return LLMSettings().asr_api_key
+
+
+def asr_problem(choice: str, lang: str | None = None) -> str | None:
+    """The check before work (before the server claims uploads): only packages and saved keys,
+    no network."""
+    from .core.backends import NO_CLOUD_KEY, is_cloud, select_backend
+
+    if is_cloud(choice):
+        return None if _cloud_key() else _(NO_CLOUD_KEY)
+    if "/" in choice:
         return _("Unknown recognition method")
-    provider = found[0]
-    return None if asr.provider_key(provider) is not None else asr.no_key(provider)
+    if choice == "auto":
+        try:
+            if select_backend("auto", lang=lang).available():
+                return None
+        except MediaError:
+            pass
+    elif any(c["id"] == choice for c in _local_asr()):
+        return None
+    return _(UNAVAILABLE_ASR)
 
 
 def asr_choices() -> list[dict[str, str]]:
-    """The server's recognition list (GET /api/node/asr): local engines and the models of the
-    node's keys; a failed request keeps the previous list."""
-    from .llm.config import LLMSettings
+    """The server's recognition list (GET /api/node/asr): its local engines and, for whoever has
+    a recognition key, both OpenAI models."""
+    from .core.backends import CLOUD_MODELS
 
     choices = local_asr_choices()
-    settings = LLMSettings()
-    for provider in providers.ASR_PROVIDERS:
-        secret = settings.asr_key(provider)  # the same key recognition uses
-        if secret is None:
-            continue
-        cache_key = provider, hashlib.sha256(secret.encode()).hexdigest()
-        with _ASR_LOCK:
-            now = time.monotonic()
-            previous = _ASR_CACHE.get(cache_key)
-            if previous is not None and now - previous[0] < 600:
-                models = previous[1]
-            else:
-                try:
-                    models = providers.asr_models(provider, secret, timeout=5.0)
-                except (providers.ProviderError, httpx.HTTPError):
-                    models = previous[1] if previous else []
-                _ASR_CACHE[cache_key] = now, models
-        choices.extend(
-            {"id": f"{provider.value}/{model}", "title": f"{TITLES[provider]} · {model}"}
-            for model in models
-        )
+    if _cloud_key():
+        choices += [{"id": m, "title": "OpenAI · " + m.partition("/")[2]} for m in CLOUD_MODELS]
     return choices

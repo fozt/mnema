@@ -286,10 +286,6 @@ def _execute(operation: str, payload: dict, on: Progress) -> Any:
             from .transcribe import _transcribe
 
             value = _transcribe(Path(payload.pop("src")), **payload, on=on)
-        elif operation == "cloud_asr":
-            from ..llm.asr import _transcribe
-
-            value = _transcribe(Path(payload.pop("wav")), **payload, on=on)
         else:
             raise MediaError(
                 _("Unknown recognition process operation: {operation}", operation=operation)

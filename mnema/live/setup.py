@@ -516,14 +516,9 @@ def _refine_track(
     chosen = engine(choice)
     if chosen is not None:  # an engine without this language: Whisper, which has them all
         params["backend"] = choice if chosen.supports(lang) else WhisperBackend.id
-    tr = None
-    if "/" in choice:  # cloud, from this machine: the keys are here
-        from ..llm import asr
-
-        tr = asr.transcribe(wav, choice, lang=lang, on=on)
-    if tr is None:
-        result = dispatch("transcribe", wav, params, runner=None, local=True, on=on)
-        tr = Transcript.model_validate(result)
+    # the cloud too: an engine run here with this machine's (on a server, the user's) key
+    result = dispatch("transcribe", wav, params, runner=None, local=True, on=on)
+    tr = Transcript.model_validate(result)
 
     # Service markers ("[skipped ~N s]" and the like) are not speech: a track of markers only
     # is empty, and no offline text on it is not an error.

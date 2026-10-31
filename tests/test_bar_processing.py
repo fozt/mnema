@@ -411,32 +411,31 @@ def test_linux_without_server_texts_are_english_in_english(monkeypatch, home) ->
 def test_cloud_speech_choice_goes_to_the_server_only(monkeypatch, home, where) -> None:
     """Cloud recognition is the server's choice: with "On the server" it is kept and sent to
     the server, with "On this Mac" it becomes "Automatic"."""
-    from mnema.core.models import Transcript
-    from mnema.llm import asr as cloud_asr
+    from mnema.live import setup
 
     captured: dict = {}
     _patch_record(monkeypatch, home, captured)
     seen = _spied_server(monkeypatch, home)
     heard: list[str] = []
 
-    def transcribe(wav, choice, *, lang=None, on=None):  # the cloud provider
-        heard.append(choice)
-        return Transcript(text="привет", segments=[], language="ru")
+    def dispatch(op, src, params, **kw):  # the recognition engine where processing runs
+        heard.append(params.get("backend", "auto"))
+        return {"text": "привет", "segments": [], "language": "ru"}
 
-    monkeypatch.setattr(cloud_asr, "transcribe", transcribe)
-    groq = "groq/whisper-large-v3"
-    (home / "bar.json").write_text(json.dumps({"where": where, "asr": groq}), encoding="utf-8")
+    monkeypatch.setattr(setup, "dispatch", dispatch)
+    cloud = "openai/gpt-4o-transcribe"
+    (home / "bar.json").write_text(json.dumps({"where": where, "asr": cloud}), encoding="utf-8")
     rt = BarRuntime(platform=_App(), prefs_file=home / "bar.json")
-    assert rt.prefs.asr == (groq if where == "server" else "auto")
+    assert rt.prefs.asr == (cloud if where == "server" else "auto")
     rt.handle("start")
     assert captured["started"].wait(timeout=10)
     rt.handle("stop")
     rt.join(timeout=30)
     jobs = [json.loads(r.content) for r in seen if r.url.path == "/api/jobs"]
     if where == "server":
-        assert [job["params"]["asr"] for job in jobs] == [groq] and heard
+        assert [job["params"]["asr"] for job in jobs] == [cloud] and set(heard) == {cloud}
     else:
-        assert jobs == [] and heard == []
+        assert jobs == [] and cloud not in heard
     assert json.loads((home / "bar.json").read_text(encoding="utf-8"))["asr"] == rt.prefs.asr
 
 

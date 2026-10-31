@@ -29,8 +29,6 @@
   "The key has invalid characters. Copy it again": "В ключе есть недопустимые знаки. Скопируйте его заново",
   "A key is required": "Нужен ключ",
   "This is a {provider} key": "Это ключ {provider}",
-  "No {provider} key. Choose another recognition model": "Нет ключа {provider}. Выберите другое распознавание",
-  "Unknown recognition model: {choice}": "Неизвестная модель распознавания: {choice}",
   "Looking for speech…": "Ищу речь…",
   "Recognizing…": "Распознаю…",
   "The model is busy, retrying in {seconds} s…": "Модель занята, повторю через {seconds} с…",

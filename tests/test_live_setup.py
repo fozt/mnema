@@ -1071,12 +1071,15 @@ def test_cloud_speech_model_without_key_is_a_remark(monkeypatch, tmp_path) -> No
     """A cloud recognition model without a key gives a track remark (the server refuses such a
     job earlier: ops.admit); no local engine is silently substituted."""
     _patch_build(monkeypatch, {})
-    calls: list = []
-    _fake_dispatch(monkeypatch, calls=calls)
-    prepared = build_live(LiveConfig(asr="groq/whisper-large-v3", lang="ru"), base=tmp_path / "x")
+    monkeypatch.delenv("MNEMA_ASR_API_KEY", raising=False)
+    import litellm
+
+    monkeypatch.setattr(litellm, "transcription", lambda **kw: pytest.fail("no key, no request"))
+    prepared = build_live(
+        LiveConfig(asr="openai/gpt-4o-transcribe", lang="ru"), base=tmp_path / "x"
+    )
     _write_wav(prepared)
     result, _ = finalize_live(prepared, _live_tracks(), retitle=False)
-    assert not [c for c in calls if c["op"] == "transcribe"]
     [remark] = [r for r in result.remarks if r.step == Step.ASR]
     assert remark.cause == "Не удалось распознать дорожку «Микрофон»: сбой на сервере"
 
@@ -1134,31 +1137,22 @@ def test_recording_failure_survives_cancelled_processing(monkeypatch, tmp_path):
 
 @pytest.mark.parametrize("runner", [None, "https://unavailable-runner.invalid"])
 def test_cloud_asr_does_not_depend_on_runner_or_local_language_model(monkeypatch, tmp_path, runner):
-    from mnema.core.models import Transcript
-    from mnema.llm import asr
-
+    """Cloud recognition is an engine run where the recording is processed, with that
+    machine's key: never sent on to a runner."""
     _patch_build(monkeypatch, {})
     _no_llm(monkeypatch)
-    monkeypatch.setattr(
-        setup_mod, "dispatch", lambda *a, **k: pytest.fail("cloud ASR uses server keys")
-    )
-    seen = []
-
-    def recognize(wav, choice, *, lang=None, on):
-        seen.append((choice, lang))
-        return Transcript(
-            text="Hello", segments=[Segment(start=0, end=1, text="Hello")], language="en"
-        )
-
-    monkeypatch.setattr(asr, "transcribe", recognize)
+    calls: list = []
+    _fake_dispatch(monkeypatch, calls=calls)
     prepared = build_live(
-        LiveConfig(asr="groq/whisper-large-v3", runner=runner, summary=False),
+        LiveConfig(asr="openai/gpt-4o-transcribe", runner=runner, summary=False),
         base=tmp_path / "recording",
     )
     _write_wav(prepared)
     result, full = finalize_live(prepared, _live_tracks(), retitle=False)
-    assert seen == [("groq/whisper-large-v3", None)]
-    assert "Hello" in full and result.transcript_txt.is_file()
+    assert [(c["op"], c["params"], c["runner"], c["local"]) for c in calls] == [
+        ("transcribe", {"backend": "openai/gpt-4o-transcribe"}, None, True)
+    ]
+    assert result.transcript_txt.is_file()
     assert not result.defer_command
     assert not any(r.step is Step.SERVER for r in result.remarks)
 

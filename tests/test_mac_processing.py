@@ -289,16 +289,18 @@ def test_mac_refuses_unavailable_recognition_before_work(monkeypatch, tmp_path, 
     assert sources == []
 
 
-def test_mac_never_recognizes_in_the_cloud(monkeypatch, tmp_path, sources):
-    """A Mac recognizes with its own engines only: a cloud choice with a Groq key is refused
-    before work, the audio goes nowhere."""
-    monkeypatch.setenv("MNEMA_ASR_API_KEY", "gsk_" + "a" * 52)
+def test_mac_cloud_recognition_without_a_key_is_refused_before_work(monkeypatch, tmp_path, sources):
+    """A Mac without a server recognizes in the cloud with its own key; without one the
+    recording is refused before work and the audio goes nowhere."""
+    monkeypatch.delenv("MNEMA_ASR_API_KEY", raising=False)
     _asr(monkeypatch)
     folder = _recording(tmp_path / "notes")
-    config = LiveConfig(asr="groq/whisper-large-v3", mix_audio=False)
+    config = LiveConfig(asr="openai/gpt-4o-transcribe", mix_audio=False)
     with pytest.raises(MediaError) as refused:
         recording_client.recover_on_node(folder, config, None)
-    assert str(refused.value) == "Выбранное распознавание недоступно. Выберите другое"
+    assert str(refused.value) == (
+        "Нет ключа OpenAI для распознавания. Задайте его в настройках Mnema на Mac"
+    )
     assert not (folder / PROCESSING_MARK).exists() and meta.last(folder) is None
     assert sources == []
 
@@ -315,7 +317,7 @@ def test_cloud_choice_saved_for_mac_records_with_own_engines(
     _asr(monkeypatch)
     _model(monkeypatch)
     prefs = tmp_path / "bar.json"
-    prefs.write_text(json.dumps({"asr": "groq/whisper-large-v3"}), encoding="utf-8")
+    prefs.write_text(json.dumps({"asr": "openai/gpt-4o-transcribe"}), encoding="utf-8")
     folder = _recording(tmp_path / "notes")
     rt = BarRuntime(prefs_file=prefs)
     rt.recover(folder)

@@ -47,7 +47,7 @@ if mode in ('hang', 'stubborn', 'descendant'):
 operation = request['operation']
 if operation == 'language':
     result = {'lang': 'ru', 'prob': 0.99}
-elif operation in ('transcribe', 'cloud_asr'):
+elif operation == 'transcribe':
     result = {'text': json.dumps(p), 'language': p.get('lang'), 'engine': 'fixture',
               'segments': [{'start': 1.0, 'end': 2.0, 'text': 'привет'}]}
 else:
@@ -187,22 +187,30 @@ def test_public_transcribe_forwards_request_and_inherited_thread_budget(
     assert result.segments[0].start == 1 and result.engine == "fixture"
 
 
-def test_public_cloud_asr_uses_worker(subprocess_engine, monkeypatch, tmp_path):
-    """The recognition key from this machine's .env reaches the process through the job pipe."""
+def test_cloud_recognition_key_reaches_the_process_through_the_pipe(
+    subprocess_engine, monkeypatch, tmp_path
+):
+    """The recognition key from this machine's .env goes with the job, never in the process
+    arguments; without a key nothing starts."""
     from mnema import config
-    from mnema.llm import asr
+    from mnema.core import transcribe
+    from mnema.core.backends import CloudBackend
 
+    monkeypatch.setattr(CloudBackend, "available", lambda self: True)  # installed here
     monkeypatch.delenv("MNEMA_ASR_API_KEY", raising=False)
+    with pytest.raises(MediaError) as refused:
+        transcribe(tmp_path / "mic.wav", backend="openai/gpt-4o-transcribe")
+    assert str(refused.value).startswith("Нет ключа OpenAI для распознавания")
+    assert subprocess_engine == []
     env = config.user_env_file()
     env.parent.mkdir(parents=True, exist_ok=True)
-    env.write_text("MNEMA_ASR_API_KEY=gsk_fixture_key_for_worker\n")
-    result = asr.transcribe(tmp_path / "mic.wav", "groq/whisper-large-v3", lang="de")
+    env.write_text("MNEMA_ASR_API_KEY=sk-proj-fixture-key-for-worker\n")
+    result = transcribe(tmp_path / "mic.wav", backend="openai/gpt-4o-transcribe", lang="de")
     request = json.loads(result.text)
-    assert request["choice"] == "groq/whisper-large-v3"
-    assert (request["key"], request["base"]) == ("gsk_fixture_key_for_worker", None)
-    assert result.language == "de"
+    assert request["backend"] == "openai/gpt-4o-transcribe" and request["lang"] == "de"
+    assert request["key"] == "sk-proj-fixture-key-for-worker"
     assert len(subprocess_engine) == 1
-    assert "gsk_fixture_key_for_worker" not in " ".join(subprocess_engine[0].process.args)
+    assert "sk-proj-fixture-key-for-worker" not in " ".join(subprocess_engine[0].process.args)
 
 
 def test_real_worker_error_does_not_import_heavy_libraries_in_parent(tmp_path):
