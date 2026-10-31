@@ -249,6 +249,7 @@ def available() -> bool:
 
 DOWNLOAD_FAILED = "Could not download the recognition model. Check the connection and try again"
 NO_SPACE = "Not enough disk space for the recognition model"
+DOWNLOADING = "Downloading the recognition model, only the first time…"
 
 
 def model_dir(on: Progress = noop) -> Path:
@@ -267,7 +268,7 @@ def model_dir(on: Progress = noop) -> Path:
     folder = _cached()
     if all((folder / name).is_file() for name in ONNX_FILES):
         return folder
-    on(None, _("Downloading the recognition model, only the first time…"))
+    on(None, _(DOWNLOADING))
     try:
         _fetch(folder)
     except OSError as e:  # the cache: no space, read-only, another owner after a reinstall

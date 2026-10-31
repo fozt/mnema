@@ -708,6 +708,27 @@ def test_mac_recognizes_both_tracks_with_one_model_load(monkeypatch, tmp_path, s
     assert {"Распознаю микрофон…", "Распознаю системный звук…"} <= set(steps)
 
 
+def test_the_first_model_download_does_not_fill_the_recognition_bar(
+    monkeypatch, tmp_path, sources
+) -> None:
+    """The model downloads to the end before both tracks are recognized: recognition goes on
+    from where the download left the bar instead of sitting at the end of the step."""
+    helper = _mac_helper(monkeypatch, tmp_path, installed={"parakeet": False})
+    _model(monkeypatch)
+    seen: list[tuple[float, str]] = []
+    recording_client.recover_on_node(
+        _recording(tmp_path / "mac"),
+        LiveConfig(mix_audio=False),
+        None,
+        on=lambda fraction, message: fraction is not None and seen.append((fraction, message)),
+    )
+    assert helper.operations() == ["transcribe", "download", "transcribe"]
+    downloads = [f for f, m in seen if m.startswith("Скачиваю модель распознавания")]
+    recognized = [f for f, m in seen if m.startswith("Распознаю ")]
+    assert len(downloads) == 2 and downloads[0] < downloads[1]  # the download shows its share
+    assert recognized and downloads[-1] < min(recognized)
+
+
 def test_a_failed_request_of_both_tracks_is_told_per_track(monkeypatch, tmp_path, sources):
     """The helper could not read the audio: each track has its own remark (the second one tried
     alone), the recording keeps its audio."""
@@ -725,10 +746,10 @@ def test_a_failed_request_of_both_tracks_is_told_per_track(monkeypatch, tmp_path
 
 
 def test_stopping_the_request_of_both_tracks_stops_the_helper(monkeypatch, tmp_path, sources):
-    import os
-
     """Stopping while the one request downloads the model: the stop propagates as is and no
     helper is left running."""
+    import os
+
     helper = _mac_helper(monkeypatch, tmp_path, installed={"parakeet": False}, hang=True)
 
     def on(fraction: float | None, message: str) -> None:

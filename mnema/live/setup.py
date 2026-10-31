@@ -69,6 +69,7 @@ logger = logging.getLogger(__name__)
 INCOMPLETE_INSTALL = "Mnema is not fully installed. Reinstall it"
 # Progress line of the recognition engines (core, cloud ASR); a track names its source instead.
 RECOGNIZING = "Recognizing…"
+_MODEL_SHARE = 0.25  # of the recognition bar: the first model download, ~630 MB
 
 if TYPE_CHECKING:
     from .session import LiveSession, View
@@ -609,16 +610,35 @@ def _refine_tracks(
     langs = {track.label: chosen for track, _wav in candidates}
     if on_lang is not None and chosen:
         on_lang(dict.fromkeys(langs, chosen))
+    from ..core.backends import recognized_together
+    from ..core.parakeet import DOWNLOADING
+
     reached = [0.0]
+    model = [0.0]  # the share of the first model download at the start of this pass
 
     def forward(fraction: float | None, message: str) -> None:
         # never back: one request recognizes every track while the first is being asked for
         if fraction is not None:
             fraction = reached[0] = max(reached[0], fraction)
+            fraction = model[0] + fraction * (1.0 - model[0])
         on_asr(fraction, message)
+
+    def downloading(fraction: float | None, message: str) -> bool:
+        """The model downloads before the first track: its own share at the start of the
+        pass, not a track's, so recognition does not start from a full bar."""
+        if message not in (DOWNLOADING, _(DOWNLOADING)):
+            return False
+        if fraction is not None and reached[0] == 0.0:
+            model[0] = _MODEL_SHARE
+            on_asr(fraction * _MODEL_SHARE, message)
+        else:
+            on_asr(None, message)
+        return True
 
     def progress_of(sl: Progress, label: str) -> Progress:
         def track_progress(fraction: float | None, message: str) -> None:
+            if downloading(fraction, message):
+                return
             generic = message in (RECOGNIZING, _(RECOGNIZING))
             sl(fraction, _recognizing(label) if generic else message)
 
@@ -631,11 +651,11 @@ def _refine_tracks(
 
     def together(fraction: float | None, message: str) -> None:
         """A fraction of all tracks in one request → the slice of the track it is in."""
+        if downloading(fraction, message):
+            return
         count = len(progress)
         index = 0 if fraction is None else min(int(fraction * count), count - 1)
         progress[index](None if fraction is None else fraction * count - index, message)
-
-    from ..core.backends import recognized_together
 
     t_asr = time.monotonic()
     with recognized_together([wav for _track, wav in candidates], on=together):

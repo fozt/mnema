@@ -50,7 +50,7 @@ _REASONS = {
     "unsupported_mac": "recognition on this Mac needs Apple silicon",
 }
 _STAGES = {
-    "download": "Downloading the recognition model, only the first time…",
+    "download": parakeet.DOWNLOADING,
     "load": "Loading the recognition model…",
     "recognize": "Recognizing…",
 }
