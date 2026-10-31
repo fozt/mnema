@@ -201,6 +201,8 @@ class BarState(BaseModel):
     sync_revision: int = 0  # UI only: revision of the selected connection
     sync_missing: list[str] = Field(default_factory=list)
     sync_missing_on_server: bool = False  # sync_missing are gone on the server, not here
+    sync_other_library: int | None = None  # the server has another library: local recordings
+    sync_foreign: str = ""  # that library's number, for the answer
     sync_errors: list[str] = Field(default_factory=list)
 
     @property
@@ -382,7 +384,13 @@ def can_relang(job: Job) -> bool:
 def has_warning(state: BarState) -> bool:
     """Yellow icon: something keeps the recording from getting its text, visible before the
     call ends."""
-    return bool(state.notice or state.error or state.sync_errors or state.sync_missing)
+    return bool(
+        state.notice
+        or state.error
+        or state.sync_errors
+        or state.sync_missing
+        or state.sync_other_library is not None
+    )
 
 
 class Title(BaseModel):
@@ -409,9 +417,8 @@ def title(state: BarState, *, discreet: bool = False, coarse: bool = False) -> T
         return Title(icon=icon, text=fmt_elapsed(state.elapsed))
     if state.jobs:
         return Title(icon="saving")  # the card and the menu show the step
-    return Title(
-        icon="warning" if state.error or state.sync_errors or state.sync_missing else "idle"
-    )
+    asking = state.sync_missing or state.sync_other_library is not None
+    return Title(icon="warning" if state.error or state.sync_errors or asking else "idle")
 
 
 _ARTIFACTS = {".txt", ".md", ".mp3", ".wav"}  # files inside a recording folder

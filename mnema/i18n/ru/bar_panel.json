@@ -83,5 +83,16 @@
   "{server} is unavailable": "{server} недоступен",
   "{server}: invitation needed": "{server}: нужно приглашение",
   "{step} {percent}%": "{step} {percent} %",
-  "Mnema {version} available": "Доступна Mnema {version}"
+  "Mnema {version} available": "Доступна Mnema {version}",
+  "The server has another recordings library. Send {n} recording from this Mac to it?": [
+    "На сервере другая библиотека записей. Отправить в неё {n} запись с этого Mac?",
+    "На сервере другая библиотека записей. Отправить в неё {n} записи с этого Mac?",
+    "На сервере другая библиотека записей. Отправить в неё {n} записей с этого Mac?"
+  ],
+  "The server has another recordings library. Send {n} recording from this computer to it?": [
+    "На сервере другая библиотека записей. Отправить в неё {n} запись с этого компьютера?",
+    "На сервере другая библиотека записей. Отправить в неё {n} записи с этого компьютера?",
+    "На сервере другая библиотека записей. Отправить в неё {n} записей с этого компьютера?"
+  ],
+  "Send": "Отправить"
 }

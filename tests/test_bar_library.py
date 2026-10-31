@@ -220,7 +220,7 @@ def test_shared_cleanup_rule(tmp_path, case):
     """The shared fixture of the cleanup rule: audio goes only when the recording is processed and
     has text, and with a connected server the last sync with it confirmed those texts. The command
     shows while there is audio; it removes exactly what removed lists, and with nothing to remove
-    it says why."""
+    it says why. Another library on the server since that sync confirms nothing."""
     connection = CONNECTION if case.get("selected", SERVER) else None
     folder, data = record(tmp_path, "Запись", text=False)
     (folder / ".mnema-meta.json").write_text(json.dumps({**data, "runs": case["runs"]}))
@@ -234,7 +234,11 @@ def test_shared_cleanup_rule(tmp_path, case):
         }
         known = Record(id=data["id"], path="Запись", files={FileName.META: meta, **texts}, tag="")
         server = SERVER if case["server"] == "selected" else case["server"]
-        save(checkpoint_path(), Checkpoint(server=server, records={known.id: known}))
+        foreign = case.get("foreign", "")
+        save(
+            checkpoint_path(),
+            Checkpoint(server=server, foreign=foreign, records={known.id: known}),
+        )
     assert model(tmp_path, connection=connection).cleanup is not None  # every case has audio
     plan = cleanup_plan(tmp_path, connection=connection, busy=lambda: set())
     assert plan.records == (1 if case["removed"] else 0) and bool(plan.reason)

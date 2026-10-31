@@ -165,7 +165,7 @@ def test_server_states() -> None:
     assert tones == [Tone.WARN, Tone.NONE, Tone.OK, Tone.WARN, Tone.ERROR]
 
 
-def _checkpoint(server: str, count: int) -> None:
+def _checkpoint(server: str, count: int, foreign: str = "") -> None:
     """sync.json of the last sync with server: count recordings."""
     from uuid import uuid4
 
@@ -175,12 +175,15 @@ def _checkpoint(server: str, count: int) -> None:
     records = {
         i: {"id": i, "path": f"Запись {n}", "files": {}, "tag": "t"} for n, i in enumerate(ids)
     }
-    save(checkpoint_path(), Checkpoint.model_validate({"server": server, "records": records}))
+    save(
+        checkpoint_path(),
+        Checkpoint.model_validate({"server": server, "records": records, "foreign": foreign}),
+    )
 
 
 def test_records_on_server_only_from_the_sync_with_this_server(monkeypatch, tmp_path) -> None:
     """Recordings on the server is the count of the last sync when it was with the connected
-    server; another server or none, no row."""
+    server; another server or none, or another library on it, no row."""
     rt = BarRuntime(prefs_file=tmp_path / "bar.json")
     _checkpoint("http://srv:8123", 3)
     assert rt.menu_env().server_records is None  # no server connected
@@ -188,6 +191,8 @@ def test_records_on_server_only_from_the_sync_with_this_server(monkeypatch, tmp_
     assert rt.menu_env().server_records == 3
     _checkpoint("http://srv:8123", 5)  # synced again
     assert rt.menu_env().server_records == 5
+    _checkpoint("http://srv:8123", 5, foreign="L2")  # the server has another library now
+    assert rt.menu_env().server_records is None
     monkeypatch.setenv("MNEMA_RUNNER", "http://other:8000")
     assert rt.menu_env().server_records is None
 

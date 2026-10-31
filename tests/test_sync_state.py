@@ -18,7 +18,13 @@ def test_checkpoint_roundtrip_uses_shared_wire_fixture(tmp_path):
     path = tmp_path / "state/sync.json"
     save(path, checkpoint)
     assert load(path) == checkpoint
-    assert set(json.loads(path.read_text())) == {"server", "records", "sections"}
+    assert set(json.loads(path.read_text())) == {
+        "server",
+        "library",
+        "foreign",
+        "records",
+        "sections",
+    }
     assert "text" not in json.loads(path.read_text())["records"][record.id]
     assert not list(path.parent.glob(".sync.json.*"))
 

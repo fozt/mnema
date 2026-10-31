@@ -1,5 +1,7 @@
 {
   "server": "http://node",
+  "library": "5e1f0c3a9b2d4c71",
+  "foreign": "",
   "records": {
     "167619ea-d702-4d4f-95f9-339ebc86873e": {
       "id": "167619ea-d702-4d4f-95f9-339ebc86873e",

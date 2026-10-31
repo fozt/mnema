@@ -26,12 +26,16 @@ from .scan import FILES_LOCK, Scan, SyncError, created_ns, scan, stamp, write_fi
 logger = logging.getLogger(__name__)
 # Shown through _() where it is reported.
 SYNC_FAILED = "Could not sync recordings with the server. See the Mnema log for details"
+LIBRARY_CHANGED = "The recordings library on the server changed; sync again"
 
 
 class SyncStatus(BaseModel):
     connection: str | None = Field(default=None, exclude=True, repr=False)
     bulk_missing: list[str] = Field(default_factory=list)
     bulk_on_server: bool = False  # bulk_missing vanished on the server, not on this device
+    # not None: the server has another library (foreign) and sync waits; n — local recordings
+    other_library: int | None = None
+    foreign: str = ""
     errors: list[str] = Field(default_factory=list)
     changed: bool = False
 
@@ -131,8 +135,17 @@ class SyncEngine:
         async with self._lock:
             return await self._run((set(ids), restore), expected=connection)
 
+    async def send_to_library(self, library: str, *, connection: str | None = None) -> SyncStatus:
+        """The answer "Send" to the question about library: a sync as with a new server."""
+        async with self._lock:
+            return await self._run(None, expected=connection, send=library)
+
     async def _run(
-        self, choice: tuple[set[str], bool] | None, *, expected: str | None = None
+        self,
+        choice: tuple[set[str], bool] | None,
+        *,
+        expected: str | None = None,
+        send: str | None = None,
     ) -> SyncStatus:
         connection = self.selected()
         status = SyncStatus(connection=connection)
@@ -144,7 +157,7 @@ class SyncEngine:
         client = None
         try:
             client = self.client_factory(connection)
-            await _Cycle(self, client, connection, status).run(choice)
+            await _Cycle(self, client, connection, status).run(choice, send)
         except LibraryError as error:
             status.errors.append(str(error))
         except (OSError, ValueError, KeyError, TypeError):
@@ -162,17 +175,30 @@ class _Cycle:
     ) -> None:
         self.engine, self.client, self.connection, self.status = engine, client, connection, status
         self.root, self.real = engine.root, engine.real
-        previous = state.load(engine.state_path)
-        self.known_root = previous.server == client.server
-        self.saved = previous
+        self.saved = state.load(engine.state_path)
         # Sections of the last sync describe local folders, so they apply after a server change too.
-        self.known_sections = frozenset(previous.sections)
-        self.previous = (
-            previous.model_copy(deep=True)
-            if self.known_root
-            else state.Checkpoint(server=client.server)
-        )
+        self.known_sections = frozenset(self.saved.sections)
+        self.known_root, self.previous = False, self.saved.model_copy(deep=True)
         self.local = Scan()
+
+    def library(self, number: str, send: str | None) -> bool:
+        """Whose library the server has (its number from the list): False — another one than the
+        last sync's, nothing may change until the answer "Send"."""
+        saved, server = self.saved, self.client.server
+        if send is not None:
+            if saved.server != server or not number or send != number or send != saved.foreign:
+                raise SyncError(_(LIBRARY_CHANGED))
+            self.previous = state.Checkpoint(server=server, library=number)
+            return True
+        if saved.server == server and saved.library and number and saved.library != number:
+            self.previous = saved.model_copy(update={"foreign": number}, deep=True)
+            self.save()
+            return False
+        self.known_root = saved.server == server
+        if not self.known_root:
+            self.previous = state.Checkpoint(server=server)
+        self.previous.library, self.previous.foreign = number or self.previous.library, ""
+        return True
 
     def selected(self) -> None:
         if self.engine.selected() != self.connection:
@@ -261,8 +287,17 @@ class _Cycle:
             real=self.real,
         )
 
-    async def run(self, choice: tuple[set[str], bool] | None) -> None:
-        remote = self.remote(await self.call(self.client.manifest()))
+    async def run(self, choice: tuple[set[str], bool] | None, send: str | None) -> None:
+        manifest = await self.call(self.client.manifest())
+        if not self.library(manifest.library, send):
+            self.local = self.scan()
+            self.status.other_library = sum(
+                bool({FileName.TRANSCRIPT, FileName.SUMMARY} & r.files.keys())
+                for r in self.local.manifest.records
+            )
+            self.status.foreign = manifest.library
+            return
+        remote = self.remote(manifest)
         self.local = self.scan()
         if self.local.missing_root:
             if not self.known_root:
@@ -543,6 +578,8 @@ class _Cycle:
             return
         remote = await self.call(self.client.manifest())
         self.remote(remote)  # check the whole response before changing any section
+        if remote.library and remote.library != self.previous.library:
+            raise SyncError(_(LIBRARY_CHANGED))
         left, right, old = (
             set(local.manifest.sections),
             set(remote.sections),

@@ -63,5 +63,6 @@
   "The server file has already changed": "Файл на сервере уже изменился",
   "The MCP SDK is missing — reinstall Mnema (./install.sh client)": "Нет MCP SDK — переустановите Mnema (./install.sh client)",
   "No such file: {path}": "Нет файла: {path}",
-  "Both sides edited the file; which edit is newer is unknown": "Файл изменён и здесь, и на сервере; неизвестно, какая правка новее"
+  "Both sides edited the file; which edit is newer is unknown": "Файл изменён и здесь, и на сервере; неизвестно, какая правка новее",
+  "The recordings library on the server changed; sync again": "Библиотека записей на сервере изменилась; повторите синхронизацию"
 }

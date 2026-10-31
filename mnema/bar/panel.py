@@ -9,7 +9,7 @@ import textwrap
 from datetime import datetime, timedelta
 
 from ..connection import VersionGap, version_gap
-from ..i18n import _, fmt_bar_panel
+from ..i18n import _, _n, fmt_bar_panel
 from ..live.meta import UNFINISHED, RecordState
 from .protocol import (
     Button,
@@ -146,6 +146,21 @@ def _missing_here(count: int, *, mac: bool) -> tuple[str, str, str]:
         else _("Recordings missing on this computer: {n}. They are kept on the server.", n=count)
     )
     return text, _("Delete everywhere"), _("Restore from the server")
+
+
+def _other_library(count: int, *, mac: bool) -> str:
+    """Sync found another library at the same server: nothing changes until the answer."""
+    if mac:
+        return _n(
+            "The server has another recordings library. Send {n} recording from this Mac to it?",
+            "The server has another recordings library. Send {n} recordings from this Mac to it?",
+            count,
+        )
+    return _n(
+        "The server has another recordings library. Send {n} recording from this computer to it?",
+        "The server has another recordings library. Send {n} recordings from this computer to it?",
+        count,
+    )
 
 
 def _move_menu(c: RecordingCard, sections: list[str], *, enabled: bool) -> Button:
@@ -351,6 +366,11 @@ def panel_model(
                     Button(key=f"sync_restore:{state.sync_revision}:{ids}", title=restore),
                 ],
             )
+        )
+    if state.sync_other_library is not None:
+        send = Button(key=f"sync_send:{state.sync_revision}:{state.sync_foreign}", title=_("Send"))
+        notices.append(
+            Notice(text=_other_library(state.sync_other_library, mac=env.mac), buttons=[send])
         )
     # the server refuses the token: sync and processing share the trouble, so one notice with a
     # button and no "Sync: …" about the same thing
