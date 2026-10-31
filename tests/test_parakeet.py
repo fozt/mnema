@@ -296,6 +296,29 @@ def test_a_failed_download_is_explained_in_the_users_words(hub, failure, text):
     assert str(refused.value).startswith(text)
 
 
+def test_a_cache_that_cannot_hold_the_model_is_explained_in_the_users_words(
+    hub, tmp_path, monkeypatch
+):
+    """The cache folder is not writable (a file in its place, another owner) or the disk fills
+    up while the file is moved: the user's words, not the OSError."""
+    import errno
+
+    (tmp_path / "cache").write_text("not a folder")
+    with pytest.raises(MediaError) as refused:
+        pk.model_dir()
+    assert str(refused.value).startswith("Не удалось скачать модель распознавания")
+
+    (tmp_path / "cache").unlink()
+
+    def full(self, target):
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    monkeypatch.setattr(Path, "replace", full)
+    with pytest.raises(MediaError) as refused:
+        pk.model_dir()
+    assert str(refused.value) == "Не хватает места на диске для модели распознавания"
+
+
 # ─────────────────────────────────────────── replies and cleanup
 
 

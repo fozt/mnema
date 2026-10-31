@@ -267,6 +267,15 @@ def model_dir(on: Progress = noop) -> Path:
     if all((folder / name).is_file() for name in ONNX_FILES):
         return folder
     on(None, _("Downloading the recognition model, only the first time…"))
+    try:
+        _fetch(folder)
+    except OSError as e:  # the cache: no space, read-only, another owner after a reinstall
+        logger.warning("could not place the recognition model in %s: %s", folder, e)
+        raise MediaError(_(NO_SPACE) if e.errno == errno.ENOSPC else _(DOWNLOAD_FAILED)) from e
+    return folder
+
+
+def _fetch(folder: Path) -> None:
     staging = folder.with_name(f".{folder.name}.partial")
     staging.mkdir(parents=True, exist_ok=True)
     with (staging.parent / f".{folder.name}.lock").open("w") as lock:
@@ -281,7 +290,6 @@ def model_dir(on: Progress = noop) -> Path:
             folder.mkdir(parents=True, exist_ok=True)
             path.replace(folder / name)
         shutil.rmtree(staging, ignore_errors=True)
-    return folder
 
 
 def _cached() -> Path:
