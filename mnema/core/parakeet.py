@@ -29,16 +29,28 @@ from .models import Segment
 logger = logging.getLogger(__name__)
 
 MODEL = "parakeet-ultra"
-# Pinned public export of Ultra (CC-BY-4.0); the code does not depend on the file names.
-ONNX_REPO = "marcosremar2/parakeet-ultra-onnx"
-ONNX_REVISION = "b4508be0373bcd39598369c1473454f826b71815"
+
+
+class OnnxFile(NamedTuple):
+    repo: str
+    revision: str
+    sha256: str
+
+
+# Public exports of Ultra (CC-BY-4.0), pinned by revision and sha256; the code does not depend on
+# the file names. Encoder int8 (MatMul only) is not worse than fp32 on FLEURS and Golos; the int8
+# decoder was, and it is only 72 MB in fp32.
+_MARCOS = ("marcosremar2/parakeet-ultra-onnx", "b4508be0373bcd39598369c1473454f826b71815")
+_MASTERX = ("Masterx/parakeet-tdt-0.6b-ultra-onnx", "99b09f030a5a6efeaa13cf2cf54592100ce2c3f1")
 ENCODER = "encoder-model.int8.onnx"
-DECODER = "decoder_joint-model.int8.onnx"
+DECODER = "decoder_joint-model.onnx"
 VOCAB = "vocab.txt"
-ONNX_FILES = {  # name → sha256
-    ENCODER: "291fa5678048c8ee3007a5995fa9e817213fdb2e3d60ea8fed549dbeb154b33b",
-    DECODER: "667ffde2242a560923cba6bc7f69ef03d736f8a36ca9588f2e6f9fa818cf2fc1",
-    VOCAB: "d58544679ea4bc6ac563d1f545eb7d474bd6cfa467f0a6e2c1dc1c7d37e3c35d",
+ONNX_FILES = {
+    ENCODER: OnnxFile(*_MARCOS, "291fa5678048c8ee3007a5995fa9e817213fdb2e3d60ea8fed549dbeb154b33b"),
+    DECODER: OnnxFile(
+        *_MASTERX, "87cdaae0a1102f6be1cb2bb45d6a7d4d914b23b764d5fba704a82960f988f958"
+    ),
+    VOCAB: OnnxFile(*_MARCOS, "d58544679ea4bc6ac563d1f545eb7d474bd6cfa467f0a6e2c1dc1c7d37e3c35d"),
 }
 SR = 16000
 FRAME_S = 0.08  # encoder frame: 10 ms feature hop × subsampling 8
@@ -240,7 +252,7 @@ NO_SPACE = "Not enough disk space for the recognition model"
 
 def model_dir(on: Progress = noop) -> Path:
     """The folder with ONNX_FILES: MNEMA_PARAKEET_ONNX_DIR as is, otherwise the pinned revision
-    in the cache (downloaded once, ~860 MB). A file gets there only after its sha256 matched:
+    in the cache (downloaded once, ~910 MB). A file gets there only after its sha256 matched:
     the download lands next to it first, so one cut short or never checked is not taken."""
     from .settings import RuntimeSettings
 
@@ -251,7 +263,8 @@ def model_dir(on: Progress = noop) -> Path:
             if not (folder / name).is_file():
                 raise MediaError(_("No {name} in {folder}", name=name, folder=folder))
         return folder
-    folder = cache_home() / "mnema" / ONNX_REPO.replace("/", "--") / ONNX_REVISION
+    pins = "".join(f"{name} {f.repo} {f.revision} {f.sha256}\n" for name, f in ONNX_FILES.items())
+    folder = cache_home() / "mnema" / MODEL / hashlib.sha256(pins.encode()).hexdigest()[:16]
     if all((folder / name).is_file() for name in ONNX_FILES):
         return folder
     on(None, _("Downloading the recognition model, only the first time…"))
@@ -263,7 +276,7 @@ def model_dir(on: Progress = noop) -> Path:
             if (folder / name).is_file():  # checked earlier, maybe by another job
                 continue
             path = _download(name, staging)
-            if _sha256(path) != ONNX_FILES[name]:
+            if _sha256(path) != ONNX_FILES[name].sha256:
                 path.unlink(missing_ok=True)
                 raise MediaError(_("The recognition model did not download correctly. Try again"))
             folder.mkdir(parents=True, exist_ok=True)
@@ -289,11 +302,11 @@ def _download(name: str, staging: Path) -> Path:
     try:
         return Path(
             huggingface_hub.hf_hub_download(
-                ONNX_REPO, name, revision=ONNX_REVISION, local_dir=staging
+                ONNX_FILES[name].repo, name, revision=ONNX_FILES[name].revision, local_dir=staging
             )
         )
     except (OSError, EntryNotFoundError, httpx.HTTPError) as e:
-        logger.warning("could not download %s of %s: %s", name, ONNX_REPO, e)
+        logger.warning("could not download %s of %s: %s", name, ONNX_FILES[name].repo, e)
         no_space = isinstance(e, OSError) and e.errno == errno.ENOSPC
         raise MediaError(_(NO_SPACE) if no_space else _(DOWNLOAD_FAILED)) from e
 

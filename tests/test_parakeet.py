@@ -217,13 +217,13 @@ def hub(monkeypatch, tmp_path):
 
     monkeypatch.delenv("MNEMA_PARAKEET_ONNX_DIR", raising=False)
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
-    monkeypatch.setattr(
-        pk, "ONNX_FILES", {name: hashlib.sha256(b"weights").hexdigest() for name in pk.ONNX_FILES}
-    )
+    weights = hashlib.sha256(b"weights").hexdigest()
+    pinned = {name: f._replace(sha256=weights) for name, f in pk.ONNX_FILES.items()}
+    monkeypatch.setattr(pk, "ONNX_FILES", pinned)
     state = {"downloads": [], "content": {}, "fail": None}
 
     def download(repo_id, filename, *, revision, local_dir, **kw):
-        assert (repo_id, revision) == (pk.ONNX_REPO, pk.ONNX_REVISION)
+        assert (repo_id, revision) == pinned[filename][:2]
         if state["fail"] is not None:
             raise state["fail"]
         path = Path(local_dir) / filename
