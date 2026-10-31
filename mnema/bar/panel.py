@@ -123,21 +123,6 @@ def _first_sentence(remark: str) -> str:
     return re.sub(r"[,;:]…$", "…", textwrap.shorten(line.removesuffix("."), 90, placeholder="…"))
 
 
-def _missing_on_server(count: int, *, mac: bool) -> tuple[str, str, str]:
-    """Sync found recordings gone on the server: the notice and its two buttons."""
-    if mac:
-        return (
-            _("Recordings missing on the server: {n}. They are kept on this Mac.", n=count),
-            _("Delete on this Mac"),
-            _("Restore to the server"),
-        )
-    return (
-        _("Recordings missing on the server: {n}. They are kept on this computer.", n=count),
-        _("Delete on this computer"),
-        _("Restore to the server"),
-    )
-
-
 def _missing_here(count: int, *, mac: bool) -> tuple[str, str, str]:
     """Sync found recordings gone here but kept on the server."""
     text = (
@@ -349,11 +334,7 @@ def panel_model(
     ]
     if state.sync_missing:
         ids, count = ",".join(sorted(state.sync_missing)), len(state.sync_missing)
-        text, delete, restore = (
-            _missing_on_server(count, mac=env.mac)
-            if state.sync_missing_on_server
-            else _missing_here(count, mac=env.mac)
-        )
+        text, delete, restore = _missing_here(count, mac=env.mac)
         notices.append(
             Notice(
                 text=text,

@@ -1111,67 +1111,30 @@ def lose_on_server(pair, *ids):
             pair.app.state.library.remove(record.id, record.tag)
 
 
-@pytest.mark.parametrize("restore", [True, False])
-def test_bulk_disappearance_on_server_holds_until_explicit_choice(pair, restore):
+def test_records_deleted_on_another_device_go_to_the_trash_without_a_question(pair):
     a, aid = synced(pair, "a")
     b, bid = synced(pair, "b")
-    lose_on_server(pair, aid, bid)  # the server lost its data, the address is the same
-    for _ in range(2):
-        result = run(pair)
-        assert not result.errors and result.bulk_on_server
-        assert result.bulk_missing == sorted([aid, bid])
-        assert a.is_dir() and b.is_dir() and not pair.trashed
-    result = asyncio.run(pair.engine().resolve_bulk(result.bulk_missing, restore=restore))
-    assert not result.errors and not result.bulk_missing
-    remote = {r.id for r in pair.app.state.library.manifest().records}
-    # "Restore to the server": the same recordings are on the server again, files in place.
-    if restore:
-        assert remote == {aid, bid} and a.is_dir() and b.is_dir() and not pair.trashed
-        assert (server_folder(pair, aid) / FileName.TRANSCRIPT).read_text() == "оригинал"
-    else:  # "Delete on this computer": the regular Trash
-        assert remote == set() and not a.exists() and not b.exists()
-        assert len(pair.trashed) == 2 and load(pair.checkpoint).records == {}
-
-
-def test_bulk_return_to_server_survives_interruption_after_first_record(pair):
-    """ "Restore to the server": the app was closed after the server accepted the first recording.
-    The set is removed from the checkpoint before the first upload, so the next sync does not take
-    the second one for a single missing recording on the server and move it to the Trash."""
-    a, aid = synced(pair, "a")
-    b, bid = synced(pair, "b")
+    c, cid = synced(pair, "c")
     lose_on_server(pair, aid, bid)
-    assert run(pair).bulk_on_server
-
-    def stop_after_create(request, response):
-        if request.method == "POST" and request.url.path.endswith("/records"):
-            raise asyncio.CancelledError("closed")
-
-    pair.transport.hook = stop_after_create
-    with pytest.raises(asyncio.CancelledError):
-        asyncio.run(pair.engine().resolve_bulk([aid, bid], restore=True))
-    assert len(pair.app.state.library.manifest().records) == 1
-    pair.transport.hook = lambda request, response: None
-    assert not run(pair).errors
-    assert a.is_dir() and b.is_dir() and not pair.trashed
-    assert {r.id for r in pair.app.state.library.manifest().records} == {aid, bid}
+    result = run(pair)
+    assert not result.errors and not result.bulk_missing and result.changed
+    assert not a.exists() and not b.exists() and c.is_dir() and len(pair.trashed) == 2
+    assert set(load(pair.checkpoint).records) == {cid}
+    assert not run(pair).changed
 
 
-def test_both_sides_bulk_disappearances_are_asked_one_after_another(pair):
+def test_losses_here_wait_while_deletions_on_the_server_are_applied(pair):
     (a, aid), (b, bid) = synced(pair, "a"), synced(pair, "b")
     (c, cid), (d, did) = synced(pair, "c"), synced(pair, "d")
     shutil.rmtree(a)
     shutil.rmtree(b)
     lose_on_server(pair, cid, did)
     result = run(pair)
-    assert result.bulk_missing == sorted([aid, bid]) and not result.bulk_on_server
-    assert c.is_dir() and d.is_dir() and not pair.trashed
-    result = asyncio.run(pair.engine().resolve_bulk(result.bulk_missing, restore=True))
-    assert a.is_dir() and b.is_dir()
-    assert result.bulk_missing == sorted([cid, did]) and result.bulk_on_server
-    assert c.is_dir() and d.is_dir() and not pair.trashed
-    result = asyncio.run(pair.engine().resolve_bulk(result.bulk_missing, restore=False))
-    assert not result.errors and not result.bulk_missing
+    assert result.bulk_missing == sorted([aid, bid])
     assert not c.exists() and not d.exists() and len(pair.trashed) == 2
+    result = asyncio.run(pair.engine().resolve_bulk(result.bulk_missing, restore=True))
+    assert not result.errors and not result.bulk_missing
+    assert a.is_dir() and b.is_dir()
     assert {r.id for r in pair.app.state.library.manifest().records} == {aid, bid}
 
 
@@ -1323,8 +1286,6 @@ def test_shared_sync_decisions(pair, tmp_path, case):
 
     assert bool(result.errors) == case.get("errors", False), result.errors
     assert sorted(names[id] for id in result.bulk_missing) == case.get("held", [])
-    if case.get("held"):
-        assert result.bulk_on_server == (case["held_on"] == "server")
     local = [p.parent.relative_to(root).as_posix() for p in root.rglob(FileName.META)]
     assert sorted(local) == sorted(case["local"])
     records = pair.app.state.library.manifest().records

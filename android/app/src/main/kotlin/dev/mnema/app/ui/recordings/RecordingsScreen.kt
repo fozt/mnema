@@ -259,14 +259,6 @@ fun RecordingsScreen(graph: AppGraph, onOpen: (File) -> Unit, onDeleted: (Record
                                 TextButton(onClick = { model.resolveBulk(true) }, enabled = !resolving) { Text(tr("Restore from the server")) }
                             }
                         }
-                        if (sync.serverMissing.isNotEmpty()) {
-                            val ask = serverMissingAsk(sync)
-                            Text(ask.text, style = MaterialTheme.typography.bodyMedium)
-                            Column {
-                                TextButton(onClick = { model.resolveBulk(false, onServer = true) }, enabled = !resolving) { Text(ask.delete) }
-                                TextButton(onClick = { model.resolveBulk(true, onServer = true) }, enabled = !resolving) { Text(tr("Restore to the server")) }
-                            }
-                        }
                         if (sync.otherLibrary != null) {
                             Text(otherLibraryAsk(sync), style = MaterialTheme.typography.bodyMedium)
                             TextButton(onClick = model::sendToLibrary, enabled = !resolving) { Text(tr("Send")) }

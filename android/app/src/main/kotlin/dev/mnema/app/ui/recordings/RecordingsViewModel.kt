@@ -133,15 +133,14 @@ class RecordingsViewModel(
         }
     }
 
-    /** onServer: recordings vanished on the server; delete here (forever without a trash) or restore them there. */
-    fun resolveBulk(restore: Boolean, onServer: Boolean = false) {
+    /** Recordings vanished on the phone: delete them everywhere or restore them from the server. */
+    fun resolveBulk(restore: Boolean) {
         val controller = sync ?: return
-        val status = syncStatus.value
-        val ids = (if (onServer) status.serverMissing else status.bulkMissing).toList()
+        val ids = syncStatus.value.bulkMissing.toList()
         if (resolving.value || ids.isEmpty()) return
         resolving.value = true
         viewModelScope.launch {
-            try { controller.resolveBulk(ids, restore, forever = onServer && !restore && status.withoutTrash) }
+            try { controller.resolveBulk(ids, restore) }
             finally { resolving.value = false; store.refresh() }
         }
     }
@@ -161,18 +160,6 @@ class RecordingsViewModel(
 sealed interface CleanupDialog {
     data class Confirm(val cleanup: AudioCleanup) : CleanupDialog
     data class Empty(val onServer: Boolean) : CleanupDialog
-}
-
-/** The question about recordings missing on the server and the delete-here button: without a trash only forever. */
-data class ServerMissingAsk(val text: String, val delete: String)
-
-fun serverMissingAsk(status: SyncStatus): ServerMissingAsk = if (status.withoutTrash) {
-    ServerMissingAsk(tr("Deleted on another device: {n}", "n" to status.serverMissing.size), tr("Delete forever"))
-} else {
-    ServerMissingAsk(
-        tr("Recordings missing on the server: {n}. They are kept on the phone.", "n" to status.serverMissing.size),
-        tr("Delete on the phone"),
-    )
 }
 
 /** The question before syncing with another library at the same server address. */

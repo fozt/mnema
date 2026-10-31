@@ -304,7 +304,8 @@ class FolderRecordingStore(
     private fun ensureIdentity(dir: File) {
         if (recordingId(dir) != null) return
         val occupied = try { isBusy(dir) } catch (_: IOException) { true }
-        if (!occupied) Meta.ensureRecording(dir, UUID.randomUUID().toString()) { startedIso(dir) }
+        // the folder may be gone since the listing (sync deleted it after another device): nothing to give an id to
+        if (!occupied && dir.isDirectory) Meta.ensureRecording(dir, UUID.randomUUID().toString()) { startedIso(dir) }
     }
 
     // not while the recording is processed: the result applies its own summary

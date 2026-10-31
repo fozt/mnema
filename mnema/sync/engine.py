@@ -31,8 +31,7 @@ LIBRARY_CHANGED = "The recordings library on the server changed; sync again"
 
 class SyncStatus(BaseModel):
     connection: str | None = Field(default=None, exclude=True, repr=False)
-    bulk_missing: list[str] = Field(default_factory=list)
-    bulk_on_server: bool = False  # bulk_missing vanished on the server, not on this device
+    bulk_missing: list[str] = Field(default_factory=list)  # several gone here at once: a choice
     # not None: the server has another library (foreign) and sync waits; n — local recordings
     other_library: int | None = None
     foreign: str = ""
@@ -338,25 +337,20 @@ class _Cycle:
             for id, record in self.previous.records.items()
             if self.local.complete and id not in local and not self.blocked(record)
         }
-        vanished = {
-            id
-            for id, record in self.previous.records.items()
-            if id in local and id not in remote and not self.blocked(record)
-        }
-        # Two or more missing on one side wait for a choice; this device's go first.
-        asks = [(g, server) for g, server in ((missing, False), (vanished, True)) if len(g) >= 2]
+        # Two or more missing here at once (a wiped folder) wait for a choice. What was deleted on
+        # another device goes to the Trash here without a question; a reinstalled server answers
+        # another library number.
+        held = missing if len(missing) >= 2 else set()
         if choice is not None:
             ids, restore = choice
-            if not asks or ids != asks[0][0]:
+            if not held or ids != held:
                 raise SyncError(_("The list of missing recordings changed; sync again"))
             if restore:
                 for id in ids:
                     self.previous.records.pop(id, None)
                 self.save()  # the whole set before the first transfer, also after a restart
-            asks.pop(0)
-        held = {id for group, _server in asks for id in group}
-        if asks:
-            self.status.bulk_missing, self.status.bulk_on_server = sorted(asks[0][0]), asks[0][1]
+            held = set()
+        self.status.bulk_missing = sorted(held)
         if held and self.local.missing_root:
             return
         ids = set(local) | set(remote) | set(self.previous.records)

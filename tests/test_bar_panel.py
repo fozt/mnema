@@ -888,9 +888,8 @@ def test_idle_panel_in_english_has_no_russian(tmp_path) -> None:
     env = MenuEnv(mac=True, server="http://srv:8000", server_name="Home", update="0.4.0")
     with i18n.using("en"):
         p = _english(state, cards, env)
-        missing_here = _english(state.model_copy(update={"sync_missing_on_server": True}), [], env)
         refused = _english(BarState(), [], env.model_copy(update={"server_auth": False}))
-    assert _russian_in(p) == [] and _russian_in(missing_here) == [] and _russian_in(refused) == []
+    assert _russian_in(p) == [] and _russian_in(refused) == []
     assert p.idle.start.title == "Start recording" and p.empty == "No recordings yet"
     assert [c.subtitle for c in p.cards] == ["Today, 9:15 · 14 min", "40 s", "3 h 1 min", ""]
     assert [c.detail for c in p.cards] == [

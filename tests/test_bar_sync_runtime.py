@@ -435,30 +435,14 @@ def test_open_text_through_a_symlinked_library_root(app, tmp_path, monkeypatch):
     assert platform.opened == [link / "Call/transcript.txt", link / "Call/summary.txt"]
 
 
-@pytest.mark.parametrize("on_server", [True, False], ids=["missing-on-server", "missing-here"])
-def test_bulk_choice_on_the_mac_names_this_mac(on_server):
-    """Sync notices on a Mac call the machine "this Mac"."""
-    state = runtime.BarState(sync_missing=[str(uuid4())], sync_missing_on_server=on_server)
+@pytest.mark.parametrize(("mac", "machine"), [(True, "этом Mac"), (False, "этом компьютере")])
+def test_bulk_choice_names_this_machine(mac, machine):
+    """Sync notices call the machine "this Mac" or "this computer"."""
+    state = runtime.BarState(sync_missing=[str(uuid4())])
     prefs = runtime.BarPrefs()
-    notice = panel_model(state, prefs, MenuEnv(mac=True), [], SettingsModel(tabs=[])).notices[0]
-    if on_server:
-        assert notice.text == "На сервере нет записей: 1. На этом Mac они сохранены."
-        assert [b.title for b in notice.buttons] == ["Удалить на этом Mac", "Вернуть на сервер"]
-    else:
-        assert notice.text == "На этом Mac нет записей: 1. На сервере они сохранены."
-        assert [b.title for b in notice.buttons] == ["Удалить везде", "Вернуть с сервера"]
-
-
-def test_bulk_choice_for_records_missing_on_server(app):
-    rt, platform, root, updates = app
-    rt.start_sync()
-    ids = [str(uuid4()), str(uuid4())]
-    rt._sync.callbacks["on_change"](SyncStatus(bulk_missing=ids, bulk_on_server=True))
-    notice = panel_model(rt.state, rt.prefs, MenuEnv(), [], SettingsModel(tabs=[])).notices[0]
-    assert notice.text == "На сервере нет записей: 2. На этом компьютере они сохранены."
-    assert [b.title for b in notice.buttons] == ["Удалить на этом компьютере", "Вернуть на сервер"]
-    rt.handle(notice.buttons[1].key)
-    assert rt._sync.choices == [(sorted(ids), True)]
+    notice = panel_model(state, prefs, MenuEnv(mac=mac), [], SettingsModel(tabs=[])).notices[0]
+    assert notice.text == f"На {machine} нет записей: 1. На сервере они сохранены."
+    assert [b.title for b in notice.buttons] == ["Удалить везде", "Вернуть с сервера"]
 
 
 @pytest.mark.parametrize(

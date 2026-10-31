@@ -485,7 +485,6 @@ class BarRuntime:
             self.state.sync_revision += 1
         self._sync_connection_status = status.connection
         self.state.sync_missing = list(status.bulk_missing)
-        self.state.sync_missing_on_server = status.bulk_on_server
         self.state.sync_other_library = status.other_library
         self.state.sync_foreign = status.foreign
         self.state.sync_errors = list(status.errors)

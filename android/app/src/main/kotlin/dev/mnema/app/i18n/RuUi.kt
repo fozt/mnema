@@ -157,14 +157,10 @@ internal val RU_UI: Map<String, Any> = mapOf(
     "Recordings missing on the phone: {n}. They are kept on the server." to "На телефоне нет записей: {n}. На сервере они сохранены.",
     "Delete everywhere" to "Удалить везде",
     "Restore from the server" to "Вернуть с сервера",
-    "Restore to the server" to "Вернуть на сервер",
     "Send" to "Отправить",
     "Nothing found" to "Ничего не найдено",
     // RecordingsViewModel
     "Audio deleted from recordings: {n}" to "Звук удалён у записей: {n}",
-    "Deleted on another device: {n}" to "Удалено на другом устройстве: {n}",
-    "Recordings missing on the server: {n}. They are kept on the phone." to "На сервере нет записей: {n}. На телефоне они сохранены.",
-    "Delete on the phone" to "Удалить на телефоне",
     "The server has another recordings library. Send {n} recording from this phone to it?" to listOf(
         "На сервере другая библиотека записей. Отправить в неё {n} запись с этого телефона?",
         "На сервере другая библиотека записей. Отправить в неё {n} записи с этого телефона?",
