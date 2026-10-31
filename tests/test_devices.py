@@ -570,8 +570,9 @@ def test_users_lists_people_with_their_devices_and_remove_hides_them(server, cap
         store.claim(store.create_invite(user="anna", now=NOW)[0], name, now=NOW, library=True)
     _cli("users", "--dir", str(server))
     assert _rows(capsys.readouterr().out) == {
-        "owner": ["0", "общая"], "anna": ["2", "общая"], "bob": ["0", "общая"],
-    }  # fmt: skip
+        name: [count, "нет", "модели"]
+        for name, count in (("owner", "0"), ("anna", "2"), ("bob", "0"))
+    }
 
     _cli("users", "remove", "anna", "--dir", str(server))
     capsys.readouterr()

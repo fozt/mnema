@@ -22,7 +22,6 @@ from .commands import (
     cmd_update,
     cmd_users,
 )
-from .model import cmd_model
 
 
 class _Parser(argparse.ArgumentParser):
@@ -361,16 +360,6 @@ def build_parser() -> argparse.ArgumentParser:
     revoke.add_argument("id", help=_("id from the mnema devices list"))
     revoke.add_argument("--dir", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
     sp.set_defaults(func=cmd_devices)
-    sp = sub.add_parser("model", help=_("the server model for titles and summaries"))
-    g = sp.add_mutually_exclusive_group()
-    g.add_argument("--show", action="store_true", help=_("only show the current model"))
-    g.add_argument(
-        "--remove", action="store_true", help=_("remove the model from ~/.config/mnema/.env")
-    )
-    sp.add_argument(
-        "--user", help=_("whose model: a user from mnema users, the shared server model by default")
-    )
-    sp.set_defaults(func=cmd_model)
 
     sp = sub.add_parser("update", help=_("update the installed app"))
     sp.set_defaults(func=cmd_update)

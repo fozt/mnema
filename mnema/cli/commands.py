@@ -1288,22 +1288,6 @@ def cmd_serve(args) -> None:
     )
     if token:
         _cli.console.print(_("[{accent}]🔒 token sign-in[/] (server token)", accent=ACCENT))
-    from .. import node_settings
-    from ..node import server_command
-    from ..users import OWNER, as_user
-
-    with as_user(OWNER):  # the shared model, outside any request
-        model = node_settings.model()
-    if model:
-        _cli.console.print(_("model: {model}", model=model))
-    else:  # shows in the container's log too
-        _cli.console.print(
-            _(
-                "[yellow]No model set up[/]: recordings will have no title or summary. Set one "
-                "with {command}",
-                command=server_command("model"),
-            )
-        )
     _configure_runner_logging(Settings().log_level)
     uvicorn.run(app, host=args.host, port=port, log_level="warning")
 
@@ -1404,15 +1388,14 @@ def cmd_users(args) -> None:
             die(no_user(name))
         print(_("User {name} removed, the recordings stay", name=name))
         return
-    from ..llm.config import own_model
+    from ..llm.config import user_settings
 
     devices = Counter(d.user for d in store.devices() if not d.revoked)
     table = Table(box=box.SIMPLE)
     for column in (_("Name"), _("Devices"), _("Model")):
         table.add_column(column)
     for user in store.users():
-        own = own_model(user.name)
-        model = _("own: {model}", model=own) if own else _("shared")
+        model = user_settings(user.name).model or _("no model")
         table.add_row(Text(user.name), str(devices[user.name]), Text(model))
     _cli.console.print(table)
 

@@ -18,7 +18,7 @@ from mnema.live.remarks import Step
 from mnema.llm.errors import ErrorKind
 from mnema.llm.notes import Cloud, LightNote
 
-_WHERE = {True: "в настройках Mnema на Mac", False: "на сервере «Домашний»"}
+_WHERE = "в настройках Mnema на Mac"
 _HINTS = {
     ErrorKind.INVALID_KEY: "Замените ключ модели {where}",
     ErrorKind.DISABLED: "Замените ключ модели {where}",
@@ -37,37 +37,28 @@ def _at(here: bool):
 @pytest.mark.parametrize("here", [True, False])
 @pytest.mark.parametrize("kind", list(ErrorKind))
 def test_model_failure_hint_names_where_to_fix_it(monkeypatch, kind, here) -> None:
-    """A remark goes into the history and to the phone: the hint names where this recording is
-    processed (the Mac, or the server by name), not the platform, and has no terminal
-    commands."""
+    """A remark goes into the history and to the phone: the model is set in the app on the Mac,
+    wherever the recording is processed, and the hint has no terminal commands."""
     monkeypatch.setattr(base, "STANDALONE", True)  # on a Mac too: the place decides
     note = LightNote(engine="none", cloud=Cloud.FAILED, kind=kind, cloud_detail="ошибка модели")
     with _at(here), remarks.at_place(remarks.Place(node="Домашний")):
         notice = remarks.light(Step.SUMMARY, note)
     assert notice is not None
     retry = "Когда модель заработает, нажмите «Составить пересказ» в меню записи"
-    hint = _HINTS.get(kind, "").format(where=_WHERE[here])
+    hint = _HINTS.get(kind, "").format(where=_WHERE)
     assert notice.hint == (f"{hint}. {retry}" if hint else retry)
     assert not any(word in notice.text for word in ("mnema ", "./install", "Настройки →"))
 
 
-@pytest.mark.parametrize(
-    ("here", "node", "where"),
-    [
-        (True, "Домашний", "в настройках Mnema на Mac"),
-        (False, "Домашний", "на сервере «Домашний»"),
-        (False, "", "на сервере"),  # no name, no empty quotes
-        (False, "Сервер", "на сервере"),  # the default name is not repeated
-    ],
-)
-def test_missing_model_says_where_to_set_it(monkeypatch, here, node, where) -> None:
-    monkeypatch.setattr(base, "STANDALONE", True)  # on a Mac too: the place decides
-    with _at(here), remarks.at_place(remarks.Place(node=node)):
+@pytest.mark.parametrize("here", [True, False])
+def test_missing_model_says_where_to_set_it(monkeypatch, here) -> None:
+    monkeypatch.setattr(base, "STANDALONE", True)
+    with _at(here), remarks.at_place(remarks.Place(node="Домашний")):
         notice = remarks.light(Step.SUMMARY, LightNote(engine="none", cloud=Cloud.NOT_SET))
         without = remarks.node_no_model()
     assert notice is not None
     retry = "Когда модель заработает, нажмите «Составить пересказ» в меню записи"
-    hint = f"Задайте модель {where}. {retry}"
+    hint = f"Задайте модель {_WHERE}. {retry}"
     for remark in (notice, without):
         assert (remark.cause, remark.short, remark.hint) == ("Не настроена модель",) * 2 + (hint,)
         assert "mnema " not in remark.text and "«»" not in remark.text
@@ -86,19 +77,17 @@ def test_place_resets_after_nested_context_and_cancellation(tmp_path) -> None:
 
 def test_place_isolated_between_threads() -> None:
     barrier = Barrier(2)
+    until = datetime(2026, 10, 21, 22, 30, tzinfo=UTC)
 
-    def worker(name):
-        with remarks.at_place(remarks.Place(node=name)):
+    def worker(hours):
+        with remarks.at_place(remarks.Place(tz=timezone(timedelta(hours=hours)))):
             barrier.wait(timeout=5)
-            notice = remarks.light(Step.SUMMARY, LightNote(engine="none", cloud=Cloud.NOT_SET))
-            assert notice is not None
-            text = notice.text
-        return text, remarks.PLACE.get().node
+            text = remarks.until_text(until, until - timedelta(hours=1))
+        return text, remarks.PLACE.get().tz
 
     with ThreadPoolExecutor(max_workers=2) as executor:
-        first, second = list(executor.map(worker, ("Первый", "Второй")))
-    assert "Первый" in first[0] and "Второй" not in first[0] and first[1] == ""
-    assert "Второй" in second[0] and "Первый" not in second[0] and second[1] == ""
+        first, second = list(executor.map(worker, (3, 5)))
+    assert first == ("до 01:30", None) and second == ("до 03:30", None)
 
 
 def test_node_limits_use_recording_timezone() -> None:

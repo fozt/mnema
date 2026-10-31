@@ -1,8 +1,9 @@
-"""Live translation of a phrase by the node's model: one request per phrase, the client
-sends the context."""
+"""Live translation of a phrase for the asking user: DeepL with her DeepL key, else her model;
+one request per phrase, the client sends the context."""
 
 from __future__ import annotations
 
+import httpx
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -30,7 +31,8 @@ def register_live_translate_routes(app: FastAPI) -> None:
             # a callback, as for a live stream: one retry, the phrase does not wait a minute
             text = translator.push(req.text, on_partial=lambda _text: None)
         except Exception as exc:  # noqa: BLE001 - the provider's refusal in the user's words
+            reason = _("DeepL did not answer") if isinstance(exc, httpx.HTTPError) else None
             raise HTTPException(
-                502, _("Translation failed: {reason}", reason=human_reason(exc))
+                502, _("Translation failed: {reason}", reason=reason or human_reason(exc))
             ) from exc
         return {"text": text}

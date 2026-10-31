@@ -15,7 +15,7 @@ from pydantic import Field
 from pydantic_settings import SettingsConfigDict
 
 from .core.settings import FILE_SETTINGS, RuntimeSettings, read_settings_file
-from .llm.config import MODEL_VARS
+from .llm.config import USER_VARS
 
 
 def config_dir() -> Path:
@@ -53,12 +53,12 @@ def library_root(default: Path | None = None) -> Path:
 
 
 _FROM_FILE: dict[str, str] = {}  # name -> value copied from .env into the environment
-_PER_USE = {*MODEL_VARS, *FILE_SETTINGS}  # read from the file on every use
+_PER_USE = {*USER_VARS, *FILE_SETTINGS}  # read from the file on every use
 
 
 def load_env() -> None:
     """Copy ~/.config/mnema/.env into the process environment; existing variables win. Model lines
-    (llm.config.MODEL_VARS) and core.settings.FILE_SETTINGS (CPU threads) are not copied: they are
+    (llm.config.USER_VARS) and core.settings.FILE_SETTINGS (CPU threads) are not copied: they are
     read from the file on every use, so an edit is seen without a restart. An unreadable file
     (another owner, not UTF-8) logs a warning and the command keeps working."""
     import logging

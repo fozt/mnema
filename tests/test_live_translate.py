@@ -1,6 +1,11 @@
-"""Live translator units; claude._stream_text is mocked at the boundary (no network)."""
+"""Live translators: claude._stream_text and DeepL (providers.TRANSPORT) are mocked at the
+boundary (no network)."""
 
 from __future__ import annotations
+
+import json
+
+import httpx
 
 from mnema.live.translate import LiveTranslator
 from mnema.llm import claude
@@ -192,3 +197,129 @@ def test_dialog_context_is_shared_across_directions(monkeypatch) -> None:
     system = captured[-1][0]
     # the other direction's line is in the context with its translation
     assert "они: How long will it take? ⟶ <How long will it take?>" in system
+
+
+# ── DeepL of the user ─────────────────────────────────────────────────────────
+
+ANNA_DEEPL = "a1b2c3d4-" + "d" * 26 + ":fx"
+PHRASE = {"text": "Привет.", "context": ["они: Hi ⟶ Привет"], "target_lang": "en"}
+
+
+class DeepL:
+    """DeepL at the network boundary (providers.TRANSPORT): answers, or fails `fail` times."""
+
+    def __init__(self, monkeypatch, *, status: int = 200, fail: int = 0) -> None:
+        from mnema.llm import providers
+
+        self.seen: list[httpx.Request] = []
+        self.status, self.fail = status, fail
+        monkeypatch.setattr(providers, "TRANSPORT", httpx.MockTransport(self))
+        monkeypatch.setattr("mnema.live.translate.time.sleep", lambda s: None)
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        self.seen.append(request)
+        if self.fail:
+            self.fail -= 1
+            return httpx.Response(self.status)
+        return httpx.Response(200, json={"translations": [{"text": "Hello."}]})
+
+
+def _server(tmp_path, monkeypatch, *lines: str):
+    """The server in its mode with a device of anna, whose file holds `lines`."""
+    import time
+
+    from fastapi.testclient import TestClient
+
+    from mnema import users
+    from mnema.server import create_app
+
+    monkeypatch.setenv("MNEMA_TOKEN", "node-token-" + "n" * 20)
+    users.set_strict(True)
+    if lines:
+        path = users.user_env_file("anna")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("".join(f"{line}\n" for line in lines))
+    app = create_app(tmp_path / "srv")
+    store = app.state.devices
+    store.add_user("anna", now=time.time())
+    code, _ = store.create_invite(user="anna", now=time.time())
+    claimed = store.claim(code, "anna mac", now=time.time(), library=True)
+    assert claimed is not None
+    return TestClient(app, headers={"Authorization": f"Bearer {claimed[1]}"})
+
+
+def _model_says(monkeypatch, text: str) -> list[dict]:
+    calls: list[dict] = []
+
+    def fake_stream(system, content, *, creds, **kw):
+        calls.append({"key": creds.api_key, "content": content})
+        return text
+
+    monkeypatch.setattr(claude, "_stream_text", fake_stream)
+    return calls
+
+
+def test_a_user_with_a_deepl_key_translates_with_deepl(tmp_path, monkeypatch) -> None:
+    deepl = DeepL(monkeypatch)
+    model = _model_says(monkeypatch, "from the model")
+    client = _server(tmp_path, monkeypatch, f"DEEPL_API_KEY={ANNA_DEEPL}")
+    answer = client.post("/api/translate/phrase", json=PHRASE)
+    assert answer.status_code == 200 and answer.json() == {"text": "Hello."}
+    [request] = deepl.seen
+    assert str(request.url) == "https://api-free.deepl.com/v2/translate"
+    assert request.headers["authorization"] == f"DeepL-Auth-Key {ANNA_DEEPL}"
+    body = json.loads(request.content)
+    assert (body["target_lang"], body["context"]) == ("EN-US", "они: Hi ⟶ Привет")
+    assert model == []
+
+
+def test_without_a_deepl_key_her_model_translates(tmp_path, monkeypatch) -> None:
+    deepl = DeepL(monkeypatch)
+    model = _model_says(monkeypatch, "from the model")
+    client = _server(
+        tmp_path, monkeypatch, "MNEMA_MODEL=deepseek/deepseek-chat", "MNEMA_API_KEY=sk-anna"
+    )
+    assert client.post("/api/translate/phrase", json=PHRASE).json() == {"text": "from the model"}
+    assert deepl.seen == [] and model == [{"key": "sk-anna", "content": "Привет."}]
+
+
+def test_deepl_down_falls_back_to_her_model(tmp_path, monkeypatch) -> None:
+    """A transient DeepL failure is retried once; failed again, her model translates."""
+    deepl = DeepL(monkeypatch, status=503, fail=2)
+    model = _model_says(monkeypatch, "from the model")
+    client = _server(
+        tmp_path,
+        monkeypatch,
+        "MNEMA_MODEL=deepseek/deepseek-chat",
+        "MNEMA_API_KEY=sk-anna",
+        f"DEEPL_API_KEY={ANNA_DEEPL}",
+    )
+    assert client.post("/api/translate/phrase", json=PHRASE).json() == {"text": "from the model"}
+    assert len(deepl.seen) == 2 and [c["key"] for c in model] == ["sk-anna"]
+
+
+def test_deepl_only_refusal_is_not_retried_and_says_deepl(tmp_path, monkeypatch) -> None:
+    deepl = DeepL(monkeypatch, status=456, fail=1)
+    client = _server(tmp_path, monkeypatch, f"DEEPL_API_KEY={ANNA_DEEPL}")
+    answer = client.post("/api/translate/phrase", json=PHRASE)
+    assert answer.status_code == 502
+    assert answer.json()["detail"] == "Перевод не получился: DeepL не ответил"
+    assert len(deepl.seen) == 1
+
+
+def test_no_deepl_key_and_no_model_is_no_live_translation(tmp_path, monkeypatch) -> None:
+    client = _server(tmp_path, monkeypatch)
+    assert client.post("/api/translate/phrase", json=PHRASE).status_code == 400
+
+
+def test_deepl_context_carries_previous_pairs(monkeypatch) -> None:
+    """Without an outside context the second phrase goes with the first one's pair."""
+    from mnema.live.translate import DeepLTranslator
+
+    deepl = DeepL(monkeypatch)
+    translator = DeepLTranslator("ru", api_key="k")
+    translator.push("First.")
+    translator.push("Second.")
+    assert str(deepl.seen[0].url).startswith("https://api.deepl.com/")
+    assert json.loads(deepl.seen[0].content)["target_lang"] == "RU"
+    assert json.loads(deepl.seen[1].content)["context"] == "First. ⟶ Hello."

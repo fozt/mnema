@@ -70,16 +70,9 @@ def at_place(place: Place) -> Iterator[None]:
 
 
 def _where() -> str:
-    """Where to fix the model, readable on the phone too. Decided by where this recording is
-    processed, not by the platform."""
-    if base.processed_here():
-        return _("in Mnema settings on the Mac")
-    from ..node_settings import SERVER_NAME
-
-    node = PLACE.get().node
-    if node and node != SERVER_NAME:  # the default name would read "on the server “Server”"
-        return _("on the server “{node}”", node=node)
-    return _("on the server")
+    """Where to fix the model, readable on the phone too: every user sets her model and keys in
+    the app on the Mac, the server's ones too."""
+    return _("in Mnema settings on the Mac")
 
 
 class Step(StrEnum):
@@ -177,45 +170,18 @@ _HINTS = {
     ErrorKind.PRIVACY: "Allow the model in the privacy settings: openrouter.ai/settings/privacy",
     ErrorKind.REGION: "Choose another provider {where}",
 }
-# a user of the server other than the owner: the owner sets her model up
-_USER_HINTS = {
-    ErrorKind.INVALID_KEY: "Ask the server owner to replace the model key",
-    ErrorKind.DISABLED: "Ask the server owner to replace the model key",
-    ErrorKind.NO_MONEY: "Ask the server owner to top up the model account",
-    ErrorKind.NO_MODEL: "Ask the server owner to choose another model",
-    ErrorKind.PRIVACY: "Ask the server owner to allow the model in the privacy settings",
-    ErrorKind.REGION: "Ask the server owner to choose another model",
-}
 _NO_MODEL = "No model configured"
 _SET_MODEL_HINT = "Set up a model {where}"
-_USER_SET_MODEL_HINT = "Ask the server owner to set up a model"
 _RETRY_HINT = "When the model works again, choose “Summarize” in the recording menu"
 _SUMMARIZE_HINT = "Choose “Summarize” in the recording menu"
 _NO_ANSWER = "The model did not respond"
 
 
-def _server_user() -> str | None:
-    """The user of this processing when it is not the owner (only on the server)."""
-    from ..users import OWNER, current_user
-
-    user = current_user()
-    return None if user == OWNER else user
-
-
 def _hint(kind: ErrorKind | None) -> str:
-    user = _server_user()
-    if user is not None and kind in _USER_HINTS:
-        from ..llm.config import own_model
-
-        # her own account she tops up herself
-        if not (kind == ErrorKind.NO_MONEY and own_model(user)):
-            return _(_USER_HINTS[kind])
     return _(_HINTS[kind], where=_where()) if kind in _HINTS else ""
 
 
 def _set_model_hint() -> str:
-    if _server_user() is not None:
-        return _(_USER_SET_MODEL_HINT)
     return _(_SET_MODEL_HINT, where=_where())
 
 

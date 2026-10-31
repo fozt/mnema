@@ -2,8 +2,6 @@
   "Microphone": "Микрофон",
   "System audio": "Системный звук",
   "in Mnema settings on the Mac": "в настройках Mnema на Mac",
-  "on the server “{node}”": "на сервере «{node}»",
-  "on the server": "на сервере",
   "until {time}": "до {time}",
   "until {month} {day}, {time}": "до {day} {month} {time}",
   "the server is restarting or unavailable": "сервер перезапускается или недоступен",
@@ -90,10 +88,5 @@
   "Translating…": "Перевожу…",
   "Writing the summary…": "Составляю пересказ…",
   "Saving…": "Сохраняю…",
-  "Coming up with a title…": "Придумываю название…",
-  "Ask the server owner to replace the model key": "Попросите владельца сервера заменить ключ модели",
-  "Ask the server owner to top up the model account": "Попросите владельца сервера пополнить счёт модели",
-  "Ask the server owner to choose another model": "Попросите владельца сервера выбрать другую модель",
-  "Ask the server owner to allow the model in the privacy settings": "Попросите владельца сервера разрешить модель в настройках приватности",
-  "Ask the server owner to set up a model": "Попросите владельца сервера настроить модель"
+  "Coming up with a title…": "Придумываю название…"
 }

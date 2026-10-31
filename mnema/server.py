@@ -21,6 +21,7 @@ from .api.lang import add_language_middleware
 from .api.library import Libraries, register_library_routes
 from .api.live import register_live_routes
 from .api.live_translate import register_live_translate_routes
+from .api.model import register_model_routes
 from .api.node import register_node_routes
 from .api.storage import register_storage_routes
 from .api.uploads import Uploads
@@ -120,5 +121,6 @@ def create_app(root: Path) -> FastAPI:
     register_live_routes(app)
     register_live_translate_routes(app)
     register_node_routes(app)
+    register_model_routes(app)
     register_device_routes(app)
     return app

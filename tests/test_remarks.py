@@ -187,8 +187,8 @@ def test_english_remarks_read_as_sentences() -> None:
     )
     assert key is not None and key.text == (
         "Model gemini-flash-latest did not respond: the model key was rejected. There is no "
-        "summary. Replace the model key on the server. When the model works again, choose "
-        "“Summarize” in the recording menu."
+        "summary. Replace the model key in Mnema settings on the Mac. When the model works again, "
+        "choose “Summarize” in the recording menu."
     )
     assert (
         down.text

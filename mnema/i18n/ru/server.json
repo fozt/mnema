@@ -80,5 +80,7 @@
   "Update the app to connect with this invitation": "Обновите приложение, чтобы подключиться по этому приглашению",
   "The input must be an uploaded file": "Нужен загруженный файл",
   "The server chooses the recognition model": "Модель распознавания выбирает сервер",
-  "The user was removed": "Пользователь удалён"
+  "The user was removed": "Пользователь удалён",
+  "DeepL did not answer": "DeepL не ответил",
+  "Choose a model from the list": "Выберите модель из списка"
 }

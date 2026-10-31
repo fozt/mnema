@@ -84,9 +84,11 @@ def test_redaction_keeps_log_args_without_secrets_and_hides_env_secrets(monkeypa
     token = "t" * 60 + "bZ9x"
     monkeypatch.setenv("MNEMA_TOKEN", token)
     monkeypatch.setenv("MNEMA_ASR_API_KEY", ASR_KEY)
-    url = f"https://runner/api/jobs?token={token} и {ASR_KEY}"
+    deepl = "f" * 30 + "e7:fx"
+    monkeypatch.setenv("DEEPL_API_KEY", deepl)
+    url = f"https://runner/api/jobs?token={token} и {ASR_KEY} и {deepl}"
     hidden = make("httpx", logging.ERROR, "", 0, "нет связи: %s", (url,), None)
-    for secret in (token, ASR_KEY):
+    for secret in (token, ASR_KEY, deepl):
         assert secret not in hidden.getMessage()
     assert "…bZ9x" in hidden.getMessage()
 
