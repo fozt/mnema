@@ -4,8 +4,8 @@ Mnema.app sets MNEMA_APP_BUNDLE to its bundle path. Opened right from the disk i
 quarantined download that macOS runs from a random read-only copy (App Translocation), the panel
 asks to move it to Applications and nothing is set up. Otherwise app.json tells the mnema command
 (a separate package) where the app and its mnema-asr are, and "Open at login" points at this
-bundle. The app has no mnema command of its own: the link of an earlier version goes. A source
-build (~/Applications/Mnema.app) is never touched.
+bundle. The app has no mnema command of its own: the link of an earlier version goes. The bundle
+an earlier version built from the sources (~/Applications/Mnema.app) is never touched.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ import os
 import sys
 from pathlib import Path
 
-from ..core.base import app_file, is_mnema_app
+from ..core.base import app_file, app_helper, is_mnema_app
 from ..i18n import _
 
 logger = logging.getLogger(__name__)
@@ -26,7 +26,8 @@ MOVE_TO_APPLICATIONS = "Move Mnema to the Applications folder and open it from t
 
 
 def app_bundle() -> Path | None:
-    """The running self-contained bundle, None for a source build or the CLI of a venv."""
+    """The running bundle, None for a terminal run of a development build or the CLI of a
+    venv."""
     if value := os.environ.get(ENV, ""):
         return Path(value)
     prefix = Path(sys.prefix)  # <bundle>/Contents/Resources/python: the bundled CLI
@@ -53,11 +54,6 @@ def placed_bundle() -> Path | None:
     return None if bundle is None or translocated(bundle) else bundle
 
 
-def helper(bundle: Path) -> Path:
-    """mnema-asr of the bundle: recognition on CoreML."""
-    return bundle / "Contents" / "MacOS" / "mnema-asr"
-
-
 def _data_dir() -> Path:
     return app_file().parent
 
@@ -69,7 +65,7 @@ def write_app_json(bundle: Path) -> None:
     path = app_file()
     path.parent.mkdir(parents=True, exist_ok=True)
     draft = path.with_name(f".{path.name}.{os.getpid()}")
-    data = {"bundle": str(bundle), "asr": str(helper(bundle)), "version": __version__}
+    data = {"bundle": str(bundle), "asr": str(app_helper(bundle)), "version": __version__}
     draft.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
     os.replace(draft, path)
 
@@ -100,9 +96,9 @@ def _first_start_marker() -> Path:
 
 
 def point_autostart(bundle: Path) -> None:
-    """ "Open at login" opens this bundle: an existing login item (also one of a source build)
-    is moved to it; on the very first start of a self-contained app it is turned on, as the
-    source installer does. Turned off later — it stays off."""
+    """ "Open at login" opens this bundle: an existing login item (also one of an earlier source
+    build) is moved to it; on the very first start of the app it is turned on. Turned off later
+    — it stays off."""
     from .install import autostart_enabled, launch_agent_target, set_autostart
 
     marker = _first_start_marker()

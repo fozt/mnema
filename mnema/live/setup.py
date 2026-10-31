@@ -5,7 +5,7 @@ transcribers (server, or a recorder stub) and the LiveSession itself; the caller
 view and how to stop. Finalization (finalize_live) runs an offline pass over the recorded WAV
 tracks (the live text is only a draft), then the final translation, a title, a summary and
 the saved files.
-Heavy imports are lazy: the module imports without sounddevice/whisperlivekit (thin client).
+Heavy imports are lazy: the module imports without sounddevice/onnxruntime (thin client).
 """
 
 from __future__ import annotations
@@ -390,16 +390,14 @@ def build_live(
 
     # One transcriber PER SOURCE: each has its own speech stream, ASR state and websocket.
     # The ASR language is NOT pinned in translation mode: "my language" is not what I speak
-    # on a given call (an English call with --translate ru lost the user's lines), and on the
-    # runner the language is part of the engine config — ru+en kept TWO large-v3 copies in
-    # VRAM and hit CUDA OOM (the track froze silently).
+    # on a given call (an English call with --translate ru lost the user's lines).
     transcribers: dict[str, Any] = {}
     if not config.stream:
         for s in sources:
             transcribers[s.name] = NullTranscriber()
         status = _("recording without live text — the transcript is built when you stop")
     else:
-        # ASR on the runner: a larger model (large-v3), loaded on the first connection.
+        # ASR on the server: its live process loads Parakeet on the first connection.
         from ..config import Settings
         from .remote import RemoteStreamingTranscriber
 

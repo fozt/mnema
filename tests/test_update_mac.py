@@ -108,7 +108,10 @@ def mac(monkeypatch, tmp_path):
                 manifest["mac"] = mac_block
             return httpx.Response(200, json=manifest)
         if request.url.path.endswith("-mac-code.tar.gz"):
-            return httpx.Response(200, content=state["code"])
+            status = state.get("code_status", 200)
+            if status == "drop":
+                raise httpx.ConnectError("connection reset", request=request)
+            return httpx.Response(status, content=state["code"])
         return httpx.Response(200, content=state["zip"])
 
     def run(cmd, **kwargs):
@@ -118,6 +121,8 @@ def mac(monkeypatch, tmp_path):
             if state.get("no_clone"):
                 return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="not supported")
             source, target = Path(cmd[-2]), Path(cmd[-1])
+            if source.is_dir() and state.get("clone_copy_fails"):
+                return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="No space left")
             if source.is_dir():
                 shutil.copytree(source, target, symlinks=True)
             else:
@@ -423,7 +428,7 @@ def _code_release(mac, tmp_path: Path, *, asr: str = "asr 1") -> Path:
     return new
 
 
-def _with_member(archive: bytes, name: str, data: bytes) -> bytes:
+def _with_member(archive: bytes, name: str | tarfile.TarInfo, data: bytes) -> bytes:
     out = io.BytesIO()
     with (
         tarfile.open(fileobj=io.BytesIO(archive)) as source,
@@ -431,9 +436,9 @@ def _with_member(archive: bytes, name: str, data: bytes) -> bytes:
     ):
         for member in source:
             target.addfile(member, source.extractfile(member))
-        info = tarfile.TarInfo(name)
+        info = name if isinstance(name, tarfile.TarInfo) else tarfile.TarInfo(name)
         info.size = len(data)
-        target.addfile(info, io.BytesIO(data))
+        target.addfile(info, io.BytesIO(data) if info.isfile() else None)
     return out.getvalue()
 
 
@@ -469,26 +474,16 @@ def test_another_runtime_or_volume_takes_the_whole_app(mac, tmp_path, case):
     assert FULL_ZIP in mac["calls"] and CODE_TAR not in mac["calls"]
 
 
-@pytest.mark.parametrize(
-    "damage",
-    ["checksum", "outside the code", "not a tar", "runtime changed here", "built for another",
-     "signing"],
-)  # fmt: skip
-def test_a_code_package_that_fails_falls_back_to_the_whole_app(mac, tmp_path, damage):
+@pytest.mark.parametrize("case", ["runtime changed here", "built for another", "no code archive"])
+def test_a_code_package_that_does_not_fit_falls_back_to_the_whole_app(mac, tmp_path, case):
     bundle = mac["bundle"]
-    _code_release(mac, tmp_path, asr="asr 2" if damage == "built for another" else "asr 1")
-    if damage == "checksum":
-        mac["code_sha256"] = "0" * 64
-    elif damage == "outside the code":
-        mac["code"] = _with_member(mac["code"], "Contents/MacOS/mnema-asr", b"#!/bin/sh\n")
-    elif damage == "not a tar":
-        mac["code"] = b"not a tar"
-    elif damage == "runtime changed here":
+    _code_release(mac, tmp_path, asr="asr 2" if case == "built for another" else "asr 1")
+    if case == "runtime changed here":
         (bundle / SITE / "httpx/__init__.py").write_text("# changed\n")
-    elif damage == "built for another":  # the manifest names the installed runtime
+    elif case == "built for another":  # the manifest names the installed runtime
         mac["runtime"] = _runtime_of(bundle)
     else:
-        mac["sign"] = 1
+        mac["code_status"] = 404
 
     assert update.apply().bundle == str(bundle) and _version_of(bundle) == NEW
 
@@ -497,9 +492,76 @@ def test_a_code_package_that_fails_falls_back_to_the_whole_app(mac, tmp_path, da
     assert _left_over(bundle.parent) == [".Mnema-previous.app"]
 
 
-def test_when_both_packages_fail_the_running_bundle_stays(mac, tmp_path):
+def _link(name: str) -> tarfile.TarInfo:
+    info = tarfile.TarInfo(name)
+    info.type = tarfile.SYMTYPE
+    info.linkname = "/etc/passwd"
+    return info
+
+
+@pytest.mark.parametrize(
+    ("damage", "error"),
+    [
+        ("checksum", "скачалось с ошибкой"),
+        ("connection", "Нет связи с сервером обновлений"),
+        ("server error", "Прежняя версия на месте"),
+        ("not a tar", "Неверное содержимое"),
+        ("outside the code", "Неверное содержимое"),
+        ("parent folder", "Неверное содержимое"),
+        ("absolute path", "Неверное содержимое"),
+        ("link", "Неверное содержимое"),
+        ("no clone copy", "Прежняя версия на месте"),
+        ("signing", "Подпись новой версии"),
+    ],
+)
+def test_a_failing_code_update_says_why_and_keeps_the_running_bundle(mac, tmp_path, damage, error):
+    """Only a code update that does not fit takes the whole app: a broken download, package or
+    disk would fail the zip the same way."""
+    bundle = mac["bundle"]
     _code_release(mac, tmp_path)
-    mac["sign"] = 1
+    if damage == "checksum":
+        mac["code_sha256"] = "0" * 64
+    elif damage == "connection":
+        mac["code_status"] = "drop"
+    elif damage == "server error":
+        mac["code_status"] = 503
+    elif damage == "not a tar":
+        mac["code"] = b"not a tar"
+    elif damage == "outside the code":
+        mac["code"] = _with_member(mac["code"], "Contents/MacOS/mnema-asr", b"#!/bin/sh\n")
+    elif damage == "parent folder":
+        mac["code"] = _with_member(mac["code"], f"{SITE}/../../../evil.py", b"x")
+    elif damage == "absolute path":
+        mac["code"] = _with_member(mac["code"], f"/{SITE}/mnema/evil.py", b"x")
+    elif damage == "link":
+        mac["code"] = _with_member(mac["code"], _link(f"{SITE}/mnema/evil.py"), b"")
+    elif damage == "no clone copy":
+        mac["clone_copy_fails"] = True
+    else:
+        mac["sign"] = 1
+
+    with pytest.raises(MediaError, match=error):
+        update.apply()
+
+    assert FULL_ZIP not in mac["calls"]
+    assert _version_of(bundle) == __version__ and _left_over(bundle.parent) == []
+
+
+def test_code_release_takes_only_a_small_archive_over_https():
+    code = {"sha256": "a" * 64, "runtime": "b" * 64}
+    update.CodeRelease(archive="https://releases.test/code.tar.gz", size=2_000_000, **code)
+
+    with pytest.raises(ValueError, match="HTTPS"):
+        update.CodeRelease(archive="http://releases.test/code.tar.gz", size=1, **code)
+    with pytest.raises(ValueError, match="less than or equal"):
+        update.CodeRelease(
+            archive="https://releases.test/code.tar.gz", size=64 * 1024 * 1024 + 1, **code
+        )
+
+
+def test_when_both_packages_fail_the_running_bundle_stays(mac, tmp_path):
+    _code_release(mac, tmp_path, asr="asr 2")
+    mac["runtime"] = _runtime_of(mac["bundle"])  # built for another runtime: the zip is taken
     mac["codesign"] = 3
 
     with pytest.raises(MediaError, match="Подпись новой версии"):

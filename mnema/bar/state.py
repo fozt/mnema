@@ -80,8 +80,8 @@ def cloud_models() -> list[tuple[str, str]]:
 
 def asr_at(choice: str, place: str) -> str:
     """The engine within a recognition place: the cloud takes only cloud models (the first one
-    otherwise), a machine never a cloud one; this Mac lacks some engines (the app ships no
-    GigaAM), and such a choice works as automatic here."""
+    otherwise), a machine never a cloud one; an engine this Mac cannot run (no recognition
+    helper of Mnema.app here) works as automatic here."""
     if place == Recognition.CLOUD:
         return choice if is_cloud(choice) else CLOUD_MODELS[0]
     if is_cloud(choice) or choice not in backend_choices():  # an old cloud choice: "groq/…"
@@ -118,7 +118,7 @@ class BarPrefs(BaseModel):
     mic: bool = True
     system: bool = True
     summary: bool = True  # summary.txt of the whole recording, and the title from it
-    asr: str = "auto"  # the engine within the place: auto | parakeet | whisper | "provider/model"
+    asr: str = "auto"  # the engine within the place: auto | parakeet | "provider/model"
     summary_lang: str | None = None  # None — the language of the conversation
     replace_original: bool = True  # processing a part moves the full recording to the Trash
     discreet: bool = False  # while recording, the menu bar looks idle

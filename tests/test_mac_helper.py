@@ -118,6 +118,31 @@ def test_helper_errors_are_told_in_the_users_words(helper, code, text) -> None:
     assert str(caught.value) == text
 
 
+@pytest.mark.parametrize(
+    ("operation", "result"),
+    [
+        ("models", {"id": "parakeet"}),
+        ("models", [{"id": "parakeet"}]),
+        ("transcribe", {"tracks": [{"words": [{"text": "да"}]}]}),
+        ("transcribe", {"tracks": []}),  # fewer tracks than files
+        ("transcribe", None),
+        ("speech", {"segments": [[0]]}),
+        ("speech", ["no", "segments"]),
+    ],
+)
+def test_a_result_of_another_shape_is_an_unknown_reply(helper, tmp_path, operation, result):
+    helper.configure(result={operation: result})
+    wav = _wav(tmp_path / "mic.wav")
+    call = {
+        "models": mac_helper.models,
+        "transcribe": lambda: mac_helper.MacHelper().words(wav),
+        "speech": lambda: mac_helper.MacHelper().speech(wav, max_s=10),
+    }[operation]
+
+    with pytest.raises(MediaError, match="^Неизвестный ответ процесса распознавания$"):
+        call()
+
+
 def test_bad_audio_is_told_in_the_users_words(helper, tmp_path) -> None:
     helper.configure(fail={"transcribe": "bad_audio"})
     with pytest.raises(MediaError, match="^Не удалось прочитать звук записи$"):
@@ -246,6 +271,23 @@ def test_the_mac_transcribes_a_file_without_a_python_child(helper, tmp_path, mon
     assert (result.text, result.language, result.engine) == ("Привет, как", "ru", "parakeet")
     [call] = helper.calls()
     assert call["ppid"] == os.getpid()
+
+
+@pytest.mark.parametrize(
+    ("code", "reason"),
+    [
+        ("no_model", "the recognition model is not downloaded"),
+        ("download_failed", "the recognition model did not download, check the connection"),
+        ("unsupported_mac", "recognition on this Mac needs Apple silicon"),
+    ],
+)
+def test_a_known_cause_reads_as_a_reason_inside_the_remark(code, reason) -> None:
+    from mnema.i18n import using
+    from mnema.live import remarks
+
+    with using("en"), base.processing_here():
+        remark = remarks.asr_failed("mic", mac_helper.HelperError(code), live_kept=False)
+    assert remark.cause == f"Could not recognize the “Microphone” track: {reason}"
 
 
 def test_a_track_remark_tells_why_this_mac_could_not_recognize(helper, tmp_path) -> None:

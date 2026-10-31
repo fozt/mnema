@@ -22,10 +22,9 @@ import tempfile
 from pathlib import Path
 
 from .. import __version__
-from ..core.base import MediaError
+from ..core.base import APP_ID, MediaError
 from ..i18n import _
 
-BUNDLE_ID = "com.mnema.bar"
 # English sources of the refusals below; the texts are read in the current language
 _FROM_DMG = "Mnema for Mac installs from the DMG: {url}"
 _NOT_IN_UV_TOOL = "The mnema command has no app. Install Mnema: {url}"
@@ -73,15 +72,15 @@ def mac_app_path() -> Path:
 
 
 def app_path() -> Path:
-    """The Mnema.app this engine runs in: the self-contained bundle wherever it is, otherwise the
-    source build in ~/Applications."""
+    """The Mnema.app this engine runs in, wherever it is; outside a bundle (a terminal run of a
+    development build) ~/Applications/Mnema.app."""
     from .bundle import app_bundle
 
     return app_bundle() or mac_app_path()
 
 
 def _launch_agent_path() -> Path:
-    return Path.home() / "Library" / "LaunchAgents" / f"{BUNDLE_ID}.plist"
+    return Path.home() / "Library" / "LaunchAgents" / f"{APP_ID}.plist"
 
 
 def launch_agent_target() -> Path | None:
@@ -119,7 +118,7 @@ def write_bundle(app: Path, *, version: str = __version__) -> None:
     res = app / "Contents" / "Resources"
     res.mkdir(parents=True, exist_ok=True)
     info = {
-        "CFBundleIdentifier": BUNDLE_ID,
+        "CFBundleIdentifier": APP_ID,
         "CFBundleName": "Mnema",
         "CFBundleDisplayName": "Mnema",
         "CFBundleExecutable": "Mnema",
@@ -153,7 +152,7 @@ def _mac_set_autostart(enabled: bool) -> bool:
     with open(agent, "wb") as f:
         plistlib.dump(
             {
-                "Label": BUNDLE_ID,
+                "Label": APP_ID,
                 "ProgramArguments": ["/usr/bin/open", "-a", str(app_path())],
                 "EnvironmentVariables": {"XDG_CONFIG_HOME": _config_home()},
                 "RunAtLoad": True,
@@ -293,7 +292,7 @@ def install() -> str:
     """`mnema-bar install` (Linux): the shortcut plus autostart; returns the summary to print."""
     if platform.system() == "Darwin":
         raise MediaError(from_dmg())
-    from ..update import uv_tool
+    from ..core.base import uv_tool
 
     if uv_tool():  # the command's environment: no tray, and uv may replace it any time
         raise MediaError(_(_NOT_IN_UV_TOOL, url=INSTALL_PAGE))

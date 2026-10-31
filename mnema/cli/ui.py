@@ -28,8 +28,7 @@ from ..i18n import _
 
 ACCENT = "#a06bff"
 console = Console(highlight=False)
-# Progress goes to stderr: the mlx backend redirects stdout process-wide to capture its
-# verbose output, so a bar on stdout would freeze until the end.
+# Progress goes to stderr: stdout carries only the results.
 err_console = Console(stderr=True, highlight=False)
 
 
@@ -161,9 +160,9 @@ def run_with_progress(label: str, func, *, total: float | None = None, live_prev
 def run_streaming(label: str, func, *, total: float | None = None, live_preview: bool = False):
     """Run func(on=callback) in the main thread; on() itself moves the bar.
 
-    mlx streams segments from the main thread without competing for the GIL. A heartbeat
-    thread repaints the spinner about 10 times a second while there are no segments yet
-    (audio extraction, weight loading), so 0% does not look stuck.
+    Recognition itself runs in its own process and reports through on(). A heartbeat thread
+    repaints the spinner about 10 times a second while no progress has come yet (audio
+    extraction, model loading), so 0% does not look stuck.
     """
     progress = Progress(
         *_progress_columns(label),
@@ -171,8 +170,7 @@ def run_streaming(label: str, func, *, total: float | None = None, live_preview:
         expand=True,
         auto_refresh=False,
     )
-    # Starts indeterminate: whisperX reports no fractions, so the bar pulses instead of
-    # sitting at 0%.
+    # Starts indeterminate: until the first share comes, the bar pulses instead of sitting at 0%.
     task = progress.add_task(label, total=None)
     msg = {"text": ""}
     paint_lock = threading.Lock()

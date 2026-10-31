@@ -59,7 +59,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func startEngine() {
         guard let launch else {
-            NSLog("Mnema: no python to run: set MnemaPython in Info.plist or MNEMA_PYTHON")
+            NSLog("Mnema: no python in the bundle and no MNEMA_PYTHON")
             Self.store.engineDown = true
             return
         }

@@ -1,13 +1,12 @@
 import Foundation
 
-/// How to start the engine: the venv interpreter, its PATH and the log.
+/// How to start the engine: the interpreter, its PATH and the log.
 struct Launch: Equatable {
     var python: String
     var path: String
     var log: String
-    var libpython: String? = nil  // MnemaLibPython (written by `mnema-bar install`) or MNEMA_LIBPYTHON
-    var configHome: String? = nil  // MnemaConfigHome: the installer's XDG_CONFIG_HOME
-    var env: [String: String] = [:]  // more engine environment (the self-contained app)
+    var libpython: String? = nil  // the bundle's, or MNEMA_LIBPYTHON of a terminal run
+    var env: [String: String] = [:]  // more engine environment (the bundle's runtime)
 
     static let defaultLog = NSHomeDirectory() + "/.cache/mnema/bar.log"
 }
@@ -19,7 +18,7 @@ enum BridgeError: Error, CustomStringConvertible {
     var description: String {
         switch self {
         case .noLibrary:
-            return "no libpython: set MnemaLibPython in Info.plist (mnema-bar install) or MNEMA_LIBPYTHON"
+            return "no libpython: set MNEMA_LIBPYTHON with MNEMA_PYTHON"
         case .pipe:
             return "could not create pipes to the engine"
         }
@@ -27,36 +26,29 @@ enum BridgeError: Error, CustomStringConvertible {
 }
 
 extension Launch {
-    /// From the environment (MNEMA_PYTHON with MNEMA_LIBPYTHON, MNEMA_PATH, MNEMA_LOG: a terminal
-    /// run) or Info.plist (MnemaPython, MnemaLibPython, MnemaPath, MnemaLog, written by
-    /// `mnema-bar install`); the environment wins. Neither names a python: the self-contained
-    /// app, everything from its bundle.
-    /// The config directory comes only from Info.plist: the one the installer and CLI wrote to.
+    /// A terminal run of a development build names a venv in the environment (MNEMA_PYTHON with
+    /// MNEMA_LIBPYTHON, MNEMA_PATH, MNEMA_LOG); otherwise the app runs everything from its bundle.
     /// nil when there is no python to run.
     init?(
         env: [String: String] = ProcessInfo.processInfo.environment,
-        info: [String: Any] = Bundle.main.infoDictionary ?? [:],
         bundle: String = Bundle.main.bundlePath
     ) {
-        func value(_ envKey: String, _ plistKey: String) -> String? {
-            [env[envKey], info[plistKey] as? String].compactMap { $0 }.first { !$0.isEmpty }
-        }
-        let log = value("MNEMA_LOG", "MnemaLog") ?? Launch.defaultLog
-        guard let python = value("MNEMA_PYTHON", "MnemaPython") else {
+        func value(_ key: String) -> String? { env[key].flatMap { $0.isEmpty ? nil : $0 } }
+        let log = value("MNEMA_LOG") ?? Launch.defaultLog
+        guard let python = value("MNEMA_PYTHON") else {
             self.init(bundle: bundle, log: log)
             return
         }
         self.init(
             python: python,
-            path: value("MNEMA_PATH", "MnemaPath") ?? env["PATH"] ?? "/usr/bin:/bin",
+            path: value("MNEMA_PATH") ?? env["PATH"] ?? "/usr/bin:/bin",
             log: log,
-            libpython: value("MNEMA_LIBPYTHON", "MnemaLibPython"),
-            configHome: (info["MnemaConfigHome"] as? String).flatMap { $0.isEmpty ? nil : $0 })
+            libpython: value("MNEMA_LIBPYTHON"))
     }
 
-    /// The self-contained app (scripts/build_mac_app.py): Python, its packages and ffmpeg are
-    /// in Contents/Resources, mnema-asr next to the app in Contents/MacOS, so the app runs from
-    /// any folder.
+    /// The app from the DMG (scripts/build_mac_app.py): Python, its packages and ffmpeg are in
+    /// Contents/Resources, the recognition helper mnema-asr next to the app in Contents/MacOS, so
+    /// the app runs from any folder.
     /// nil — no Python in the bundle.
     init?(bundle: String, log: String) {
         let res = bundle + "/Contents/Resources"
@@ -91,7 +83,7 @@ struct LineBuffer {
     }
 }
 
-/// The engine is the Python venv inside the app process (EmbeddedPython): its stdin and stdout
+/// The engine is the Python interpreter inside the app process (EmbeddedPython): its stdin and stdout
 /// are pipes on descriptors 0 and 1, stderr is the log. Messages and exit arrive on the main
 /// thread in order; call it from the main thread too.
 final class Bridge {
@@ -125,7 +117,6 @@ final class Bridge {
         input = FileHandle(fileDescriptor: toEngine[1], closeOnDealloc: true)
         setenv("PATH", launch.path, 1)
         setenv("PYTHONEXECUTABLE", launch.python, 1)  // the venv is found by the pyvenv.cfg next to it
-        if let home = launch.configHome { setenv("XDG_CONFIG_HOME", home, 1) }
         for (name, value) in launch.env { setenv(name, value, 1) }
         setenv("MNEMA_UI_LANG", UILanguage.current, 1)  // the engine renders in the app language
         FileManager.default.changeCurrentDirectoryPath(NSHomeDirectory())

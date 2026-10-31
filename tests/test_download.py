@@ -372,3 +372,30 @@ def test_fetch_gives_yt_dlp_the_bundled_ffmpeg(
     opts = _fake_yt_dlp(monkeypatch, tmp_path)
     download.fetch("https://youtu.be/abc", want_video=True, dest_dir=tmp_path)
     assert opts[0]["ffmpeg_location"] == str(bundled)
+
+
+@pytest.mark.parametrize(
+    ("mac", "uv_tool", "hint"),
+    [
+        (True, True, "Reinstall the mnema command: https://github.com/fozt/mnema#command-line"),
+        (False, True, "Reinstall the mnema command: https://github.com/fozt/mnema#command-line"),
+        (False, False, "Reinstall Mnema: ./install.sh client"),
+    ],
+)
+def test_links_without_yt_dlp_say_how_to_reinstall_this_command(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, mac: bool, uv_tool: bool, hint: str
+) -> None:
+    """The Mac has only the command of uv tool; the Linux app has its installer."""
+    from mnema.core import base
+
+    monkeypatch.setattr(base, "STANDALONE", mac)
+    monkeypatch.setattr(base.sys, "prefix", str(tmp_path))
+    if uv_tool:
+        (tmp_path / "uv-receipt.toml").write_text("[tool]\n")
+    monkeypatch.setitem(sys.modules, "yt_dlp", None)  # import fails
+    monkeypatch.setattr(download.socket, "getaddrinfo", _fake_getaddrinfo("142.250.180.14"))
+
+    with using("en"), pytest.raises(MediaError) as err:
+        download.fetch("https://www.youtube.com/watch?v=x", want_video=False, dest_dir=tmp_path)
+
+    assert str(err.value) == f"Links need yt-dlp. {hint}"

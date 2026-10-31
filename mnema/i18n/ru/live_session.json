@@ -14,7 +14,7 @@
   "⚠ Stream stalled — Ctrl-C builds the transcript from the recording (for calls, `mnema rec` is more reliable)": "⚠ распознавание встало — Ctrl-C соберёт расшифровку из записи, для звонков надёжнее `mnema rec`",
   "Ctrl-T copy text · Ctrl-C stop": "Ctrl-T — текст в буфер · Ctrl-C — стоп",
   "server error": "ошибка сервера",
-  "websockets is missing — reinstall Mnema (./install.sh client).": "Нет websockets — переустановите Mnema (./install.sh client).",
+  "websockets is missing. {hint}": "Нет websockets. {hint}",
   "The server isn't ready: check the connection, the token and the model.": "Сервер не готов: проверьте подключение, токен и модель.",
   "Couldn't connect to the server: {error}": "Не удалось подключиться к серверу: {error}",
   "the server closed the connection": "сервер закрыл соединение",

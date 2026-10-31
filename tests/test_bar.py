@@ -828,6 +828,51 @@ def test_unfinished_sessions_found_and_recovered(monkeypatch, tmp_path) -> None:
     assert rt.state.unfinished == [] and notes_.calls[-1][0] == "Запись обработана"
 
 
+def test_a_model_downloaded_by_a_recording_is_reread_without_asking_the_server(
+    monkeypatch, tmp_path
+) -> None:
+    """The Mac's model was missing and the processing fetched it: afterwards only the model's
+    state is read again, the server is not asked for its recognition list."""
+    import mnema.live.setup as setup_mod
+    from mnema.client import MnemaClient
+    from tests.mac_helper_stub import install
+
+    helper = install(monkeypatch, tmp_path / "app")
+    helper.configure(installed={"parakeet": False, "vad": False})
+    notes = tmp_path / "notes"
+    _wav(notes / "live-1" / "mic.wav")
+    monkeypatch.setenv("MNEMA_LIVE_DIR", str(notes))
+    monkeypatch.setenv("MNEMA_RUNNER", "http://srv:8123")
+    monkeypatch.setattr("mnema.bar.runtime._system_available", lambda: False)
+    asked: list[str] = []
+    monkeypatch.setattr(MnemaClient, "asr_choices", lambda self: asked.append("asr") or [])
+
+    def recognized(op, src, params, *, runner=None, local=False, on=None):
+        helper.configure(installed={"parakeet": True, "vad": True})  # the first recording
+        return {"text": "Итоги.", "segments": [{"start": 0.0, "end": 1.0, "text": "Итоги."}]}
+
+    monkeypatch.setattr(setup_mod, "dispatch", recognized)
+    rt = BarRuntime(platform=_WholeRecording(), prefs_file=tmp_path / "bar.json")
+    for thread in threading.enumerate():
+        if thread.name == "mnema-bar-asr-choices":
+            thread.join(timeout=10)
+    assert rt.menu_env().asr_model is not None and not rt.menu_env().asr_model.installed
+    rt.handle("recognition:server")  # the list now comes from the server
+    for thread in threading.enumerate():
+        if thread.name == "mnema-bar-asr-choices":
+            thread.join(timeout=10)
+    before = len(asked)
+
+    rt.handle(f"recover:{notes / 'live-1'}")
+    rt.join(timeout=10)
+    for thread in threading.enumerate():
+        if thread.name == "mnema-bar-asr-model":
+            thread.join(timeout=10)
+
+    assert rt.menu_env().asr_model is not None and rt.menu_env().asr_model.installed
+    assert len(asked) == before
+
+
 class _WholeRecording(_Notes):
     """The "Process recording" window: the whole recording, as offered."""
 

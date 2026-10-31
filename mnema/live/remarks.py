@@ -313,7 +313,7 @@ def node_asr_reason(error: Exception) -> str:
     if isinstance(error, (NoCloudKey, OnlyCloud)):
         return str(error)
     if isinstance(error, HelperError) and error.known:  # no space, no network, an Intel Mac
-        return str(error)[:1].lower() + str(error)[1:]
+        return error.reason
     if classify(error) is not ErrorKind.OTHER:
         return human_reason(error)
     return _("error on the Mac") if base.processed_here() else _("error on the server")

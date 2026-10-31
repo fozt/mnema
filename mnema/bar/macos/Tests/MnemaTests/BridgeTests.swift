@@ -16,37 +16,36 @@ private func text(_ lines: [Data]) -> [String] {
     #expect(buffer.feed(Data("\n".utf8)).isEmpty)
 }
 
-@Test func launchTakesEnvironmentOverInfoPlist() {
-    let info: [String: Any] = [
-        "MnemaPython": "/app/python", "MnemaPath": "/app/bin", "MnemaLog": "/app/bar.log",
+@Test func launchOfATerminalRunTakesTheVenvFromTheEnvironment() {
+    let env = [
+        "MNEMA_PYTHON": "/dev/python", "MNEMA_LIBPYTHON": "/dev/libpython.dylib",
+        "MNEMA_PATH": "/dev/bin", "MNEMA_LOG": "/tmp/bar.log", "PATH": "/usr/bin",
     ]
-    #expect(Launch(env: [:], info: info) == Launch(python: "/app/python", path: "/app/bin", log: "/app/bar.log"))
-    let env = ["MNEMA_PYTHON": "/dev/python", "MNEMA_LOG": "/tmp/bar.log", "PATH": "/usr/bin"]
-    #expect(Launch(env: env, info: info) == Launch(python: "/dev/python", path: "/app/bin", log: "/tmp/bar.log"))
-    #expect(Launch(env: ["MNEMA_PYTHON": "/dev/python", "PATH": "/usr/bin"], info: [:])?.path == "/usr/bin")
-    #expect(Launch(env: ["PATH": "/usr/bin", "MNEMA_PYTHON": ""], info: ["MnemaPath": "/app/bin"]) == nil)
-    let configured = info.merging(["MnemaConfigHome": "/Users/me/xdg"]) { $1 }
-    #expect(Launch(env: ["XDG_CONFIG_HOME": "/elsewhere"], info: configured)?.configHome == "/Users/me/xdg")
+    #expect(
+        Launch(env: env, bundle: "/nonexistent/Mnema.app")
+            == Launch(python: "/dev/python", path: "/dev/bin", log: "/tmp/bar.log", libpython: "/dev/libpython.dylib"))
+    #expect(Launch(env: ["MNEMA_PYTHON": "/dev/python", "PATH": "/usr/bin"], bundle: "/nonexistent/Mnema.app")?.path == "/usr/bin")
+    #expect(Launch(env: ["PATH": "/usr/bin", "MNEMA_PYTHON": ""], bundle: "/nonexistent/Mnema.app") == nil)
 }
 
 @Test func launchRunsTheBundledPythonWhenNothingNamesOne() throws {
     let bundle = FileManager.default.temporaryDirectory.appendingPathComponent("Mnema-\(UUID()).app").path
     defer { try? FileManager.default.removeItem(atPath: bundle) }
-    #expect(Launch(env: ["PATH": "/usr/bin"], info: [:], bundle: bundle) == nil)  // no Python inside
+    #expect(Launch(env: ["PATH": "/usr/bin"], bundle: bundle) == nil)  // no Python inside
     let res = bundle + "/Contents/Resources"
     try FileManager.default.createDirectory(atPath: res + "/python/bin", withIntermediateDirectories: true)
     FileManager.default.createFile(
         atPath: res + "/python/bin/python3.12", contents: Data(), attributes: [.posixPermissions: 0o755])
-    let launch = try #require(Launch(env: ["PATH": "/opt/homebrew/bin:/usr/bin"], info: [:], bundle: bundle))
+    let launch = try #require(Launch(env: ["PATH": "/opt/homebrew/bin:/usr/bin"], bundle: bundle))
     #expect(launch.python == res + "/python/bin/python3.12")
     #expect(launch.libpython == res + "/python/lib/libpython3.12.dylib")
     #expect(launch.path == "\(res)/bin:\(res)/python/bin:/usr/bin:/bin:/usr/sbin:/sbin")
     #expect(launch.env["MNEMA_APP_BUNDLE"] == bundle)
     #expect(launch.env["MNEMA_ASR"] == bundle + "/Contents/MacOS/mnema-asr")  // recognition on CoreML
     #expect(launch.env["SSL_CERT_FILE"] == res + "/python/lib/python3.12/site-packages/certifi/cacert.pem")
-    #expect(launch.configHome == nil && launch.log == Launch.defaultLog)
-    // a source build or a terminal run still names its venv
-    let dev = Launch(env: ["MNEMA_PYTHON": "/dev/python", "PATH": "/usr/bin"], info: [:], bundle: bundle)
+    #expect(launch.log == Launch.defaultLog)
+    // a terminal run of a development build still names its venv
+    let dev = Launch(env: ["MNEMA_PYTHON": "/dev/python", "PATH": "/usr/bin"], bundle: bundle)
     #expect(dev == Launch(python: "/dev/python", path: "/usr/bin", log: Launch.defaultLog))
 }
 

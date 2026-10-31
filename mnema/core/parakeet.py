@@ -308,12 +308,8 @@ def _download(name: str, staging: Path) -> Path:
         import huggingface_hub
         from huggingface_hub.errors import EntryNotFoundError
     except ImportError as e:
-        raise MediaError(
-            _(
-                "huggingface_hub is missing — reinstall Mnema "
-                "(./install.sh client or ./install.sh server)."
-            )
-        ) from e
+        logger.warning("huggingface_hub is missing")
+        raise MediaError(_("Mnema is not fully installed. Reinstall it")) from e
     try:
         return Path(
             huggingface_hub.hf_hub_download(

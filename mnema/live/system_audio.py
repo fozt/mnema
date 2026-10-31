@@ -512,8 +512,8 @@ def in_mnema_app() -> bool:
     try:
         from Foundation import NSBundle  # ty: ignore[unresolved-import]
 
-        from ..bar.install import BUNDLE_ID
+        from ..core.base import APP_ID
 
-        return NSBundle.mainBundle().bundleIdentifier() == BUNDLE_ID
+        return NSBundle.mainBundle().bundleIdentifier() == APP_ID
     except ImportError:
         return False

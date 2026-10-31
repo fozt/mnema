@@ -1,7 +1,7 @@
 """A stand-in for mnema-asr: a real process that speaks the protocol of the shared fixture
 (tests/fixtures/asr-helper-v1.json). Its behaviour is a JSON file next to it (what is
-installed, which operation fails with which code, the protocol version); every request is
-logged there with the helper's environment and parent pid.
+installed, which operation fails with which code or gives which result, the protocol version);
+every request is logged there with the helper's environment and parent pid.
 """
 
 from __future__ import annotations
@@ -48,6 +48,8 @@ for line in sys.stdin:
     operation, payload = request["operation"], request["payload"]
     if operation in c.get("fail", {{}}):
         error(c["fail"][operation])
+    elif operation in c.get("result", {{}}):  # a result of the test's own shape
+        send({{"type": "result", "value": c["result"][operation]}})
     elif operation == "models":
         models = [dict(m, installed=c["installed"].get(m["id"], False))
                   for m in replies["models"]["value"]]

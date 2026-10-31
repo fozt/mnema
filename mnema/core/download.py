@@ -166,9 +166,9 @@ def fetch(
     try:
         import yt_dlp
     except ImportError as e:
-        raise MediaError(
-            _("Links need yt-dlp: reinstall Mnema (./install.sh client or ./install.sh server)")
-        ) from e
+        from .base import reinstall_command
+
+        raise MediaError(_("Links need yt-dlp. {hint}", hint=reinstall_command())) from e
 
     def hook(d: dict) -> None:
         if d.get("status") == "downloading":

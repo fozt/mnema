@@ -8,9 +8,10 @@ Recording comes first: recorders and sources start at once, ASR warms up in the 
 into a voice recorder: recording goes on until the stop, the cause shows in the view and in
 asr_failures.
 
-The transcriber here is a synchronous facade (feed/poll/finish → LiveChunk); WhisperLiveKit's
-async details live in asr.py. Optional facade members (start_warmup(), ready) are read with
-getattr, like dropped_seconds of the sources. Speakers are separated by source (label = name).
+The transcriber here is a synchronous facade (feed/poll/finish → LiveChunk); the live process
+and its phrase-by-phrase recognition live in asr.py. Optional facade members (start_warmup(),
+ready) are read with getattr, like dropped_seconds of the sources. Speakers are separated by
+source (label = name).
 """
 
 from __future__ import annotations
@@ -45,9 +46,9 @@ _MIN_FLUSH = 60  # characters: a coherent enough piece is flushed at once
 # starvation guard: decoding without final punctuation (auto language, continuous speech) would
 # accumulate forever and translation would never start, so split at a word boundary
 _MAX_PENDING = 300
-# ASR stall watchdog: the draft grows but nothing is committed for this long → the engine
-# stalled (WLK stops committing, buffer_transcription swells, the live text freezes). An honest
-# status instead of a silent freeze; recording is unaffected, the final offline pass rebuilds it.
+# ASR stall watchdog: the draft is shown but nothing is committed for this long → the engine
+# stalled (the live process hangs or falls behind, the live text freezes). An honest status
+# instead of a silent freeze; recording is unaffected, the final offline pass rebuilds it.
 _STALL_AFTER = 20.0
 _DRAFT_TAIL = 240  # draft characters on screen: the tail, not the whole sheet
 
@@ -60,8 +61,8 @@ _STOP_TRANSLATE_WAIT = 15.0
 _DROP_SETTLE = 2.0  # seconds without growing losses → the drop episode is over
 _DROP_ANNOUNCE_MIN = 1.0  # total losses under a second are not announced
 
-# Silence filter: on pauses Whisper hallucinates a continuation of the dialog and WLK's VAD/VAC
-# let it through. A committed segment whose interval falls on actual silence of the source (its
+# Silence filter: a recognizer may make words of a pause (noise silero took for speech). A
+# committed segment whose interval falls on actual silence of the source (its
 # energy timeline, speech_energy via getattr; sources without it disable the filter) is dropped
 # entirely: not in the Track, not on screen, not translated.
 # Threshold from live measurements: room noise RMS 61–223 (median ~80), speech through speakers
@@ -80,7 +81,7 @@ _log = logging.getLogger(__name__)
 
 
 def _tidy(text: str) -> str:
-    """Collapse extra spaces and drop the space before punctuation (WLK emits ' .' deltas)."""
+    """Collapse extra spaces and drop the space before punctuation."""
     text = re.sub(r"\s{2,}", " ", text)
     return re.sub(r"\s+([.!?,;:…])", r"\1", text)
 

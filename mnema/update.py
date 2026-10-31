@@ -39,7 +39,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from . import __version__
 from . import extras as roles
-from .core.base import MediaError
+from .core.base import MediaError, uv_tool
 from .i18n import _
 
 TRANSPORT: httpx.BaseTransport | None = None
@@ -269,25 +269,28 @@ def _fetch(
     digest = hashlib.sha256()
     size = 0
     shown = -1
-    with _client() as client, client.stream("GET", url) as response:
-        response.raise_for_status()
-        if response.url.scheme != "https":
-            raise MediaError(_("The update package isn't available over a secure connection"))
-        if total is None:
-            length = response.headers.get("content-length", "")
-            total = int(length) if length.isascii() and length.isdigit() else None
-        with destination.open("wb") as out:
-            for chunk in response.iter_bytes():
-                size += len(chunk)
-                if size > limit:
-                    raise MediaError(_("The update package is larger than allowed"))
-                digest.update(chunk)
-                out.write(chunk)
-                if total:
-                    percent = min(100, size * 100 // total)
-                    if percent != shown:
-                        shown = percent
-                        on(percent / 100)
+    try:
+        with _client() as client, client.stream("GET", url) as response:
+            response.raise_for_status()
+            if response.url.scheme != "https":
+                raise MediaError(_("The update package isn't available over a secure connection"))
+            if total is None:
+                length = response.headers.get("content-length", "")
+                total = int(length) if length.isascii() and length.isdigit() else None
+            with destination.open("wb") as out:
+                for chunk in response.iter_bytes():
+                    size += len(chunk)
+                    if size > limit:
+                        raise MediaError(_("The update package is larger than allowed"))
+                    digest.update(chunk)
+                    out.write(chunk)
+                    if total:
+                        percent = min(100, size * 100 // total)
+                        if percent != shown:
+                            shown = percent
+                            on(percent / 100)
+    except httpx.TransportError as exc:
+        raise MediaError(_("No connection to the update server")) from exc
     if digest.hexdigest() != sha256:
         raise MediaError(_("The update didn't download correctly. Try again"))
 
@@ -314,11 +317,6 @@ def _unpack(archive: Path, destination: Path, version: str) -> None:
     project = tomllib.loads((destination / "pyproject.toml").read_text())
     if project["project"]["version"] != version or not (destination / "uv.lock").is_file():
         raise MediaError(_("The update package has no locked Mnema version"))
-
-
-def uv_tool() -> bool:
-    """The mnema command installed with uv tool: uv leaves its receipt in the environment."""
-    return (Path(sys.prefix) / "uv-receipt.toml").is_file()
 
 
 def _tool_update(found: Available) -> Result:
@@ -415,19 +413,19 @@ def _system_tool(*cmd: str, what: str) -> None:
 
 def _checked_bundle(app: Path, version: str) -> None:
     """The unpacked bundle is Mnema of the expected version and its signature holds."""
-    from .bar.install import BUNDLE_ID
+    from .core.base import APP_ID
 
     try:
         info = plistlib.loads((app / "Contents/Info.plist").read_bytes())
     except (OSError, ValueError, plistlib.InvalidFileException) as exc:
         raise MediaError(_("Invalid update package contents")) from exc
-    if not isinstance(info, dict) or info.get("CFBundleIdentifier") != BUNDLE_ID:
+    if not isinstance(info, dict) or info.get("CFBundleIdentifier") != APP_ID:
         raise MediaError(_("The update package isn't the Mnema app"))
     if info.get("CFBundleShortVersionString") != version:
         raise MediaError(_("The update package holds another Mnema version"))
     _system_tool(
         "/usr/bin/codesign", "--verify", "--deep", "--strict",
-        f"-R=identifier \"{BUNDLE_ID}\"", str(app),
+        f"-R=identifier \"{APP_ID}\"", str(app),
         what=_("The new Mnema version isn't signed correctly"),
     )  # fmt: skip
 
@@ -456,6 +454,20 @@ def _clones(bundle: Path, work: Path) -> bool:
     finally:
         probe.unlink(missing_ok=True)
     return True
+
+
+class CodeNotApplicable(MediaError):
+    """The code-only update does not fit this bundle (another runtime, no code archive): the
+    whole bundle does."""
+
+
+def _unquarantine(app: Path) -> None:
+    """A bundle from the DMG or a copy may carry the quarantine: a missing attribute is no
+    failure."""
+    subprocess.run(
+        ["/usr/bin/xattr", "-dr", "com.apple.quarantine", str(app)],
+        capture_output=True, check=False, stdin=subprocess.DEVNULL,
+    )  # fmt: skip
 
 
 def _code_members(package: tarfile.TarFile) -> list[tarfile.TarInfo]:
@@ -488,27 +500,37 @@ def prepare_code_bundle(bundle: Path, archive: Path, work: Path, version: str) -
     checked; the installed bundle is not changed. The release check runs this function of the
     previous release on the new archive (scripts/build_mac_app.py): keep its arguments."""
     from .bar import codesign
-    from .bar.install import BUNDLE_ID
+    from .core.base import APP_ID
 
     app = work / "Mnema.app"
     invalid = _("Invalid update package contents")
-    with tarfile.open(archive, "r:gz") as package:
-        members = _code_members(package)
-        _system_tool("/bin/cp", "-c", "-R", str(bundle), str(app), what=invalid)
-        # a bundle from the DMG may carry the quarantine: a missing attribute is no failure
-        subprocess.run(
-            ["/usr/bin/xattr", "-dr", "com.apple.quarantine", str(app)],
-            capture_output=True, check=False, stdin=subprocess.DEVNULL,
-        )  # fmt: skip
-        codesign.remove_code(app)
-        package.extractall(app, members=members, filter="data")
+    try:
+        with tarfile.open(archive, "r:gz") as package:
+            members = _code_members(package)
+            _system_tool(
+                "/bin/cp", "-c", "-R", str(bundle), str(app),
+                what=_("Couldn't update Mnema. The previous version is in place"),
+            )  # fmt: skip
+            _unquarantine(app)
+            codesign.remove_code(app)
+            package.extractall(app, members=members, filter="data")
+    except tarfile.TarError as exc:
+        raise MediaError(invalid) from exc
     key = _runtime_of(app)
-    if key is None or codesign.runtime_key(app) != key:
-        raise MediaError(invalid)  # built for another runtime, or this one was changed
+    try:
+        same = key is not None and codesign.runtime_key(app) == key
+    except ValueError:  # an entry of the installed runtime is neither a file nor a link
+        same = False
+    if not same:  # built for another runtime, or this one was changed
+        raise CodeNotApplicable(_("Invalid update package contents"))
     unpacked = [app / member.name for member in members]
     main_executable = app / codesign.MAIN
-    codesign.sign_files([p for p in unpacked if p != main_executable and codesign.is_macho(p)])
-    codesign.sign_bundle(app, BUNDLE_ID)
+    try:
+        codesign.sign_files([p for p in unpacked if p != main_executable and codesign.is_macho(p)])
+        codesign.sign_bundle(app, APP_ID)
+    except subprocess.CalledProcessError as exc:
+        logger.warning("signing the code update: %s", (exc.stderr or "")[-4000:])
+        raise MediaError(_("The new Mnema version isn't signed correctly")) from exc
     _checked_bundle(app, version)
     return app
 
@@ -571,8 +593,8 @@ def _apply_bundle(bundle: Path, release: Release, on: Progress) -> Result:
         if code is not None and _runtime_of(bundle) == code.runtime and _clones(bundle, work):
             try:
                 app = _code_bundle(bundle, release, code, work / "code", on)
-            except Exception:  # whatever failed on this way, the whole bundle may still do
-                logger.warning("code-only update failed, taking the whole app", exc_info=True)
+            except CodeNotApplicable:
+                logger.warning("code-only update does not fit, taking the whole app", exc_info=True)
                 shutil.rmtree(work / "code", ignore_errors=True)
         if app is None:
             app = _whole_bundle(release, mac, work, on)
@@ -596,26 +618,31 @@ def _code_bundle(
     bundle: Path, release: Release, code: CodeRelease, work: Path, on: Progress
 ) -> Path:
     work.mkdir()
-    downloading = _("Downloading Mnema {version}…", version=release.version)
-    on(None, downloading)
     archive = work / "code.tar.gz"
-    _fetch(
-        code.archive, code.sha256, archive, limit=code.size, total=code.size,
-        on=lambda share: on(share, downloading),
-    )  # fmt: skip
-    on(None, _("Checking the new version…"))
+    try:
+        _fetch_package(release, code, archive, on)
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code not in (404, 410):
+            raise
+        raise CodeNotApplicable(_("Invalid update package contents")) from exc
     return prepare_code_bundle(bundle, archive, work, release.version)
 
 
-def _whole_bundle(release: Release, mac: MacRelease, work: Path, on: Progress) -> Path:
+def _fetch_package(
+    release: Release, package: MacRelease | CodeRelease, archive: Path, on: Progress
+) -> None:
     downloading = _("Downloading Mnema {version}…", version=release.version)
     on(None, downloading)
-    archive = work / "Mnema.zip"
     _fetch(
-        mac.archive, mac.sha256, archive, limit=mac.size, total=mac.size,
+        package.archive, package.sha256, archive, limit=package.size, total=package.size,
         on=lambda share: on(share, downloading),
     )  # fmt: skip
     on(None, _("Checking the new version…"))
+
+
+def _whole_bundle(release: Release, mac: MacRelease, work: Path, on: Progress) -> Path:
+    archive = work / "Mnema.zip"
+    _fetch_package(release, mac, archive, on)
     unpacked = work / "unpacked"
     _system_tool(
         "/usr/bin/ditto", "-x", "-k", str(archive), str(unpacked),
@@ -625,11 +652,7 @@ def _whole_bundle(release: Release, mac: MacRelease, work: Path, on: Progress) -
     app = unpacked / "Mnema.app"
     if app.is_symlink() or not app.is_dir():
         raise MediaError(_("Invalid update package contents"))
-    # httpx sets no quarantine, but a copy may carry it: a missing attribute is no failure
-    subprocess.run(
-        ["/usr/bin/xattr", "-dr", "com.apple.quarantine", str(app)],
-        capture_output=True, check=False, stdin=subprocess.DEVNULL,
-    )  # fmt: skip
+    _unquarantine(app)
     _checked_bundle(app, release.version)
     return app
 
@@ -658,7 +681,9 @@ def drop_previous_bundle() -> None:
 
 
 def apply(on: Progress = lambda _f, _m: None, *, terminal: bool = False) -> Result:
-    """Prepare one locked release and switch the app to it.
+    """Update this installation to the latest release: the mnema command of uv tool is told
+    how, Mnema.app replaces its bundle (the code only when the runtime is the same), the Linux
+    app prepares a locked release folder and switches to it; a Mac without the app gets the DMG.
     terminal: a command runs the update, so a refusal may name the command that helps; otherwise
     it is an app notice without commands, and the command goes to the log."""
     import fcntl

@@ -32,6 +32,7 @@ from pathlib import Path
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from mnema.core.base import app_helper
 from scripts.build_mac_app import FORBIDDEN, WHEEL, load_commands, macho_files, outside
 
 
@@ -85,7 +86,7 @@ def run(cmd: list[str], env: dict[str, str], **kw) -> subprocess.CompletedProces
 def check_asr(app: Path, env: dict[str, str], home: Path) -> list[str]:
     """mnema-asr starts from the bundle (no build folder next to it), says its protocol version
     and lists its models; nothing is downloaded. Returns the model ids."""
-    asr = str(app / "Contents" / "MacOS" / "mnema-asr")
+    asr = str(app_helper(app))
     out = run([asr, "--version"], env, cwd=home)
     if out.returncode != 0 or not re.fullmatch(r"mnema-asr \d+", out.stdout.strip()):
         raise SmokeError(f"mnema-asr --version:\n{out.stdout}\n{out.stderr[-2000:]}")
@@ -192,7 +193,7 @@ print(json.dumps([c["id"] for c in node_settings.local_asr_choices()]))
 def check_choices(app: Path, env: dict[str, str], models: list[str]) -> list[str]:
     """local_asr_choices in the bundle: Automatic and the models of mnema-asr."""
     python = app / "Contents" / "Resources" / "python" / "bin" / "python3.12"
-    asr = app / "Contents" / "MacOS" / "mnema-asr"
+    asr = app_helper(app)
     env = {**env, "MNEMA_APP_BUNDLE": str(app), "MNEMA_ASR": str(asr)}
     out = run([str(python), "-I", "-B", "-c", _CHOICES_CHECK], env)
     if out.returncode != 0:
@@ -214,7 +215,7 @@ def check_first_start(app: Path, home: Path, version: str) -> None:
         raise SmokeError(f"first start did not write {record}: {e}") from None
     wanted = {
         "bundle": str(app),
-        "asr": str(app / "Contents" / "MacOS" / "mnema-asr"),
+        "asr": str(app_helper(app)),
         "version": version,
     }
     if {key: found.get(key) for key in wanted} != wanted:
@@ -246,7 +247,7 @@ def check_recognition(app: Path, env: dict[str, str], expected: list[str]) -> No
     env = {
         **env,
         "MNEMA_APP_BUNDLE": str(app),
-        "MNEMA_ASR": str(app / "Contents" / "MacOS" / "mnema-asr"),
+        "MNEMA_ASR": str(app_helper(app)),
         "PATH": f"{res / 'bin'}:{res / 'python' / 'bin'}:{env['PATH']}",
     }
     cmd = [str(python), "-I", "-B", "-m", "mnema.bar", "--headless"]

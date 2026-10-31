@@ -150,7 +150,7 @@ def _run_op(
 ) -> dict:
     """Run an op through dispatch under the fitting progress wrapper.
 
-    Locally run_streaming keeps mlx in the main thread without competing for the GIL;
+    Locally run_streaming runs the op in the main thread (recognition is its own process);
     remotely run_with_progress polls the runner in the background.
     """
     is_local = resolve_runner(runner, local=local) is None
@@ -596,7 +596,7 @@ def _cmd_live(args, *, ephemeral_base: Path | None = None) -> None:
     here are the flags, the terminal view and the hints.
     """
 
-    # lazy: the thin client does not import sounddevice or whisperlivekit
+    # lazy: the thin client does not import sounddevice
     from ..live.setup import (
         LiveConfig,
         build_live,

@@ -33,7 +33,7 @@ VERSION = 1
 
 
 class TrackRun(BaseModel):
-    engine: str | None = None  # gigaam | mlx | whisperx; None — unknown
+    engine: str | None = None  # parakeet | "provider/model" (earlier: gigaam, mlx…); None — unknown
     lang: str | None = None
     seconds: float | None = None
     error: str | None = None  # why the track was not recognized

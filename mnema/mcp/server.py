@@ -20,7 +20,9 @@ def _build() -> Any:
     try:
         from mcp.server.fastmcp import FastMCP
     except ImportError as e:
-        raise SystemExit(_("The MCP SDK is missing — reinstall Mnema (./install.sh client)")) from e
+        from ..core.base import reinstall_command
+
+        raise SystemExit(_("The MCP SDK is missing. {hint}", hint=reinstall_command())) from e
 
     mcp = FastMCP("mnema")
 

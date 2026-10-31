@@ -15,7 +15,7 @@ import platform
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from ..i18n import _
 from . import base, parakeet
@@ -41,6 +41,14 @@ _ERRORS = {
     "bad_audio": "Could not read the recording audio",
     "unsupported_mac": "Recognition on this Mac needs Apple silicon",
 }
+# The same causes as a reason after a colon: "Could not recognize the track: <reason>"
+_REASONS = {
+    "no_model": "the recognition model is not downloaded",
+    "no_space": "not enough disk space for the recognition model",
+    "download_failed": "the recognition model did not download, check the connection",
+    "bad_audio": "the recording audio could not be read",
+    "unsupported_mac": "recognition on this Mac needs Apple silicon",
+}
 _STAGES = {
     "download": "Downloading the recognition model, only the first time…",
     "load": "Loading the recognition model…",
@@ -60,6 +68,11 @@ class HelperError(MediaError):
         """The cause is in the user's words, not just "failed"."""
         return self.code in _ERRORS
 
+    @property
+    def reason(self) -> str:
+        """The known cause as a reason inside a sentence, "" for an unknown one."""
+        return _(_REASONS[self.code]) if self.code in _REASONS else ""
+
 
 class Model(BaseModel):
     """A recognition model the helper knows (the models operation)."""
@@ -69,6 +82,33 @@ class Model(BaseModel):
     langs: list[str]
     size: int  # bytes on disk once downloaded
     installed: bool
+
+
+class _Track(BaseModel):
+    words: list[Word]
+
+
+class _Tracks(BaseModel):
+    tracks: list[_Track]
+
+
+class _Speech(BaseModel):
+    segments: list[tuple[int, int]]
+
+
+_MODELS = TypeAdapter(list[Model])
+UNKNOWN_REPLY = "Unknown reply from the recognition process"
+# Listing the models reads only the helper's files: a helper silent for this long is hung.
+# Recognition and downloads have no limit: a long recording takes minutes.
+MODELS_TIMEOUT = 120.0
+
+
+def _parsed[T](adapter: TypeAdapter[T], value: Any, operation: str) -> T:
+    try:
+        return adapter.validate_python(value)
+    except ValidationError as e:
+        logger.warning("mnema-asr %s: unexpected result: %s", operation, e)
+        raise MediaError(_(UNKNOWN_REPLY)) from e
 
 
 def helper_path() -> Path | None:
@@ -81,7 +121,7 @@ def helper_path() -> Path | None:
     if named and _runnable(Path(named)):
         return Path(named)
     bundle = base.mac_app()
-    found = bundle / "Contents" / "MacOS" / "mnema-asr" if bundle is not None else None
+    found = base.app_helper(bundle) if bundle is not None else None
     return found if found is not None and _runnable(found) else None
 
 
@@ -93,8 +133,13 @@ def _apple_silicon() -> bool:
     return platform.machine() == "arm64"
 
 
-def _call(operation: str, payload: dict[str, Any], on: Progress) -> Any:
-    """One request to a fresh helper; progress goes to on, an exception from on stops it."""
+def _call(
+    operation: str, payload: dict[str, Any], on: Progress, *, timeout: float | None = None
+) -> Any:
+    """One request to a fresh helper; progress goes to on, an exception from on stops it.
+    timeout: the longest wait for the result, None — no limit."""
+    import time
+
     from .worker import Worker
 
     helper = helper_path()
@@ -109,11 +154,15 @@ def _call(operation: str, payload: dict[str, Any], on: Progress) -> Any:
     except OSError as e:
         logger.warning("mnema-asr did not start", exc_info=True)
         raise HelperError("unsupported_mac" if e.errno == _EBADARCH else "failed") from e
+    deadline = None if timeout is None else time.monotonic() + timeout
     with worker:
         worker.send({"operation": operation, "payload": payload})
         while True:
             event = worker.receive()
             if event is None:
+                if deadline is not None and time.monotonic() > deadline:
+                    logger.warning("mnema-asr %s: no answer in %.0f s", operation, timeout)
+                    raise HelperError("failed")
                 on(*status)  # a stop also works during a long download or window
                 continue
             if "v" not in event and "message" in event:  # the Worker's own: a corrupt reply
@@ -131,12 +180,12 @@ def _call(operation: str, payload: dict[str, Any], on: Progress) -> Any:
                 case "error":
                     raise HelperError(str(event.get("code")))
                 case _:
-                    raise MediaError(_("Unknown reply from the recognition process"))
+                    raise MediaError(_(UNKNOWN_REPLY))
 
 
 def models() -> list[Model]:
     """The helper's models and whether they are downloaded; no network."""
-    return [Model.model_validate(m) for m in _call("models", {}, noop)]
+    return _parsed(_MODELS, _call("models", {}, noop, timeout=MODELS_TIMEOUT), "models")
 
 
 def download(model: str, *, on: Progress = noop) -> None:
@@ -175,14 +224,19 @@ class MacHelper:
         """The words of each track: one request, so the model loads once for all of them."""
         payload = {"id": self.id, "wavs": [str(w) for w in wavs]}
         value = _downloaded(self.id, "transcribe", payload, on)
-        return [[Word.model_validate(w) for w in t["words"]] for t in value["tracks"]]
+        tracks = _parsed(TypeAdapter(_Tracks), value, "transcribe").tracks
+        if len(tracks) != len(wavs):
+            logger.warning("mnema-asr transcribe: %d tracks for %d files", len(tracks), len(wavs))
+            raise MediaError(_(UNKNOWN_REPLY))
+        return [t.words for t in tracks]
 
     def speech(self, wav: Path, *, max_s: float) -> list[tuple[int, int]]:
         """FluidAudio's speech segments, a longer one cut into equal parts of at most max_s."""
         value = _downloaded(VAD, "speech", {"wav": str(wav)}, noop)
+        segments = _parsed(TypeAdapter(_Speech), value, "speech").segments
         limit = max(1, int(max_s * SR))
         spans: list[tuple[int, int]] = []
-        for start, end in value["segments"]:
+        for start, end in segments:
             parts = -(-(end - start) // limit)
             spans += [
                 (start + (end - start) * i // parts, start + (end - start) * (i + 1) // parts)

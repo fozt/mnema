@@ -96,9 +96,9 @@ class RemoteStreamingTranscriber:
         try:
             import websockets  # noqa: F401
         except Exception as e:  # noqa: BLE001
-            raise MediaError(
-                _("websockets is missing — reinstall Mnema (./install.sh client).")
-            ) from e
+            from ..core.base import reinstall_command
+
+            raise MediaError(_("websockets is missing. {hint}", hint=reinstall_command())) from e
         self._loop = asyncio.new_event_loop()
         # the socket thread builds error texts: it keeps the caller's interface language
         context = contextvars.copy_context()

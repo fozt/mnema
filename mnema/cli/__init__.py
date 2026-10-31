@@ -41,8 +41,8 @@ def main() -> None:
 
         cancel_active_job()
         console.print(f"\n[yellow]{_('Exiting.')}[/]")
-        # os._exit, not sys.exit: litellm and WhisperLiveKit leave thread pools that atexit
-        # would join forever. Everything needed is already saved and printed.
+        # os._exit, not sys.exit: litellm leaves thread pools that atexit would join forever.
+        # Everything needed is already saved and printed.
         sys.stdout.flush()
         sys.stderr.flush()
         os._exit(130)

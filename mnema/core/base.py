@@ -122,8 +122,29 @@ TOOL_ENV = {"ffmpeg": "MNEMA_FFMPEG", "ffprobe": "MNEMA_FFPROBE"}
 MISSING_TOOL = "{program} not found. Install ffmpeg or reinstall Mnema"
 
 
-APP_ID = "com.mnema.bar"  # CFBundleIdentifier of Mnema.app (bar.install.BUNDLE_ID)
+APP_ID = "com.mnema.bar"  # CFBundleIdentifier of Mnema.app
 SYSTEM_APPS = Path("/Applications")
+
+
+COMMAND_PAGE = "https://github.com/fozt/mnema#command-line"
+
+
+def uv_tool() -> bool:
+    """The mnema command installed with uv tool: uv leaves its receipt in the environment."""
+    return (Path(sys.prefix) / "uv-receipt.toml").is_file()
+
+
+def reinstall_command() -> str:
+    """For a terminal: how to put back a package of the mnema command. The command is the uv tool
+    package (on a Mac the only one) or the environment of the Linux app."""
+    if STANDALONE or uv_tool():
+        return _("Reinstall the mnema command: {url}", url=COMMAND_PAGE)
+    return _("Reinstall Mnema: ./install.sh client")
+
+
+def app_helper(bundle: Path) -> Path:
+    """mnema-asr of a Mnema.app: recognition on CoreML (core/mac_helper.py)."""
+    return bundle / "Contents" / "MacOS" / "mnema-asr"
 
 
 def app_file() -> Path:

@@ -13,15 +13,23 @@ tasks:
     silent: true
 
   install:
-    desc: Install the app from this checkout
+    desc: Install the Linux app from this checkout (a Mac builds it with mac:app)
     cmds:
-      - ./install.sh client
+      - cmd: ./install.sh client
+        platforms: [linux]
+      - cmd: 'echo "Mnema for Mac is built with: task mac:app (dist/mac/Mnema.app and its DMG)"'
+        platforms: [darwin]
+        silent: true
 
   update:
-    desc: Install the published version of the Mnema app
+    desc: Install the published version of the Linux app (Mnema.app updates itself)
     cmds:
       # The app installed by ./install.sh client lives in its own environment, not in .venv
-      - "${XDG_DATA_HOME:-$HOME/.local/share}/mnema/app/.venv/bin/python -m mnema.update"
+      - cmd: '"${XDG_DATA_HOME:-$HOME/.local/share}/mnema/app/.venv/bin/python" -m mnema.update'
+        platforms: [linux]
+      - cmd: 'echo "Mnema.app updates itself: Settings → General → Check for updates"'
+        platforms: [darwin]
+        silent: true
 
   serve:
     desc: Run a Mnema server (runner) on this computer

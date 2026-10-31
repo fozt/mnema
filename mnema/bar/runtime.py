@@ -589,20 +589,26 @@ class BarRuntime:
                 else LocalModel(size=found.size, installed=found.installed, error=error)
             )
 
+    def _reread_local_model(self) -> None:
+        """Only the model's state, in the background: the recognition list did not change."""
+        threading.Thread(
+            target=lambda: (self._read_local_model(), self._env_changed()),
+            daemon=True,
+            name="mnema-bar-asr-model",
+        ).start()
+
     def _download_local_model(self) -> None:
         """Recognition on this Mac is chosen, or "Download": the model in the background, its
-        share in the settings; there already — only a check. A failure — the reason in the row."""
+        share in the settings; there already — nothing to do, not read yet — read first. A
+        failure — the reason in the row."""
         from ..core import mac_helper
 
         if not _base.STANDALONE or not mac_helper.MacHelper().available():
             return
         with self._lock:
             current = self._local_model
-            if current is not None and current.downloading:
+            if current is not None and (current.downloading or current.installed):
                 return
-            self._local_model = LocalModel(
-                size=current.size if current is not None else 0, downloading=True
-            )
 
         def step(share: float | None, message: str) -> None:
             with self._lock:
@@ -613,6 +619,18 @@ class BarRuntime:
             self._env_changed()
 
         def work() -> None:
+            if current is None:
+                self._read_local_model()
+            with self._lock:
+                model = self._local_model
+                done = model is not None and (model.downloading or model.installed)
+                if not done:
+                    self._local_model = LocalModel(
+                        size=model.size if model is not None else 0, downloading=True
+                    )
+            self._env_changed()
+            if done:
+                return
             error = ""
             try:
                 mac_helper.download(mac_helper.RECOGNIZER, on=step)
@@ -628,7 +646,6 @@ class BarRuntime:
             self._read_local_model()
             self._env_changed()
 
-        self._env_changed()
         threading.Thread(target=work, daemon=True, name="mnema-bar-asr-model").start()
 
     def menu_env(self) -> MenuEnv:
@@ -885,7 +902,7 @@ class BarRuntime:
 
             env = _env()
             # MNEMA_PYTHON from a terminal launch must not leak into the relaunched app: the
-            # updated bundle takes the interpreter and libpython from its own Info.plist
+            # updated bundle runs the Python inside it
             for name in ("MNEMA_PYTHON", "MNEMA_LIBPYTHON"):
                 env.pop(name, None)
         if _platform.system() == "Darwin":  # on a Mac the engine lives only in Mnema.app
@@ -1949,7 +1966,7 @@ class BarRuntime:
                 self._library_changed()
                 model = self._local_model
                 if model is not None and not model.installed and not model.downloading:
-                    self._load_asr_choices()  # the first recording may have downloaded it
+                    self._reread_local_model()  # the first recording may have downloaded it
             try:
                 self._after(task, completed)
             except Exception:  # noqa: BLE001

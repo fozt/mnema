@@ -251,7 +251,6 @@ export PATH="$HOME/.local/bin:$PATH:/usr/local/sbin:/usr/sbin:/sbin"
 if [ "$OS" = "Linux" ] && command -v apt-get >/dev/null; then
   missing=()
   command -v ffmpeg >/dev/null || missing+=(ffmpeg)
-  command -v git >/dev/null || missing+=(git)
   command -v curl >/dev/null || missing+=(curl)
   ldconfig -p 2>/dev/null | grep libportaudio >/dev/null || missing+=(libportaudio2)
   command -v parec >/dev/null || missing+=(pulseaudio-utils)

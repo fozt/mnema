@@ -1103,6 +1103,22 @@ def test_choosing_this_mac_downloads_the_model_with_progress(mac_helper, tmp_pat
     assert [c.key for c in rows["Движок"].choices] == ["asr:auto", "asr:parakeet"]
 
 
+def test_choosing_this_mac_with_the_model_there_downloads_nothing(mac_helper, tmp_path) -> None:
+    """The model is there: choosing this Mac only reads its state, nothing shows a download."""
+    mac_helper.configure(installed={"parakeet": True, "vad": True})
+    (tmp_path / "bar.json").write_text(json.dumps({"recognition": "cloud"}), encoding="utf-8")
+    rt = BarRuntime(prefs_file=tmp_path / "bar.json")
+    _settled_model()
+
+    rt.handle("recognition:mac")
+    _settled_model()
+    rt.handle("asr_model_download")
+    _settled_model()
+
+    assert "download" not in mac_helper.operations()
+    assert "Модель распознавания" not in _processing(rt)
+
+
 def test_a_mac_without_the_model_offers_to_download_it_and_tells_why_it_failed(
     mac_helper, tmp_path
 ) -> None:
