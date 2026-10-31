@@ -40,5 +40,9 @@
   "Shortening the summary: part {i} of {n}…": "Сокращаю пересказ: часть {i} из {n}…",
   "Could not shorten the text to the size the model accepts": "Не удалось сократить текст до размера, который принимает модель",
   "Writing the summary and title…": "Составляю пересказ и название…",
-  "Translation: part {i} of {n}": "Перевод: часть {i} из {n}"
+  "Translation: part {i} of {n}": "Перевод: часть {i} из {n}",
+  "Own model: {model}, key {key}": "Своя модель: {model}, ключ {key}",
+  "Own model: {model}, no key": "Своя модель: {model}, ключа нет",
+  "The model file cannot be read: {path}": "Файл модели не читается: {path}",
+  "Shared server model: {model}": "Общая модель сервера: {model}"
 }

@@ -90,18 +90,19 @@ def process_env(name: str) -> str | None:
     return None if value is None or _FROM_FILE.get(name) == value else value
 
 
-def set_env(values: dict[str, str | None]) -> list[str]:
-    """The only writer of ~/.config/mnema/.env: set the given lines (None removes one) in one
-    atomic replace, other lines intact, file 600, directory 700. Everything except the model lines
-    (LLMSettings reads those from the file) also goes into the process environment. Returns the
-    removed names."""
+def set_env(values: dict[str, str | None], *, path: Path | None = None) -> list[str]:
+    """The only writer of ~/.config/mnema/.env (and of a user's own model file `path`): set the
+    given lines (None removes one) in one atomic replace, other lines intact, file 600, directory
+    700. For .env everything except the model lines (LLMSettings reads those from the file) also
+    goes into the process environment; a user's file never does. Returns the removed names."""
     import os
     import shutil
     import tempfile
 
     from dotenv import dotenv_values, set_key, unset_key
 
-    path = user_env_file()
+    own = path is not None
+    path = path or user_env_file()
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     path.parent.chmod(0o700)
     fd, temporary = tempfile.mkstemp(prefix=".env.", dir=path.parent)
@@ -121,6 +122,8 @@ def set_env(values: dict[str, str | None]) -> list[str]:
         os.replace(draft, path)
     finally:
         draft.unlink(missing_ok=True)
+    if own:
+        return removed
     for name, value in values.items():
         if name in _PER_USE:
             continue

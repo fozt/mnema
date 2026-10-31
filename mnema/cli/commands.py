@@ -1290,8 +1290,11 @@ def cmd_serve(args) -> None:
         _cli.console.print(_("[{accent}]🔒 token sign-in[/] (server token)", accent=ACCENT))
     from .. import node_settings
     from ..node import server_command
+    from ..users import OWNER, as_user
 
-    if model := node_settings.model():
+    with as_user(OWNER):  # the shared model, outside any request
+        model = node_settings.model()
+    if model:
         _cli.console.print(_("model: {model}", model=model))
     else:  # shows in the container's log too
         _cli.console.print(
@@ -1401,12 +1404,16 @@ def cmd_users(args) -> None:
             die(no_user(name))
         print(_("User {name} removed, the recordings stay", name=name))
         return
+    from ..llm.config import own_model
+
     devices = Counter(d.user for d in store.devices() if not d.revoked)
     table = Table(box=box.SIMPLE)
-    for column in (_("Name"), _("Devices")):
+    for column in (_("Name"), _("Devices"), _("Model")):
         table.add_column(column)
     for user in store.users():
-        table.add_row(Text(user.name), str(devices[user.name]))
+        own = own_model(user.name)
+        model = _("own: {model}", model=own) if own else _("shared")
+        table.add_row(Text(user.name), str(devices[user.name]), Text(model))
     _cli.console.print(table)
 
 
@@ -1426,15 +1433,16 @@ def _add_user(args, root: Path, store) -> None:
         check_invite(url, args.hours)
     except ValueError as e:
         die(str(e))
+    # the folder before the user: a failed mkdir leaves no user without a library
+    library = user_library(root, name)
+    library.mkdir(mode=0o700, parents=True, exist_ok=True)
+    library.chmod(0o700)
     try:
         _user, returned = store.add_user(name, now=time.time())
     except ValueError:
         command = server_command(f"invite --user {name}")
         die(_("User {name} already exists. Invitation: {command}", name=name, command=command))
         return
-    library = user_library(root, name)
-    library.mkdir(mode=0o700, parents=True, exist_ok=True)
-    library.chmod(0o700)
     if returned:
         try:
             count = len(LibraryFiles(library).manifest().records)

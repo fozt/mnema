@@ -1,7 +1,8 @@
 """Keys never reach logs, remarks or history: redact and install_redaction.
 
 Known secrets are the model and recognition keys (MNEMA_API_KEY, MNEMA_ASR_API_KEY from the
-process environment and ~/.config/mnema/.env), Mnema and Hugging Face tokens;
+process environment, ~/.config/mnema/.env and every user's own file users/*.env, whoever asks),
+Mnema and Hugging Face tokens;
 plus anything that looks like a key.
 """
 
@@ -11,6 +12,7 @@ import logging
 import os
 import re
 import threading
+from pathlib import Path
 
 from .providers import KEY_PREFIXES
 
@@ -21,15 +23,29 @@ _PATTERNS = re.compile(
 _ENV_SECRETS = ("MNEMA_API_KEY", "MNEMA_ASR_API_KEY", "HF_TOKEN", "MNEMA_TOKEN")
 _FILE_SECRETS = ("MNEMA_API_KEY", "MNEMA_ASR_API_KEY")
 _FILE: dict[str, tuple[tuple[int, int], list[str]]] = {}  # .env path → (mtime, size), keys
+_USERS: dict[str, tuple[int, list[Path]]] = {}  # users/ folder → mtime, its .env files
 _BUSY = threading.local()  # logging while reading the file must not read it again
 _ADDED: set[str] = set()  # keys entered in this process (mnema model) and not yet saved
 
 
-def _file_secrets() -> list[str]:
-    """Model keys from ~/.config/mnema/.env, re-read only when the file changes."""
+def _env_files() -> list[Path]:
+    """The shared .env and the users' own files; the folder is listed again when it changes."""
     from .. import config
 
-    path = config.user_env_file()
+    folder = config.config_dir() / "users"
+    try:
+        stamp = folder.stat().st_mtime_ns
+        cached = _USERS.get(str(folder))
+        if cached is None or cached[0] != stamp:
+            cached = _USERS[str(folder)] = stamp, sorted(folder.glob("*.env"))
+        found = cached[1]
+    except OSError:
+        found = []
+    return [config.user_env_file(), *found]
+
+
+def _secrets_of(path: Path) -> list[str]:
+    """Model keys of one .env file, re-read only when the file changes."""
     try:
         st = path.stat()
         stamp = st.st_mtime_ns, st.st_size
@@ -44,12 +60,16 @@ def _file_secrets() -> list[str]:
     try:
         from .config import file_values
 
-        values = file_values()
+        values = file_values(path) or {}
     finally:
         _BUSY.on = False
     keys = [values[name] for name in _FILE_SECRETS if name in values]
     _FILE[str(path)] = stamp, keys
     return keys
+
+
+def _file_secrets() -> list[str]:
+    return [key for path in _env_files() for key in _secrets_of(path)]
 
 
 def add_secret(secret: str) -> None:

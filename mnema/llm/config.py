@@ -6,23 +6,29 @@ environment variables (service, export). Model, key and address come from one pl
 MNEMA_MODEL in the process environment all three come from there, otherwise all three from the
 file; MNEMA_ASR_API_KEY from the environment overrides the file. The file is read every time
 LLMSettings is created, so an edit applies without a restart. There are no fallback models.
+
+On the server a user other than the owner may have an own model: the file
+~/.config/mnema/users/<name>.env with MNEMA_MODEL is taken whole, the environment and the shared
+file do not reach it; an unreadable file means no model at all.
 """
 
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from .. import users
 from ..core.base import MediaError
 from ..i18n import _
 
 if TYPE_CHECKING:
     from .providers import Provider
 
-Source = Literal["env", "unconfigured"]
+Source = Literal["env", "user", "unconfigured"]
 # model, key and address always come from one place: a key never reaches another provider
 MODEL_GROUP = ("MNEMA_MODEL", "MNEMA_API_KEY", "MNEMA_API_BASE")
 # model lines: read from the file on every access, load_env does not copy them to os.environ
@@ -54,25 +60,44 @@ def credentials_for(model: str, api_key: str, api_base: str | None = None) -> Cr
     return Credentials(model=model, api_key=api_key, api_base=base)
 
 
-def file_values() -> dict[str, str]:
-    """Non-empty model lines of ~/.config/mnema/.env; empty if the file is missing or unreadable."""
+def file_values(path: Path) -> dict[str, str] | None:
+    """Non-empty model lines of an .env file: empty without the file, None when it is there but
+    cannot be read."""
     from dotenv import dotenv_values
 
-    from .. import config
-
-    path = config.user_env_file()
     try:
-        if not path.is_file():
+        if not path.exists():
             return {}
+        if not path.is_file():
+            return None
         values = dotenv_values(path, interpolate=False, encoding="utf-8")
     except (OSError, UnicodeError):
-        return {}
+        return None
     return {k: v for k, v in values.items() if k in MODEL_VARS and v}
 
 
+def _own_lines(user: str | None) -> dict[str, str] | None:
+    """The model lines of the user's own model; None — the shared model (no user, the owner, no
+    file or no MNEMA_MODEL in it). An unreadable file is an own model with no lines."""
+    if user is None or user == users.OWNER:
+        return None
+    values = file_values(users.user_env_file(user))
+    if values is None:
+        return {}
+    return values if values.get("MNEMA_MODEL") else None
+
+
+def own_model(name: str) -> str | None:
+    """The model of the user's own file, None when the user is on the shared model."""
+    own = _own_lines(name)
+    return own.get("MNEMA_MODEL") if own else None
+
+
 class LLMSettings(BaseSettings):
-    """Cloud model and key: with MNEMA_MODEL in the process environment, model, key and address
-    come from there, otherwise from ~/.config/mnema/.env; re-read on every creation."""
+    """Cloud model and key: the user's own file when there is one with a model; otherwise with
+    MNEMA_MODEL in the process environment, model, key and address come from there, otherwise
+    from ~/.config/mnema/.env; re-read on every creation. In the server mode (users.strict) a
+    use outside a user's request or job is a RuntimeError, not the owner's key spent silently."""
 
     model_config = SettingsConfigDict(extra="ignore")
 
@@ -85,9 +110,22 @@ class LLMSettings(BaseSettings):
     asr_api_key: str | None = Field(default=None, validation_alias="MNEMA_ASR_API_KEY")
     # one LLM call: without it LiteLLM waits ~100 min and a hung provider stalls processing
     timeout: float = Field(default=90.0, validation_alias="MNEMA_API_TIMEOUT")
+    _own: bool = PrivateAttr(default=False)
 
     def __init__(self, **values: Any) -> None:
-        saved = file_values()
+        from .. import config
+
+        user = users.current_user()
+        if user is None and users.strict():
+            raise RuntimeError("the model is used outside a user's request or job")
+        own = _own_lines(user)
+        if own is not None:  # the whole file: no line of the environment or the shared file
+            for name in MODEL_VARS:
+                values.setdefault(name, own.get(name))
+            super().__init__(**values)
+            self._own = True
+            return
+        saved = file_values(config.user_env_file()) or {}
         if not os.environ.get("MNEMA_MODEL"):  # model from the file: key and address too
             for name in MODEL_GROUP:
                 values.setdefault(name, saved.get(name))
@@ -97,8 +135,11 @@ class LLMSettings(BaseSettings):
 
     @property
     def source(self) -> Source:
-        """Where the model comes from: env when MNEMA_MODEL is set (file or environment)."""
-        return "env" if self.model else "unconfigured"
+        """Where the model comes from: user — the user's own file, env — the shared one (file or
+        environment)."""
+        if not self.model:
+            return "unconfigured"
+        return "user" if self._own else "env"
 
     @property
     def cloud(self) -> bool:
@@ -145,11 +186,31 @@ class LLMSettings(BaseSettings):
         return secret if looks in (None, provider) else None
 
 
-def current_line() -> str:
+def _user_file(user: str | None) -> Path | None:
+    """The file of the user's own model; None — the shared .env (no user or the owner)."""
+    return None if user is None or user == users.OWNER else users.user_env_file(user)
+
+
+def current_line(*, user: str | None = None) -> str:
     """ "Current: gemini/gemini-flash-latest, key …a1B2" or "Model not set up", for
-    `mnema model --show` and the model window; the key is never shown in full."""
+    `mnema model --show` and the model window; for a user, the own or the shared model. The key
+    is never shown in full."""
     from .redact import mask
 
+    path = _user_file(user)
+    if path is not None:
+        with users.as_user(user):
+            settings = LLMSettings()
+        if settings.source == "user":
+            if settings.api_key:
+                key = mask(settings.api_key)
+                return _("Own model: {model}, key {key}", model=settings.model, key=key)
+            return _("Own model: {model}, no key", model=settings.model)
+        if file_values(path) is None:
+            return _("The model file cannot be read: {path}", path=path)
+        if settings.model:
+            return _("Shared server model: {model}", model=settings.model)
+        return _("Model not set up")
     settings = LLMSettings()
     model = settings.model
     if not model:
@@ -167,19 +228,24 @@ def current_line() -> str:
     return _("Current: {model}, no key", model=model)
 
 
-def save_model(model: str, api_key: str) -> None:
-    """MNEMA_MODEL and MNEMA_API_KEY as lines of ~/.config/mnema/.env in one file replacement, so
-    the server never reads a model without its key. The previous model's MNEMA_API_BASE is
-    dropped: credentials_for supplies the provider's address."""
+def save_model(model: str, api_key: str, *, user: str | None = None) -> None:
+    """MNEMA_MODEL and MNEMA_API_KEY as lines of ~/.config/mnema/.env (or of the user's own file)
+    in one file replacement, so the server never reads a model without its key. The previous
+    model's MNEMA_API_BASE is dropped: credentials_for supplies the provider's address."""
     from .. import config
 
-    config.set_env({"MNEMA_MODEL": model, "MNEMA_API_KEY": api_key, "MNEMA_API_BASE": None})
+    config.set_env(
+        {"MNEMA_MODEL": model, "MNEMA_API_KEY": api_key, "MNEMA_API_BASE": None},
+        path=_user_file(user),
+    )
 
 
-def remove_model() -> bool:
-    """Remove the model lines (MNEMA_MODEL, MNEMA_API_KEY, MNEMA_API_BASE); were there any."""
+def remove_model(*, user: str | None = None) -> bool:
+    """Remove the model lines (MNEMA_MODEL, MNEMA_API_KEY, MNEMA_API_BASE); were there any. The
+    user is on the shared model again, other lines of the file stay."""
     from .. import config
 
-    if not config.user_env_file().is_file():
+    path = _user_file(user)
+    if not (path or config.user_env_file()).is_file():
         return False
-    return bool(config.set_env(dict.fromkeys(MODEL_GROUP)))
+    return bool(config.set_env(dict.fromkeys(MODEL_GROUP), path=path))

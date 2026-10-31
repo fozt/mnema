@@ -367,6 +367,9 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument(
         "--remove", action="store_true", help=_("remove the model from ~/.config/mnema/.env")
     )
+    sp.add_argument(
+        "--user", help=_("whose model: a user from mnema users, the shared server model by default")
+    )
     sp.set_defaults(func=cmd_model)
 
     sp = sub.add_parser("update", help=_("update the installed app"))

@@ -177,18 +177,53 @@ _HINTS = {
     ErrorKind.PRIVACY: "Allow the model in the privacy settings: openrouter.ai/settings/privacy",
     ErrorKind.REGION: "Choose another provider {where}",
 }
+# a user of the server other than the owner: the owner sets her model up
+_USER_HINTS = {
+    ErrorKind.INVALID_KEY: "Ask the server owner to replace the model key",
+    ErrorKind.DISABLED: "Ask the server owner to replace the model key",
+    ErrorKind.NO_MONEY: "Ask the server owner to top up the model account",
+    ErrorKind.NO_MODEL: "Ask the server owner to choose another model",
+    ErrorKind.PRIVACY: "Ask the server owner to allow the model in the privacy settings",
+    ErrorKind.REGION: "Ask the server owner to choose another model",
+}
 _NO_MODEL = "No model configured"
 _SET_MODEL_HINT = "Set up a model {where}"
+_USER_SET_MODEL_HINT = "Ask the server owner to set up a model"
 _RETRY_HINT = "When the model works again, choose “Summarize” in the recording menu"
 _SUMMARIZE_HINT = "Choose “Summarize” in the recording menu"
 _NO_ANSWER = "The model did not respond"
+
+
+def _server_user() -> str | None:
+    """The user of this processing when it is not the owner (only on the server)."""
+    from ..users import OWNER, current_user
+
+    user = current_user()
+    return None if user == OWNER else user
+
+
+def _hint(kind: ErrorKind | None) -> str:
+    user = _server_user()
+    if user is not None and kind in _USER_HINTS:
+        from ..llm.config import own_model
+
+        # her own account she tops up herself
+        if not (kind == ErrorKind.NO_MONEY and own_model(user)):
+            return _(_USER_HINTS[kind])
+    return _(_HINTS[kind], where=_where()) if kind in _HINTS else ""
+
+
+def _set_model_hint() -> str:
+    if _server_user() is not None:
+        return _(_USER_SET_MODEL_HINT)
+    return _(_SET_MODEL_HINT, where=_where())
 
 
 def _model_cause(note: LightNote) -> tuple[str, str, str]:
     """(cause, short, hint) of the active model's refusal; one function for the title and the
     summary so that merged joins them into one remark."""
     if note.cloud == Cloud.NOT_SET:
-        return _(_NO_MODEL), _(_NO_MODEL), _(_SET_MODEL_HINT, where=_where())
+        return _(_NO_MODEL), _(_NO_MODEL), _set_model_hint()
     if note.kind in _KIND_REASONS:
         reason = _(_KIND_REASONS[note.kind])
     else:
@@ -200,8 +235,7 @@ def _model_cause(note: LightNote) -> tuple[str, str, str]:
     else:
         cause = _("The model did not respond: {reason}", reason=reason)
     short = _(_KIND_SHORT[note.kind]) if note.kind in _KIND_SHORT else _(_NO_ANSWER)
-    hint = _(_HINTS[note.kind], where=_where()) if note.kind in _HINTS else ""
-    return cause, short, hint
+    return cause, short, _hint(note.kind)
 
 
 _NO_SUMMARY = "There is no summary"
@@ -367,7 +401,7 @@ def node_no_model() -> Remark:
         step=Step.SUMMARY,
         cause=_(_NO_MODEL),
         effect=_(_NO_SUMMARY),
-        hint=_join_hints([_(_SET_MODEL_HINT, where=_where()), _(_RETRY_HINT)]),
+        hint=_join_hints([_set_model_hint(), _(_RETRY_HINT)]),
         short=_(_NO_MODEL),
         short_effect=_(_NO_SUMMARY_SHORT),
     )
