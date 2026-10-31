@@ -24,7 +24,6 @@ server_commands() {
   ./mnema.sh invite                 приглашение для одного устройства (--hours до 72)
   ./mnema.sh devices                подключённые устройства
   ./mnema.sh devices revoke ID      отключить устройство
-  ./mnema.sh model                  модель для названий и пересказов
   ./mnema.sh update                 новая версия сервера
   ./mnema.sh logs                   журнал сервера
 HELP
@@ -32,7 +31,6 @@ HELP
   ./mnema.sh invite                 an invitation for one device (--hours up to 72)
   ./mnema.sh devices                connected devices
   ./mnema.sh devices revoke ID      disconnect a device
-  ./mnema.sh model                  the model for titles and summaries
   ./mnema.sh update                 the newest version of the server
   ./mnema.sh logs                   the server's log
 HELP

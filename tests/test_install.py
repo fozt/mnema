@@ -147,8 +147,8 @@ elif name == "docker":
             print(url + "#invite=one-time-code")
         elif command[2:] == ["--version"]:
             print("mnema 9.9.9")
-        elif command[2:] == ["model"]:  # asks for the key
-            print("key: " + (sys.stdin.readline().strip() if attached else ""))
+        elif command[2:] == ["devices"]:  # reads a line when stdin is attached
+            print("read: " + (sys.stdin.readline().strip() if attached else ""))
 elif name in ("ip", "ifconfig"):
     print("1: lo    inet 127.0.0.1/8 scope host lo")
     print("2: eth0    inet 203.0.113.7/24 brd 203.0.113.255 scope global eth0")
@@ -256,7 +256,8 @@ def calls(system):
     return [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
 
 
-def installer(system, *args):
+def installer(system, *args, answer: str | None = None):
+    """./install.sh from a script, or (answer — what is typed) from a terminal."""
     root, env = system
     shutil.copy(REPO / "install.sh", root / "install.sh")
     shutil.copy(REPO / "mnema.sh", root / "mnema.sh")
@@ -264,13 +265,27 @@ def installer(system, *args):
     skip = shutil.ignore_patterns("__pycache__", "macos")
     shutil.copytree(REPO / "mnema", root / "mnema", ignore=skip, dirs_exist_ok=True)
     shutil.copytree(REPO / "scripts", root / "scripts", ignore=skip, dirs_exist_ok=True)
-    return subprocess.run(
-        ["bash", str(root / "install.sh"), *args],
-        env=env,
-        capture_output=True,
-        text=True,
-        stdin=subprocess.DEVNULL,
-    )
+    if answer is None:
+        return subprocess.run(
+            ["bash", str(root / "install.sh"), *args],
+            env=env,
+            capture_output=True,
+            text=True,
+            stdin=subprocess.DEVNULL,
+        )
+    leader, terminal = os.openpty()
+    try:
+        os.write(leader, answer.encode())
+        return subprocess.run(
+            ["bash", str(root / "install.sh"), *args],
+            env=env,
+            capture_output=True,
+            text=True,
+            stdin=terminal,
+        )
+    finally:
+        os.close(terminal)
+        os.close(leader)
 
 
 def swap(system, size="auto", ram_kib=12345678):
@@ -380,7 +395,6 @@ def test_server_runs_in_docker_and_writes_only_its_folder(system):
         ["pull", image],
         ["run", "--rm", "--network", "host", image, "python", "-m", "mnema.install_setup", "host"],
         compose(system, "up", "-d", "--wait"),
-        ["exec", "-i", "mnema", "mnema", "model", "--show"],
         ["exec", "-i", "mnema", "mnema", "invite"],
     ]  # fmt: skip
     assert not [c for c in calls(system) if c[0] in ("uv", "apt-get", "sudo", "chown")]
@@ -403,7 +417,8 @@ def test_server_runs_in_docker_and_writes_only_its_folder(system):
     }  # fmt: skip
     assert "http://203.0.113.7:43117#invite=one-time-code" in done.stdout
     assert "Сервер принимает подключения на порту 43117." in done.stdout
-    assert "Модель можно выбрать позже: ./mnema.sh model" in done.stdout  # no terminal to ask in
+    assert "Модель задаётся в приложении: Настройки → Модель" in done.stdout
+    assert "model" not in done.stdout.split("Команды сервера")[1]
     assert f"Команды сервера, в папке {root}:" in done.stdout
     assert "./mnema.sh logs" in done.stdout
 
@@ -518,6 +533,42 @@ def test_server_swap_only_when_asked_and_only_on_linux(system, os_name, ok):
     assert len([c for c in calls(system) if c[:2] == ["sudo", "bash"]]) == int(ok)
 
 
+def swap_calls(system) -> list[list[str]]:
+    return [c for c in calls(system) if c[:2] == ["sudo", "bash"]]
+
+
+def test_server_without_swap_and_without_a_terminal_says_how_to_add_it(system):
+    done = installer(system, "server")
+    assert done.returncode == 0, done.stderr
+    assert "./install.sh server --swap-size 4G" in done.stdout
+    assert swap_calls(system) == []
+
+
+@pytest.mark.parametrize(("answer", "added"), [("\n", True), ("y\n", True), ("n\n", False)])
+def test_server_without_swap_asks_at_a_terminal(system, answer, added):
+    done = installer(system, "server", answer=answer)
+    assert done.returncode == 0, done.stderr
+    assert [c[-1] for c in swap_calls(system)] == (["4"] if added else [])
+    assert "--swap-size 4G" not in done.stdout
+
+
+def test_swap_size_zero_neither_asks_nor_hints(system):
+    done = installer(system, "server", "--swap-size", "0", answer="")
+    assert done.returncode == 0, done.stderr
+    assert "--swap-size 4G" not in done.stdout
+    assert "Подкачки нет" not in done.stdout
+    assert swap_calls(system) == []
+
+
+def test_server_with_swap_neither_asks_nor_hints(system):
+    Path(system[1]["FAKE_ACTIVE"]).write_text("/swapfile\n")
+    done = installer(system, "server", answer="")
+    assert done.returncode == 0, done.stderr
+    assert "--swap-size 4G" not in done.stdout
+    assert "Подкачки нет" not in done.stdout
+    assert swap_calls(system) == []
+
+
 # the head of ~/mnema-server/mnema as ./install.sh server of 0.3.1 wrote it
 OLD_SERVER_COMMAND = """#!/usr/bin/env bash
 DIR=/home/me/mnema-server
@@ -575,9 +626,9 @@ def test_host_command_runs_mnema_in_the_container(system, tty):
 def test_host_command_passes_piped_answers_to_the_container(system):
     """Without a terminal what is piped into ./mnema.sh still reaches the command."""
     assert installer(system, "server").returncode == 0
-    done = host_command(system, "model", given="AIza-piped\n")
+    done = host_command(system, "devices", given="piped\n")
     assert done.returncode == 0, done.stderr
-    assert done.stdout == "key: AIza-piped\n"
+    assert done.stdout == "read: piped\n"
 
 
 def test_host_command_finds_the_server_where_the_installer_put_it(system):
@@ -672,7 +723,8 @@ LINUX_SYNC = client_sync("menubar", "mcp")
 @pytest.mark.parametrize(
     "args", [(), ("bogus",), ("client", "--bogus"), ("server", "http://server#invite=x"),
              ("server", "--swap-size", "0G"), ("server", "--swap-size", "4"),
-             ("server", "--swap-size", "65G"), ("client", "--threads", "8"),
+             ("server", "--swap-size", "00"), ("server", "--swap-size", "65G"),
+             ("client", "--threads", "8"),
              ("server", "--threads", "8"), ("client", "--build"),
              ("client", "--url", "http://203.0.113.7:43117"),
              ("server", "--url", "http://host:1#invite=x"), ("server", "--url", "host:1"),
@@ -741,7 +793,7 @@ def test_installer_speaks_the_language_of_the_locale(system, lang, text):
     for name in ("MNEMA_UI_LANG", "LC_ALL", "LC_MESSAGES", "LANG"):
         env.pop(name, None)
     env.update(lang)
-    done = installer(system, "server", "--swap-size", "0G")
+    done = installer(system, "server", "--swap-size", "65G")
     assert done.returncode != 0
     assert text in done.stdout
 

@@ -20,7 +20,7 @@ usage() {
   --url АДРЕС      адрес, по которому сервер видят устройства, например домен; запоминается.
                    Без него — адрес этого компьютера в сети
   --build          собрать образ из этой папки, а не скачивать
-  --swap-size 4G   добавить swap, от 1G до 64G
+  --swap-size 4G   добавить swap, от 1G до 64G; 0 — не предлагать
 HELP
       ;;
       client) cat <<'HELP'
@@ -52,7 +52,7 @@ to ~/mnema-server (or MNEMA_SERVER_DIR); the server's commands are ./mnema.sh in
   --url URL        the address devices use to reach the server, such as a domain; remembered.
                    Without it, this machine's network address
   --build          build the image from this folder instead of pulling it
-  --swap-size 4G   add swap, 1G to 64G
+  --swap-size 4G   add swap, 1G to 64G; 0 to not offer it
 HELP
       ;;
       client) cat <<'HELP'
@@ -88,9 +88,9 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --help|-h) usage "$MODE"; exit 0;;
     --swap-size)
-      if [ $# -lt 2 ] || ! [[ "$2" =~ ^([1-9]|[1-5][0-9]|6[0-4])[Gg]$ ]]; then
-        say "--swap-size: 1G to 64G, for example --swap-size 4G" \
-          "--swap-size: от 1G до 64G, например --swap-size 4G"
+      if [ $# -lt 2 ] || ! [[ "$2" =~ ^(0|([1-9]|[1-5][0-9]|6[0-4])[Gg])$ ]]; then
+        say "--swap-size: 1G to 64G, for example --swap-size 4G, or 0 for no swap" \
+          "--swap-size: от 1G до 64G, например --swap-size 4G, или 0, если swap не нужен"
         exit 1
       fi
       SWAP_SIZE="${2%[Gg]}"; shift 2;;
@@ -148,11 +148,24 @@ if [ "$MODE" = server ]; then
       "Здесь работает сервер прежней Mnema, служба systemd mnema. Сначала остановите её: sudo systemctl disable --now mnema"
     exit 1
   fi
-  if [ -n "$SWAP_SIZE" ]; then
-    if [ "$OS" != Linux ]; then
-      say "--swap-size is for Linux." "--swap-size только для Linux."
-      exit 1
+  if [ -n "$SWAP_SIZE" ] && [ "$OS" != Linux ]; then
+    say "--swap-size is for Linux." "--swap-size только для Linux."
+    exit 1
+  fi
+  # No swap: ask at a terminal, otherwise tell how to add it. --swap-size 0 leaves it alone.
+  if [ -z "$SWAP_SIZE" ] && [ "$OS" = Linux ] && command -v swapon >/dev/null \
+    && [ -z "$(swapon --show=NAME --noheadings)" ]; then
+    if [ -t 0 ]; then
+      answer=y
+      if [ -n "$RU" ]; then read -r -p "Подкачки нет. Добавить 4 ГБ? [Y/n] " answer
+      else read -r -p "No swap. Add 4 GB? [Y/n] " answer; fi
+      case "$answer" in [Nn]*) ;; *) SWAP_SIZE=4;; esac
+    else
+      say "No swap. Add it with: ./install.sh server --swap-size 4G" \
+        "Подкачки нет. Добавьте её: ./install.sh server --swap-size 4G"
     fi
+  fi
+  if [ -n "$SWAP_SIZE" ] && [ "$SWAP_SIZE" != 0 ]; then
     as_root bash "$PWD/scripts/setup-swap.sh" "$SWAP_SIZE"
   fi
 
@@ -206,19 +219,11 @@ if [ "$MODE" = server ]; then
     rm -f "$DIR/mnema"
   fi
 
-  ./mnema.sh model --show
-  answer=n
-  if [ -t 0 ] && [ -t 1 ]; then
-    if [ -n "$RU" ]; then read -r -p "Выбрать модель для названия и пересказа сейчас? [Y/n] " answer
-    else read -r -p "Choose the model for titles and summaries now? [Y/n] " answer; fi
-  fi
-  case "$answer" in
-    [Nn]*) say "The model can be chosen later: ./mnema.sh model" "Модель можно выбрать позже: ./mnema.sh model";;
-    *) ./mnema.sh model || true;;
-  esac
   echo
   say "The server listens on port $PORT." "Сервер принимает подключения на порту $PORT."
   if [ -n "$URL" ]; then ./mnema.sh invite --url "$URL"; else ./mnema.sh invite; fi
+  echo
+  say "The model is set in the app: Settings → Model" "Модель задаётся в приложении: Настройки → Модель"
   echo
   say "The server's commands, in $PWD:" "Команды сервера, в папке $PWD:"
   server_commands

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The server's commands on its machine, run in this folder (the one with install.sh):
-#   ./mnema.sh invite | model | devices [revoke ID] | update | logs
+#   ./mnema.sh invite | devices [revoke ID] | update | logs
 # The server is the container that ./install.sh server set up in ~/mnema-server (or
 # MNEMA_SERVER_DIR). update pulls the newest image and recreates the container (compose.yaml:
 # pull_policy); a new image that does not become healthy is replaced by the previous one. logs
@@ -60,6 +60,6 @@ elif [ "$1" = update ]; then
   docker exec "$NAME" mnema --version
 elif [ -t 0 ] && [ -t 1 ]; then
   exec docker exec -it "$NAME" mnema "$@"
-else  # stdin still reaches the command: piped answers to mnema model
+else  # stdin still reaches the command: piped input reaches the command
   exec docker exec -i "$NAME" mnema "$@"
 fi
