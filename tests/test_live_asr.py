@@ -76,7 +76,7 @@ def test_faster_whisper_uses_child_cpu_budget(wlk_process, monkeypatch, threads)
     wlk_process[1]()
 
 
-def test_faster_whisper_default_four_on_two_available_cpus(wlk_process, monkeypatch):
+def test_faster_whisper_leaves_a_core_free_on_two_available_cpus(wlk_process, monkeypatch):
     import os
     import shutil
     import subprocess
@@ -101,9 +101,9 @@ def test_faster_whisper_default_four_on_two_available_cpus(wlk_process, monkeypa
     try:
         tr.warmup()
         row = wlk_process[0]()[0]
-        assert row["threads"] == 2
-        assert row["omp_at_import"] == row["torch_omp_at_import"] == "2"
-        assert row["omp_at_engine"] == "2"
+        assert row["threads"] == 1
+        assert row["omp_at_import"] == row["torch_omp_at_import"] == "1"
+        assert row["omp_at_engine"] == "1"
         assert os.environ["OMP_NUM_THREADS"] == "17"
         assert os.sched_getaffinity(0) == affinity
     finally:

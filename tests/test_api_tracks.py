@@ -158,11 +158,12 @@ def test_concurrent_retries_enqueue_once(node):
     app, client = node
     app.state.job_queue.pending_limit = 0
     tracks = _uploads(client)
-    release = threading.Event()
+    release, entered = threading.Event(), threading.Event()
     calls = []
 
     def operation(path, params, on):
         calls.append(path)
+        entered.set()
         assert release.wait(5)
         return {"ok": True}
 
@@ -172,6 +173,7 @@ def test_concurrent_retries_enqueue_once(node):
             responses = list(pool.map(lambda _: _submit(client, tracks, key="same-key"), range(8)))
         assert all(response.status_code == 200 for response in responses)
         ids = {response.json()["id"] for response in responses}
+        assert entered.wait(5)
         assert len(ids) == len(calls) == 1
     finally:
         release.set()
