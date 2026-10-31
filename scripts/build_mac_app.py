@@ -42,8 +42,8 @@ if str(ROOT) not in sys.path:
 
 from mnema.bar import codesign  # noqa: E402 - code, runtime and the signature of the bundle
 from mnema.bar.codesign import macho_files  # noqa: E402
-from mnema.core.base import APP_ID  # noqa: E402
 from mnema.extras import MAC as EXTRAS  # noqa: E402 - the one list of what the Mac app ships
+from mnema.macapp import APP_ID  # noqa: E402
 from scripts import third_party_sources  # noqa: E402
 
 SWIFT_PACKAGE = ROOT / "mnema" / "bar" / "macos"

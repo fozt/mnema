@@ -3,6 +3,7 @@
 import os
 import plistlib
 import subprocess
+import sys
 import tarfile
 from pathlib import Path
 
@@ -25,6 +26,17 @@ def _bundle(root: Path) -> Path:
 
 def _run(path: Path, *args: str) -> str:
     return subprocess.run([str(path), *args], capture_output=True, text=True, check=True).stdout
+
+
+def test_build_and_smoke_scripts_run_on_a_bare_python():
+    """The release runs them with uv run --no-project: a Python without the app's packages."""
+    root = Path(build.__file__).resolve().parent.parent
+    code = f"import sys; sys.path.insert(0, {str(root)!r}); "
+    code += "import scripts.build_mac_app, scripts.smoke_mac_app"
+    done = subprocess.run(
+        [sys.executable, "-I", "-S", "-c", code], cwd=root, capture_output=True, text=True
+    )
+    assert done.returncode == 0, done.stderr
 
 
 def test_console_scripts_run_the_python_next_to_them(tmp_path):

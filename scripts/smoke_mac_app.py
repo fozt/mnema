@@ -32,7 +32,7 @@ from pathlib import Path
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from mnema.core.base import app_helper
+from mnema.macapp import app_helper
 from scripts.build_mac_app import FORBIDDEN, WHEEL, load_commands, macho_files, outside
 
 
