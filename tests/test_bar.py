@@ -72,10 +72,10 @@ def _node_pipeline(monkeypatch, tmp_path):
     import importlib.util
 
     find = importlib.util.find_spec
-    monkeypatch.setattr(  # this Mac has GigaAM and Whisper; recognition itself is replaced
+    monkeypatch.setattr(  # this Mac has Parakeet; recognition itself is replaced
         importlib.util,
         "find_spec",
-        lambda n, *a, **kw: object() if n in ("gigaam", "whisperx") else find(n, *a, **kw),
+        lambda n, *a, **kw: object() if n == "onnxruntime" else find(n, *a, **kw),
     )
     monkeypatch.setattr(
         audio, "extract_audio", lambda src, dst, **kw: shutil.copyfile(src, dst) and dst
@@ -265,8 +265,8 @@ def test_tray_opens_record_folders_like_the_panel(tmp_path) -> None:
 
 def test_prefs_roundtrip_and_broken_file(tmp_path) -> None:
     f = tmp_path / "bar.json"
-    save_prefs(BarPrefs(asr="whisper", system=False), f)
-    assert load_prefs(f) == BarPrefs(asr="whisper", system=False)
+    save_prefs(BarPrefs(asr="parakeet", system=False), f)
+    assert load_prefs(f) == BarPrefs(asr="parakeet", system=False)
     f.write_text("{не json", encoding="utf-8")
     assert load_prefs(f) == BarPrefs()  # a broken file gives the defaults, the app starts
 
@@ -539,14 +539,14 @@ def test_retry_repeats_the_processing_that_did_not_reach_the_server(monkeypatch,
 
     monkeypatch.setattr("mnema.live.recording_client.recover_on_node", fake_recover)
     rt = BarRuntime(platform=_Notes(), prefs_file=tmp_path / "bar.json")
-    rt.recover(folder, start=10.0, end=50.0, title="Итоги", lang="en", asr="whisper")
+    rt.recover(folder, start=10.0, end=50.0, title="Итоги", lang="en", asr="parakeet")
     rt.join(timeout=10)
     assert list(rt.state.unreachable) == [folder]
-    rt.prefs.asr = "parakeet"  # a retry does not change the settings of later recordings
+    rt.prefs.asr = "auto"  # a retry does not change the settings of later recordings
     [card] = library(root).cards
     rt.handle(f"record:{card.id}:retry")
     rt.join(timeout=10)
-    assert seen == [(folder, 10.0, 50.0, "en", "whisper", True, "Итоги")] * 2
+    assert seen == [(folder, 10.0, 50.0, "en", "parakeet", True, "Итоги")] * 2
     assert rt.state.unreachable == {}
 
 
@@ -1319,27 +1319,22 @@ def test_process_window_speech_model_is_for_this_recording_only(monkeypatch, tmp
         seen.append(config.asr)
         return LiveResult(), ""
 
-    choices = ["whisper", ""]
+    choices = ["auto", ""]
     rt, window, folder = _process_window(
         monkeypatch,
         tmp_path,
         lambda req: RangeAnswer(start="", end="", title=req.name, asr=choices.pop(0)),
         fake_recover,
     )
-    rt.handle("asr:gigaam")
-    rt._asr_choices = [
-        ("auto", "Автоматически"),
-        ("parakeet", "Parakeet"),
-        ("gigaam", "GigaAM"),
-        ("whisper", "Whisper"),
-    ]
+    rt.handle("asr:parakeet")
+    rt._asr_choices = [("auto", "Автоматически"), ("parakeet", "Parakeet")]
     for _ in range(2):
         rt.handle(_process_key(folder))
         rt.join(timeout=10)
     req = window.requests[0]
-    assert req.asr == "gigaam"
-    assert [k for k, _ in req.asrs] == ["auto", "parakeet", "gigaam", "whisper"]
-    assert seen == ["whisper", "gigaam"] and rt.prefs.asr == "gigaam"
+    assert req.asr == "parakeet"
+    assert [k for k, _ in req.asrs] == ["auto", "parakeet"]
+    assert seen == ["auto", "parakeet"] and rt.prefs.asr == "parakeet"
 
 
 def test_language_chosen_while_processing_part_redoes_the_same_part(monkeypatch, tmp_path) -> None:

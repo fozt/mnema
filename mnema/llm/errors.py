@@ -176,8 +176,6 @@ def _reason(exc: BaseException) -> str:
         return _("no model configured")
     if any(p in lowered for p in _NO_KEY):
         return _("no model key set")
-    if "torchvision::" in lowered or "could not find qwen3forcausallm" in lowered:
-        return _("Mnema is not fully installed, reinstall it")
     kind = classify(exc)
     if kind in _REASONS:
         return _(_REASONS[kind])

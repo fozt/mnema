@@ -14,7 +14,7 @@ from pydantic import BaseModel
 
 from .core.settings import available_memory, default_workers
 
-MEMORY_PER_JOB = 5 * 1024**3  # a local recognition job at its peak
+MEMORY_PER_JOB = 2 * 1024**3  # a local recognition job at its peak (ONNX int8: 1.1–1.3 GB)
 MEMORY_RECHECK_S = 10.0
 
 _log = logging.getLogger(__name__)

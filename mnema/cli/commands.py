@@ -1299,6 +1299,9 @@ def cmd_serve(args) -> None:
     if token:
         _cli.console.print(_("[{accent}]🔒 token sign-in[/] (server token)", accent=ACCENT))
     _configure_runner_logging(Settings().log_level)
+    from ..cleanup import remove_old_weights_in_background
+
+    remove_old_weights_in_background(server=Settings().container)
     uvicorn.run(app, host=args.host, port=port, log_level="warning")
 
 

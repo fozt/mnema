@@ -88,8 +88,7 @@ class LiveConfig(BaseModel):
     translate: str | None = None  # my language for two-way translation; None: no translation
     summary: bool = True  # summary.txt of the whole recording; the title comes from the same pass
     summary_lang: str | None = None  # summary and title language (ru/en); None: the call's
-    # auto (Parakeet, without it GigaAM for Russian, else Whisper) | parakeet | gigaam |
-    # whisper | cloud "provider/model" (llm/asr)
+    # auto (Parakeet) | parakeet | a cloud model "openai/…"
     asr: str = "auto"
     stream: bool = True  # live text (streaming ASR); False: "rec", the transcript is built by
     # the offline pass at stop (batch quality, the GPU stays free during the call)
@@ -509,13 +508,15 @@ def _refine_track(
     language is decided before recognition (None: the engine finds it). The speaker is the
     track label.
     """
-    choice = prepared.config.asr
-    params: dict[str, Any] = {"lang": lang} if lang else {}
-    from ..core.backends import WhisperBackend, engine
+    from ..core.backends import OnlyCloud, ParakeetBackend, engine, retired
 
+    choice = retired(prepared.config.asr)
+    params: dict[str, Any] = {"lang": lang} if lang else {}
     chosen = engine(choice)
-    if chosen is not None:  # an engine without this language: Whisper, which has them all
-        params["backend"] = choice if chosen.supports(lang) else WhisperBackend.id
+    if chosen is not None:
+        params["backend"] = choice
+    if not (chosen or ParakeetBackend).supports(lang):  # automatic is Parakeet
+        raise OnlyCloud
     # the cloud too: an engine run here with this machine's (on a server, the user's) key
     result = dispatch("transcribe", wav, params, runner=None, local=True, on=on)
     tr = Transcript.model_validate(result)
@@ -603,9 +604,9 @@ def _refine_tracks(
     if not candidates:
         on_asr(1.0, "")
         return refined, warnings, languages, None
-    # A chosen language applies to every track, unchecked. "Automatic" is not detected up
-    # front: Parakeet recognizes without a hint and names the language from the text, Whisper
-    # and the cloud detect it themselves. If they get it wrong, the user picks the language.
+    # A chosen language applies to every track: the cloud is told it, Parakeet recognizes
+    # without a hint and only cleans the replies by it. "Automatic" is not detected up front:
+    # Parakeet names the language from the text, the cloud detects it itself.
     chosen = prepared.config.lang or None
     langs = {track.label: chosen for track, _wav in candidates}
     if on_lang is not None and chosen:

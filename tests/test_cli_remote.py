@@ -571,8 +571,8 @@ def test_transcribe_remote_params_forwarded(tmp_path: Path, lang):
         input=str(src),
         output=str(out),
         runner="http://srv",
-        backend="whisperx",
-        model="large-v3",
+        backend="parakeet",
+        model="parakeet-ultra",
         lang=lang,
     )
 
@@ -589,8 +589,8 @@ def test_transcribe_remote_params_forwarded(tmp_path: Path, lang):
         cmd_transcribe(args)
 
     params = mock_client.run.call_args[0][2]
-    assert params.get("backend") == "whisperx"
-    assert params.get("model") == "large-v3"
+    assert params.get("backend") == "parakeet"
+    assert params.get("model") == "parakeet-ultra"
     assert params.get("lang") == lang and ("lang" in params) == (lang is not None)
 
 
@@ -735,7 +735,7 @@ def test_serve_does_not_load_speech_engines_at_start(monkeypatch, tmp_path):
     real_exists = Path.exists
 
     def guarded_import(name, *args, **kwargs):
-        if name.split(".")[0] in {"whisperx", "whisperlivekit"}:
+        if name.split(".")[0] in {"onnxruntime", "whisperlivekit"}:
             attempted.append(name)
             raise ImportError("движок не должен загружаться до запроса")
         return real_import(name, *args, **kwargs)
@@ -744,7 +744,7 @@ def test_serve_does_not_load_speech_engines_at_start(monkeypatch, tmp_path):
     monkeypatch.setattr(
         importlib.util, "find_spec",
         lambda name, *a: importlib.machinery.ModuleSpec(name, None)
-        if name == "whisperx" else real_find(name, *a),
+        if name == "onnxruntime" else real_find(name, *a),
     )  # fmt: skip
     monkeypatch.setattr(
         Path, "exists",

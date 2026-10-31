@@ -13,15 +13,6 @@ import threading
 from ..core.worker import emit, isolate_stdout, parent_gone, setup_child_logging
 
 
-def _cap_vram() -> None:
-    """Each live session is its own process with its own model: they split the torch budget
-    evenly so batch recognition on the same GPU keeps its memory."""
-    from ..config import Settings
-    from ..core.backends import _TORCH_VRAM_FRACTION, cap_torch_vram
-
-    cap_torch_vram(_TORCH_VRAM_FRACTION / max(1, Settings().live_connections))
-
-
 def main() -> None:
     isolate_stdout()
     setup_child_logging()
@@ -47,7 +38,6 @@ def main() -> None:
                 os.environ["OMP_NUM_THREADS"] = str(_asr_cpu_threads())
                 from .asr import _InProcessTranscriber
 
-                _cap_vram()
                 transcriber = _InProcessTranscriber(**options)
                 transcriber.warmup()
                 emit({"type": "ready"})

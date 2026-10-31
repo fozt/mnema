@@ -1,15 +1,11 @@
-"""Recognition CPU budget: the ffmpeg, silero session and ASR loading boundaries are stubbed."""
+"""Recognition CPU budget: the OS limits (affinity, cgroup files) are stubbed."""
 
-import subprocess
-import sys
-import types
-import wave
+import os
 from pathlib import Path
 
 import pytest
 
 from mnema.core import backends as b
-from tests import onnx_stubs
 
 
 @pytest.fixture(autouse=True)
@@ -28,55 +24,6 @@ def cpu_environment(monkeypatch):
     return files
 
 
-@pytest.mark.parametrize("seconds, fail", [(3, False), (30, False), (30, True)])
-def test_asr_uses_configured_threads_and_restores_caller(monkeypatch, tmp_path, seconds, fail):
-    """GigaAM on the default torch budget (speech search is the silero session); the caller's
-    budget survives an error."""
-    torch = pytest.importorskip("torch")
-    before = torch.get_num_threads()
-    events = []
-    monkeypatch.setattr(b.os, "sched_getaffinity", lambda _: set(range(16)), raising=False)
-    monkeypatch.setattr(b, "_GIGAAM_MODEL", None)
-    onnx_stubs.install(
-        monkeypatch, silero_vad=onnx_stubs.silero(onnx_stubs.speech_probs([(0, 1)], 30))
-    )
-
-    def ffmpeg(cmd, **kwargs):
-        assert cmd[0] == "ffmpeg"
-        with wave.open(cmd[-1], "wb") as out:
-            out.setparams((1, 2, 16000, 0, "NONE", "not compressed"))
-            out.writeframes(b"\0\0" * 16000 * seconds)
-        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
-
-    monkeypatch.setattr(subprocess, "run", ffmpeg)
-
-    class Model:
-        _device, _dtype, head = "cpu", torch.float32, None
-
-        def __init__(self, *args, **kwargs):
-            events.append(("load", torch.get_num_threads()))
-            self.decoding = types.SimpleNamespace(decode=lambda *a: [("Привет.", [], [])])
-
-        def forward(self, audio, length):
-            events.append(("infer", torch.get_num_threads()))
-            if fail:
-                raise RuntimeError("ошибка движка")
-            return audio, length
-
-    monkeypatch.setitem(sys.modules, "gigaam", types.SimpleNamespace(load_model=Model))
-    try:
-        torch.set_num_threads(2)
-        if fail:
-            with pytest.raises(RuntimeError, match="ошибка движка"):
-                b.GigaAmBackend().run(Path("call.wav"), lang="ru")
-        else:
-            assert b.GigaAmBackend().run(Path("call.wav"), lang="ru").text == "Привет."
-        assert events == [("load", 15), ("infer", 15)]
-        assert torch.get_num_threads() == 2
-    finally:
-        torch.set_num_threads(before)
-
-
 @pytest.mark.parametrize(
     "setting, available, expected",
     [
@@ -88,7 +35,7 @@ def test_asr_uses_configured_threads_and_restores_caller(monkeypatch, tmp_path, 
     ],
 )
 def test_asr_cpu_budget_respects_available_cpus(monkeypatch, setting, available, expected):
-    monkeypatch.setattr(b.os, "sched_getaffinity", lambda _: set(range(available)), raising=False)
+    monkeypatch.setattr(os, "sched_getaffinity", lambda _: set(range(available)), raising=False)
     if setting is None:
         monkeypatch.delenv("MNEMA_ASR_THREADS", raising=False)
     else:
@@ -118,15 +65,15 @@ def test_cpu_budget_falls_back_to_cpu_count_on_macos(monkeypatch):
     def no_affinity(_):
         raise AttributeError
 
-    monkeypatch.setattr(b.os, "sched_getaffinity", no_affinity, raising=False)
-    monkeypatch.setattr(b.os, "cpu_count", lambda: 10)
+    monkeypatch.setattr(os, "sched_getaffinity", no_affinity, raising=False)
+    monkeypatch.setattr(os, "cpu_count", lambda: 10)
     monkeypatch.setenv("MNEMA_ASR_THREADS", "auto")
     assert b._asr_cpu_threads() == 10
 
 
 def test_cpu_budget_respects_cgroup_v2_cpuset_and_parent_quota(monkeypatch, cpu_environment):
     monkeypatch.setenv("MNEMA_ASR_THREADS", "auto")
-    monkeypatch.setattr(b.os, "sched_getaffinity", lambda _: set(range(32)), raising=False)
+    monkeypatch.setattr(os, "sched_getaffinity", lambda _: set(range(32)), raising=False)
     cpu_environment.update(
         {
             "/proc/self/cgroup": "0::/jobs/worker",
@@ -143,7 +90,7 @@ def test_cpu_budget_respects_cgroup_v2_cpuset_and_parent_quota(monkeypatch, cpu_
 
 def test_cpu_budget_respects_cgroup_v1_and_container_namespace(monkeypatch, cpu_environment):
     monkeypatch.setenv("MNEMA_ASR_THREADS", "auto")
-    monkeypatch.setattr(b.os, "sched_getaffinity", lambda _: set(range(32)), raising=False)
+    monkeypatch.setattr(os, "sched_getaffinity", lambda _: set(range(32)), raising=False)
     cpu_environment.update(
         {
             "/proc/self/cgroup": "3:cpu,cpuacct:/docker/job\n4:cpuset:/docker/job",
@@ -155,53 +102,3 @@ def test_cpu_budget_respects_cgroup_v1_and_container_namespace(monkeypatch, cpu_
     assert b._asr_cpu_threads() == 1
     cpu_environment["/sys/fs/cgroup/cpu,cpuacct/cpu.cfs_quota_us"] = "-1"
     assert b._asr_cpu_threads() == 4
-
-
-@pytest.mark.parametrize(
-    "device, model",
-    [("cpu", b.DEFAULT_WHISPERX_MODEL), ("cuda", b.DEFAULT_WHISPERX_MODEL), ("cuda", "small")],
-)
-def test_whisperx_cpu_budget_reaches_model_on_cpu_and_cuda(
-    monkeypatch, cpu_environment, device, model
-):
-    from mnema.core.settings import asr_thread_budget
-
-    monkeypatch.setattr(b.os, "sched_getaffinity", lambda _: set(range(8)), raising=False)
-    cpu_environment["/sys/fs/cgroup/cpu.max"] = "max 100000"
-    torch_threads, models, pipelines = [], [], []
-    monkeypatch.setitem(
-        sys.modules,
-        "torch",
-        types.SimpleNamespace(
-            set_num_threads=torch_threads.append,
-            cuda=types.SimpleNamespace(
-                is_available=lambda: True, set_per_process_memory_fraction=lambda _: None
-            ),
-        ),
-    )
-
-    class WhisperModel:
-        def __init__(self, *args, cpu_threads, **kwargs):
-            self.threads = cpu_threads
-            models.append(self)
-
-    def load_model(name, device, *, compute_type, model=None, threads):
-        pipelines.append((threads, model is not None))
-        return types.SimpleNamespace(
-            model=model or WhisperModel(name, device=device, cpu_threads=threads)
-        )
-
-    external = types.SimpleNamespace(load_model=load_model)
-    monkeypatch.setitem(sys.modules, "whisperx", external)
-    monkeypatch.setitem(
-        sys.modules, "whisperx.asr", types.SimpleNamespace(WhisperModel=WhisperModel)
-    )
-    monkeypatch.setattr(b, "_SHARED_WHISPER", None)
-    monkeypatch.setattr(b, "_WHISPERX_ASR", {})
-    with asr_thread_budget(6):
-        pipeline = b._whisperx_model(external, model, device, "float16")
-        assert b._whisperx_model(external, model, device, "float16") is pipeline
-    assert [m.threads for m in models] == [6]
-    assert pipelines == [(6, device == "cuda" and model == b.DEFAULT_WHISPERX_MODEL)]
-    if device == "cuda" and model == b.DEFAULT_WHISPERX_MODEL:
-        assert torch_threads == [6]

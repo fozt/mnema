@@ -125,17 +125,10 @@ class Refused(MediaError):
         self.status = status
 
 
-def admit(spec: OpSpec, values: dict) -> dict:
-    """Admission before work, one rule for the server API and processing on the Mac:
-    parameters by the operation's schema (422); a recording needs available recognition (422);
-    a recording summary needs a model (400). The API refuses cloud operations (requires_model)
-    earlier, before checking the input. Returns the parameters as the operation gets them."""
-    from . import node_settings
-    from .llm.config import LLMSettings
-
-    name = spec.name
+def parsed(spec: OpSpec, values: dict) -> BaseModel:
+    """The parameters by the operation's schema; refused (422) in the user's words."""
     try:
-        params = spec.params.model_validate(values).model_dump(mode="json", exclude_none=True)
+        return spec.params.model_validate(values)
     except ValidationError as exc:
         errors = exc.errors()
         # a validator's own text as is; a wrong type or an extra field by the parameter name
@@ -145,6 +138,18 @@ def admit(spec: OpSpec, values: dict) -> dict:
             "Invalid processing parameter: {fields}", fields=fields
         )
         raise Refused(detail, 422) from exc
+
+
+def admit(spec: OpSpec, values: dict) -> dict:
+    """Admission before work, one rule for the server API and processing on the Mac:
+    parameters by the operation's schema (422); a recording needs available recognition (422);
+    a recording summary needs a model (400). The API refuses cloud operations (requires_model)
+    earlier, before checking the input. Returns the parameters as the operation gets them."""
+    from . import node_settings
+    from .llm.config import LLMSettings
+
+    name = spec.name
+    params = parsed(spec, values).model_dump(mode="json", exclude_none=True)
     if name == "recording" and (
         problem := node_settings.asr_problem(params["asr"], params.get("lang"))
     ):
@@ -164,6 +169,16 @@ class TranscribeParams(BaseModel):
     backend: str = "auto"
     model: str | None = None
     lang: str | None = None
+
+    @model_validator(mode="after")
+    def _current(self) -> TranscribeParams:
+        from .core.backends import ONLY_CLOUD, ParakeetBackend, is_cloud, retired
+
+        if retired(self.backend) != self.backend:  # an old CLI: its engine and model are gone
+            self.backend, self.model = retired(self.backend), None
+        if not is_cloud(self.backend) and not ParakeetBackend.supports(self.lang):
+            raise ValueError(_(ONLY_CLOUD))
+        return self
 
 
 class TranslateParams(BaseModel):
@@ -272,6 +287,14 @@ class _RecordingFinalization(_RecordingBase):
 
 class RecordingParams(_RecordingFinalization):
     asr: str = "auto"
+
+    @field_validator("asr")
+    @classmethod
+    def _asr(cls, value: str) -> str:
+        from .core.backends import retired
+
+        return retired(value)  # a choice saved by an earlier version works as automatic
+
     part: Part | None = None
     # why the other side had no sound at all (the phone's report): blocked — a call was going on,
     # none — there was no call; refines the remark on the silence the server found

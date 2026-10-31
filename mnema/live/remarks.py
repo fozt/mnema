@@ -307,9 +307,9 @@ def recording_failed(reason: str) -> Remark:
 def node_asr_reason(error: Exception) -> str:
     """Why recognition failed: a cloud refusal in the user's words, otherwise only where it
     failed (the engine's text may point to a terminal)."""
-    from ..core.backends import NoCloudKey
+    from ..core.backends import NoCloudKey, OnlyCloud
 
-    if isinstance(error, NoCloudKey):
+    if isinstance(error, (NoCloudKey, OnlyCloud)):
         return str(error)
     if classify(error) is not ErrorKind.OTHER:
         return human_reason(error)

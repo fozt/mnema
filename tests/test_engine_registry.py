@@ -13,7 +13,7 @@ from mnema.core.base import MediaError
 from mnema.core.models import Transcript
 from mnema.server import create_app
 
-_REAL_ENGINES = ("onnxruntime", "gigaam", "mlx_whisper", "whisperx", "mlx")
+_REAL_ENGINES = ("onnxruntime",)
 
 
 class Klingon(backends.Engine):
@@ -57,9 +57,14 @@ def test_automatic_choice_takes_a_registered_engine_only_for_its_languages():
 
 
 def test_a_named_engine_this_machine_lacks_is_refused_before_recognition(tmp_path):
-    """The Mac app ships no GigaAM: `--backend gigaam` names what is missing, no module error."""
+    """`--backend parakeet` without its packages names what is missing, no module error."""
     from mnema.core.transcribe import transcribe
 
     with pytest.raises(MediaError) as refused:
-        transcribe(tmp_path / "call.wav", backend="gigaam")
-    assert str(refused.value) == "Распознавание GigaAM не установлено на этом компьютере"
+        transcribe(tmp_path / "call.wav", backend="parakeet")
+    assert str(refused.value) == "Распознавание Parakeet не установлено на этом компьютере"
+
+
+def test_a_language_no_local_engine_has_is_recognized_only_in_the_cloud():
+    with pytest.raises(MediaError, match="^Этот язык распознаёт только облако$"):
+        backends.select_backend("auto", lang="ja")

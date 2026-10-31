@@ -43,7 +43,7 @@ def node(monkeypatch, tmp_path):
     monkeypatch.setattr(
         importlib.util,
         "find_spec",
-        lambda n, *a, **kw: object() if n == "whisperx" else find(n, *a, **kw),
+        lambda n, *a, **kw: object() if n == "onnxruntime" else find(n, *a, **kw),
     )
     monkeypatch.setattr(providers, "TRANSPORT", httpx.MockTransport(lambda r: httpx.Response(404)))
     monkeypatch.setattr(limits, "_FETCHED", {})
@@ -67,7 +67,7 @@ def _asr(monkeypatch, *, failing=()):
             "text": WORDS,
             "segments": [{"start": 0, "end": 1, "text": WORDS}],
             "language": "ru",
-            "engine": "whisperx",
+            "engine": "parakeet",
         }
 
     monkeypatch.setattr(setup, "dispatch", transcribe)
@@ -257,7 +257,7 @@ def test_record_waiting_on_the_node_is_not_moved_to_a_section(monkeypatch, tmp_p
             "text": WORDS,
             "segments": [{"start": 0, "end": 1, "text": WORDS}],
             "language": "ru",
-            "engine": "whisperx",
+            "engine": "parakeet",
         }
 
     monkeypatch.setattr(setup, "dispatch", transcribe)

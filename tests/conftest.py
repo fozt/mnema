@@ -248,16 +248,6 @@ def _no_update_network(monkeypatch):
     monkeypatch.setattr(update, "TRANSPORT", httpx.MockTransport(lambda _: httpx.Response(404)))
 
 
-@pytest.fixture(autouse=True)
-def _reset_shared_whisper():
-    """The shared whisper model is a process singleton: reset it between tests."""
-    import mnema.core.backends as backends_mod
-
-    backends_mod._SHARED_WHISPER = None
-    yield
-    backends_mod._SHARED_WHISPER = None
-
-
 @pytest.fixture
 def wlk_process(monkeypatch, tmp_path):
     """Real child processes with the external WhisperLiveKit stub."""

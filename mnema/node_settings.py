@@ -9,7 +9,6 @@ import socket
 import unicodedata
 from pathlib import Path
 
-from .core.base import MediaError
 from .i18n import _
 
 NAME_MAX = 40
@@ -111,22 +110,18 @@ def _cloud_key() -> str | None:
 
 def asr_problem(choice: str, lang: str | None = None) -> str | None:
     """The check before work (before the server claims uploads): only packages and saved keys,
-    no network."""
-    from .core.backends import NO_CLOUD_KEY, is_cloud, select_backend
+    no network. A choice of an earlier version is checked as automatic."""
+    from .core.backends import NO_CLOUD_KEY, ONLY_CLOUD, installed_engines, is_cloud, retired
 
+    choice = retired(choice)
     if is_cloud(choice):
         return None if _cloud_key() else _(NO_CLOUD_KEY)
     if "/" in choice:
         return _("Unknown recognition method")
-    if choice == "auto":
-        try:
-            if select_backend("auto", lang=lang).available():
-                return None
-        except MediaError:
-            pass
-    elif any(c["id"] == choice for c in _local_asr()):
-        return None
-    return _(UNAVAILABLE_ASR)
+    chosen = [e for e in installed_engines() if choice in ("auto", e.id)]
+    if chosen and not any(e.supports(lang) for e in chosen):
+        return _(ONLY_CLOUD)
+    return None if chosen else _(UNAVAILABLE_ASR)
 
 
 def asr_choices() -> list[dict[str, str]]:

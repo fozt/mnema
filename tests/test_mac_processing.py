@@ -44,8 +44,8 @@ class Crash(BaseException):
 
 @pytest.fixture
 def engines(monkeypatch) -> dict:
-    """Installed recognition engines: whisperx is there, the rest as on the machine."""
-    installed: dict = {"whisperx": object()}
+    """Installed recognition engines: Parakeet is there, the rest as on the machine."""
+    installed: dict = {"onnxruntime": object()}
     find = importlib.util.find_spec
     monkeypatch.setattr(
         importlib.util,
@@ -84,7 +84,7 @@ def _asr(monkeypatch, crash: list[bool] | None = None) -> None:
             "text": WORDS,
             "segments": [{"start": 0, "end": 1, "text": WORDS}],
             "language": "ru",
-            "engine": "whisperx",
+            "engine": "parakeet",
         }
 
     monkeypatch.setattr(setup, "dispatch", transcribe)
@@ -247,7 +247,7 @@ def test_folder_in_processing_is_not_processed_again(monkeypatch, tmp_path, sour
             "text": WORDS,
             "segments": [{"start": 0, "end": 1, "text": WORDS}],
             "language": "ru",
-            "engine": "whisperx",
+            "engine": "parakeet",
         }
 
     monkeypatch.setattr(setup, "dispatch", transcribe)
@@ -277,12 +277,12 @@ def test_folder_in_processing_is_not_processed_again(monkeypatch, tmp_path, sour
 
 def test_mac_refuses_unavailable_recognition_before_work(monkeypatch, tmp_path, sources, engines):
     """The chosen recognition is not installed: refused before work, the recording as it was."""
-    engines["gigaam"] = None
+    engines["onnxruntime"] = None
     _asr(monkeypatch)
     folder = _recording(tmp_path / "notes")
     before = _files(folder)
     with pytest.raises(MediaError) as refused:
-        recording_client.recover_on_node(folder, LiveConfig(asr="gigaam", mix_audio=False), None)
+        recording_client.recover_on_node(folder, LiveConfig(asr="parakeet", mix_audio=False), None)
     assert str(refused.value) == "Выбранное распознавание недоступно. Выберите другое"
     assert not (folder / PROCESSING_MARK).exists() and meta.last(folder) is None
     assert set(_files(folder)) <= {*before, meta.META_FILE}
@@ -338,14 +338,13 @@ def test_cloud_choice_saved_for_mac_records_with_own_engines(
         ({}, "gigaam"),  # "Retry" here of a recording asked from the server's list
     ],
 )
-def test_gigaam_chosen_elsewhere_records_here_with_own_engines(
+def test_gigaam_chosen_elsewhere_records_here_automatically(
     monkeypatch, tmp_path, sources, engines, saved, asked
 ) -> None:
-    """GigaAM is not in the Mac app: processing here with it chosen runs Automatic, as a cloud
-    choice does, instead of being refused."""
+    """GigaAM is gone: processing here with it chosen runs Automatic, as a cloud choice does,
+    instead of being refused."""
     from mnema.bar.runtime import BarRuntime
 
-    engines["gigaam"] = None
     monkeypatch.setenv("MNEMA_LIVE_DIR", str(tmp_path / "notes"))
     _asr(monkeypatch)
     _model(monkeypatch)
@@ -365,11 +364,11 @@ def test_server_refusal_drops_the_request(monkeypatch, tmp_path, engines) -> Non
     """The server refused before work (422): the refusal has no commands, there is no work
     file with a request: the recording was not "interrupted", it stays as it was."""
     monkeypatch.setattr(audio, "extract_audio", lambda src, dst, **kw: shutil.copyfile(src, dst))
-    engines["gigaam"] = None
+    engines["onnxruntime"] = None
     folder = _recording(tmp_path / "notes")
     with pytest.raises(MediaError) as refused:
         recording_client.recover_on_node(
-            folder, LiveConfig(asr="gigaam", mix_audio=False), _server(monkeypatch, tmp_path)
+            folder, LiveConfig(asr="parakeet", mix_audio=False), _server(monkeypatch, tmp_path)
         )
     assert str(refused.value) == "Выбранное распознавание недоступно. Выберите другое"
     assert not (folder / PROCESSING_MARK).exists() and meta.last(folder) is None
@@ -381,7 +380,7 @@ def test_refused_part_leaves_only_the_original_recording(
 ) -> None:
     """A refusal before work for a part: no part folder is left, the library as it was."""
     monkeypatch.setattr(audio, "extract_audio", lambda src, dst, **kw: shutil.copyfile(src, dst))
-    engines["gigaam"] = None
+    engines["onnxruntime"] = None
     root = tmp_path / "notes"
     folder = _recording(root)
     before = _files(folder)
@@ -392,7 +391,7 @@ def test_refused_part_leaves_only_the_original_recording(
         connection = _server(monkeypatch, tmp_path)
     with pytest.raises(MediaError) as refused:
         recording_client.recover_on_node(
-            folder, LiveConfig(asr="gigaam", mix_audio=False), connection, start=0.2, end=0.8
+            folder, LiveConfig(asr="parakeet", mix_audio=False), connection, start=0.2, end=0.8
         )
     assert str(refused.value) == "Выбранное распознавание недоступно. Выберите другое"
     assert [p.name for p in root.iterdir()] == [NAME] and _files(folder) == before
@@ -426,7 +425,7 @@ def test_busy_server_keeps_the_request_and_its_uploads(monkeypatch, tmp_path, en
     )
     connection = Connection(url="http://node:8123")
     folder = _recording(tmp_path / "notes")
-    config = LiveConfig(asr="whisper", mix_audio=False)
+    config = LiveConfig(asr="parakeet", mix_audio=False)
     with pytest.raises(MediaError, match="^Сервер занят: очередь заполнена$"):
         recording_client.recover_on_node(folder, config, connection)
     assert (folder / PROCESSING_MARK).is_file() and len(uploads) == 2

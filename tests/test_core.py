@@ -10,20 +10,11 @@ from pathlib import Path
 import pytest
 
 from mnema.core import base
-from mnema.core.backends import _SegmentParser, local_snapshot_dir
 from mnema.core.models import Segment, Transcript
 from mnema.core.probe import probe
 from mnema.i18n import using
 
 # ─────────────────────────────────────────── formatting
-
-
-@pytest.mark.parametrize(
-    ("ts", "expected"),
-    [("00:05.000", 5.0), ("01:30", 90.0), ("1:00:00", 3600.0)],
-)
-def test_ts_to_sec(ts: str, expected: float) -> None:
-    assert base.ts_to_sec(ts) == pytest.approx(expected)
 
 
 def _cyrillic(text: str) -> bool:
@@ -321,56 +312,6 @@ def test_detect_lang() -> None:
     assert claude._detect_lang("mostly english text here with пара слов") == "en"
 
 
-# ─────────────────────────────────────────── mlx verbose output parser
-
-
-def test_segment_parser_extracts_segments_and_language() -> None:
-    captured: list = []
-    parser = _SegmentParser(total=10.0, on=lambda frac, msg: captured.append((frac, msg)))
-    parser.write("Detected language: Russian\n")
-    parser.write("[00:00.000 --> 00:05.000] привет\n")
-    parser.write("[00:05.000 --> 00:10.000] пока\n")
-    assert parser.language == "Russian"
-    assert [s.text for s in parser.segments] == ["привет", "пока"]
-    assert parser.segments[1].end == pytest.approx(10.0)
-    # progress is end/total
-    assert captured[-1] == (pytest.approx(1.0), "Распознаю…")
-
-
-def test_segment_parser_progress_reads_in_english() -> None:
-    """live/setup matches this exact message to name the track being recognized."""
-    captured: list[str] = []
-    parser = _SegmentParser(total=10.0, on=lambda frac, msg: captured.append(msg))
-    with using("en"):
-        parser.write("[00:00.000 --> 00:05.000] hello\n")
-    assert captured == ["Recognizing…"]
-
-
-def test_segment_parser_buffers_partial_lines() -> None:
-    parser = _SegmentParser(total=0.0, on=lambda f, m: None)
-    parser.write("[00:00.000 --> 00:01.0")
-    assert parser.segments == []  # the line is not finished yet
-    parser.write("00] кусок\n")
-    assert [s.text for s in parser.segments] == ["кусок"]
-
-
-# ─────────────────────────────────────────── model lookup in the cache (no network)
-
-
-def test_model_cache_detection(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("HF_HOME", str(tmp_path))
-    repo = "mlx-community/whisper-test"
-    assert local_snapshot_dir(repo) is None
-
-    snap = tmp_path / "hub" / "models--mlx-community--whisper-test" / "snapshots" / "abc"
-    snap.mkdir(parents=True)
-    (snap / "weights.safetensors").write_bytes(b"x" * 10)
-    (tmp_path / "hub" / "models--mlx-community--whisper-test" / "refs").mkdir(parents=True)
-    (tmp_path / "hub" / "models--mlx-community--whisper-test" / "refs" / "main").write_text("abc")
-
-    assert local_snapshot_dir(repo) == snap
-
-
 def test_merge_raises_on_silent_material_loss(monkeypatch, tmp_path) -> None:
     """Completeness guard: ffmpeg "succeeded" but the result is much shorter than the parts →
     a loud error, not a silently incomplete file."""
@@ -481,68 +422,3 @@ def test_merge_mixed_audio_and_video_inputs_die(monkeypatch, tmp_path) -> None:
 
     with pytest.raises(MediaError, match="нет видеопотока"):
         video.merge([Path("a.mp4"), Path("b.mp3")], tmp_path / "joined.mp4")
-
-
-# ── whisperx ──
-
-
-def _fake_whisperx(monkeypatch):
-    """A fake whisperx: run() imports it lazily; caches and the live path are untouched."""
-    import sys
-    import types
-
-    from mnema.core import backends
-
-    def load_model(name, device, compute_type=None, model=None, **kw):
-        class Pipe:
-            def transcribe(self, audio, language=None, progress_callback=None):
-                return {"segments": [], "language": language or "ru", "text": ""}
-
-        return Pipe()
-
-    fake = types.SimpleNamespace(
-        load_audio=lambda p: b"pcm",
-        load_model=load_model,
-        load_align_model=lambda language_code, device: (object(), {}),
-        align=lambda segs, m, meta, audio, device, progress_callback=None: {"segments": []},
-    )
-    monkeypatch.setitem(sys.modules, "whisperx", fake)
-    monkeypatch.setattr(backends, "shared_whisper_model", lambda: object())
-    monkeypatch.setattr(backends, "_WHISPERX_ASR", {})
-    return backends
-
-
-def test_transcribe_does_not_load_alignment(monkeypatch):
-    """Word alignment is never called: align downloads a per-language model over the network.
-    faster-whisper segments already have times, so they are returned as is (voice messages
-    used to hang on align without a network)."""
-    backends = _fake_whisperx(monkeypatch)
-    import sys
-
-    fake = sys.modules["whisperx"]
-    align_called = {"n": 0}
-
-    def spy_align_model(language_code, device):
-        align_called["n"] += 1
-        raise AssertionError("align must not be called")
-
-    fake.load_align_model = spy_align_model
-
-    def load_model(name, device, compute_type=None, model=None, **kw):
-        class Pipe:
-            def transcribe(self, audio, language=None, progress_callback=None):
-                return {
-                    "segments": [{"start": 0.0, "end": 2.0, "text": "привет как дела"}],
-                    "language": "ru",
-                }
-
-        return Pipe()
-
-    fake.load_model = load_model
-
-    be = backends.WhisperXBackend()
-    tr = be.run(Path("voice.ogg"), total_duration=6.0)  # a short voice message
-
-    assert align_called["n"] == 0  # align untouched
-    assert [s.text for s in tr.segments] == ["привет как дела"]  # timed segments
-    assert tr.segments[0].start == 0.0 and tr.segments[0].end == 2.0

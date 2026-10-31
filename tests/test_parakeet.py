@@ -211,56 +211,89 @@ def test_ready_folder_without_a_file_is_refused(monkeypatch, model_dir):
 
 @pytest.fixture
 def hub(monkeypatch, tmp_path):
-    """huggingface_hub.hf_hub_download: the cache in tmp; a download writes `content`."""
+    """huggingface_hub.hf_hub_download into local_dir, as the library does it: a file already
+    there is returned as is (resumed), otherwise `content` is written; `fail` raises instead."""
     import huggingface_hub
-    from huggingface_hub.errors import LocalEntryNotFoundError
 
     monkeypatch.delenv("MNEMA_PARAKEET_ONNX_DIR", raising=False)
-    state = {"downloads": [], "content": {}}
-    snapshot = tmp_path / "hub" / "snapshots" / pk.ONNX_REVISION
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    monkeypatch.setattr(
+        pk, "ONNX_FILES", {name: hashlib.sha256(b"weights").hexdigest() for name in pk.ONNX_FILES}
+    )
+    state = {"downloads": [], "content": {}, "fail": None}
 
-    def download(repo_id, filename, *, revision, local_files_only=False, **kw):
+    def download(repo_id, filename, *, revision, local_dir, **kw):
         assert (repo_id, revision) == (pk.ONNX_REPO, pk.ONNX_REVISION)
-        path = snapshot / filename
-        if local_files_only:
-            if not path.is_file():
-                raise LocalEntryNotFoundError("not cached")
-            return str(path)
-        state["downloads"].append(filename)
-        blob = tmp_path / "hub" / "blobs" / filename
-        blob.parent.mkdir(parents=True, exist_ok=True)
-        blob.write_bytes(state["content"].get(filename, b"weights"))
-        snapshot.mkdir(parents=True, exist_ok=True)
-        path.symlink_to(blob)
+        if state["fail"] is not None:
+            raise state["fail"]
+        path = Path(local_dir) / filename
+        if not path.is_file():
+            state["downloads"].append(filename)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(state["content"].get(filename, b"weights"))
         return str(path)
 
     monkeypatch.setattr(huggingface_hub, "hf_hub_download", download)
     return state
 
 
-def test_downloaded_files_are_checked_once_and_then_read_from_the_cache(monkeypatch, hub):
-    monkeypatch.setattr(
-        pk, "ONNX_FILES", {name: hashlib.sha256(b"weights").hexdigest() for name in pk.ONNX_FILES}
-    )
+def test_downloaded_files_are_checked_once_and_then_read_from_the_cache(hub):
     steps: list[str] = []
     folder = pk.model_dir(lambda f, m: steps.append(m))
     assert sorted(p.name for p in folder.iterdir()) == sorted(pk.ONNX_FILES)
     assert sorted(hub["downloads"]) == sorted(pk.ONNX_FILES)
     assert "Скачиваю модель распознавания, только в первый раз…" in steps
+    hub["fail"] = AssertionError("the cache is read without the network")
     assert pk.model_dir() == folder
-    assert len(hub["downloads"]) == len(pk.ONNX_FILES)
 
 
-def test_a_damaged_download_is_refused_and_removed(monkeypatch, hub):
-    monkeypatch.setattr(
-        pk, "ONNX_FILES", {name: hashlib.sha256(b"weights").hexdigest() for name in pk.ONNX_FILES}
-    )
+def test_a_damaged_download_is_refused_and_downloaded_again(hub):
     hub["content"][pk.ENCODER] = b"cut short"
     with pytest.raises(MediaError, match="скачалась с ошибкой"):
         pk.model_dir()
-    with pytest.raises(MediaError):  # not taken from the cache next time
-        pk.model_dir()
+    hub["content"][pk.ENCODER] = b"weights"
+    folder = pk.model_dir()
+    assert (folder / pk.ENCODER).read_bytes() == b"weights"
     assert hub["downloads"].count(pk.ENCODER) == 2
+
+
+def test_a_file_left_unchecked_by_a_stopped_job_is_checked_before_use(hub):
+    """The job stopped between the download and the check: the file is not taken unchecked."""
+    folder = pk.model_dir()
+    (folder / pk.ENCODER).unlink()
+    staging = folder.with_name(f".{folder.name}.partial")
+    staging.mkdir()
+    (staging / pk.ENCODER).write_bytes(b"cut short")
+    with pytest.raises(MediaError, match="скачалась с ошибкой"):
+        pk.model_dir()
+    assert not (folder / pk.ENCODER).exists()
+
+
+@pytest.mark.parametrize(
+    "failure, text",
+    [
+        ("offline", "Не удалось скачать модель распознавания. Проверьте подключение"),
+        ("network", "Не удалось скачать модель распознавания. Проверьте подключение"),
+        ("http", "Не удалось скачать модель распознавания. Проверьте подключение"),
+        ("disk", "Не хватает места на диске для модели распознавания"),
+    ],
+)
+def test_a_failed_download_is_explained_in_the_users_words(hub, failure, text):
+    import errno
+
+    import httpx
+    from huggingface_hub.errors import HfHubHTTPError, LocalEntryNotFoundError
+
+    unavailable = httpx.Response(503, request=httpx.Request("GET", "https://huggingface.co"))
+    hub["fail"] = {
+        "offline": LocalEntryNotFoundError("Cannot find the requested files in the cache"),
+        "network": httpx.ConnectError("[Errno 8] nodename nor servname provided"),
+        "http": HfHubHTTPError("503 Server Error: Service Unavailable", response=unavailable),
+        "disk": OSError(errno.ENOSPC, "No space left on device"),
+    }[failure]
+    with pytest.raises(MediaError) as refused:
+        pk.model_dir()
+    assert str(refused.value).startswith(text)
 
 
 # ─────────────────────────────────────────── replies and cleanup

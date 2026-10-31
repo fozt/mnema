@@ -469,8 +469,6 @@ def _settings_sample(*, idle: bool = True, update: SettingsField = _UPDATE_FOUND
                                 choices=[
                                     c(key="asr:auto", title="Автоматически", checked=True),
                                     c(key="asr:parakeet", title="Parakeet"),
-                                    c(key="asr:gigaam", title="GigaAM"),
-                                    c(key="asr:whisper", title="Whisper"),
                                 ],
                             ),
                             f(
@@ -1031,11 +1029,10 @@ def _samples() -> dict[str, BaseModel]:
                 subtitle="Дейли · 27.09 · 1:32:40",
                 name="Дейли",
                 replace=True,
-                asr="whisper",
+                asr="parakeet",
                 asrs=[
                     Choice(key="auto", title="Автоматически"),
-                    Choice(key="gigaam", title="GigaAM"),
-                    Choice(key="whisper", title="Whisper"),
+                    Choice(key="parakeet", title="Parakeet"),
                     Choice(key="openai/gpt-4o-transcribe", title="OpenAI · gpt-4o-transcribe"),
                 ],
                 sources=[

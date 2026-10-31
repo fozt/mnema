@@ -42,7 +42,7 @@
       }
     ],
     "asr_label": "Распознавание",
-    "asr": "whisper",
+    "asr": "parakeet",
     "asrs": [
       {
         "key": "auto",
@@ -52,15 +52,8 @@
         "enabled": true
       },
       {
-        "key": "gigaam",
-        "title": "GigaAM",
-        "detail": "",
-        "checked": false,
-        "enabled": true
-      },
-      {
-        "key": "whisper",
-        "title": "Whisper",
+        "key": "parakeet",
+        "title": "Parakeet",
         "detail": "",
         "checked": false,
         "enabled": true

@@ -445,6 +445,9 @@ def run() -> None:
         notice = prepare()  # reads "Open at login", which the first start turns on
     except Exception:  # noqa: BLE001 - setup never stops the engine
         logger.warning("app bundle setup failed", exc_info=True)
+    from ..cleanup import remove_old_weights_in_background
+
+    remove_old_weights_in_background(server=False)
     engine = Engine(Channel(proto))
     if notice:
         engine.rt.state.notice = notice

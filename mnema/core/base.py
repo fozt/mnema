@@ -42,8 +42,10 @@ def processing_here() -> Iterator[None]:
         _HERE.reset(token)
 
 
-DEFAULT_LOCAL_MODEL = "mlx-community/whisper-large-v3-turbo"
-DEFAULT_WHISPERX_MODEL = "large-v3"
+def cache_home() -> Path:
+    """XDG_CACHE_HOME, else ~/.cache: model weights and other downloads (on the server /data)."""
+    return Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
+
 
 # Audio files: the recordings feed shows them and audio cleanup removes them.
 AUDIO_EXT = frozenset({".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".opus", ".wma"})
@@ -52,20 +54,6 @@ MEDIA_EXT = AUDIO_EXT | VIDEO_EXT
 
 # on(fraction in 0..1 or None, message): the progress callback shared by the CLI, app and server.
 Progress = Callable[["float | None", str], None]
-
-
-def vram_status() -> str:
-    """VRAM snapshot for logs; empty without torch/CUDA. Never imports torch itself."""
-    try:
-        import sys
-
-        torch = sys.modules.get("torch")
-        if torch is None or not torch.cuda.is_available():
-            return ""
-        free, total = torch.cuda.mem_get_info()
-        return f"VRAM free {free >> 20} / total {total >> 20} MiB (used {(total - free) >> 20})"
-    except Exception:  # noqa: BLE001 - diagnostics must not break the hot path
-        return ""
 
 
 def noop(fraction: float | None, message: str) -> None:
@@ -240,13 +228,6 @@ def fmt_size(num_bytes: int) -> str:
     if size < 1024:
         return _("{size} MB", size=f"{size:.1f}")
     return _("{size} GB", size=f"{size / 1024:.1f}")
-
-
-def ts_to_sec(ts: str) -> float:
-    sec = 0.0
-    for part in ts.split(":"):
-        sec = sec * 60 + float(part)
-    return sec
 
 
 def speaker_word(lang: str | None) -> str:

@@ -840,20 +840,6 @@
                       "detail": "",
                       "checked": false,
                       "enabled": false
-                    },
-                    {
-                      "key": "asr:gigaam",
-                      "title": "GigaAM",
-                      "detail": "",
-                      "checked": false,
-                      "enabled": false
-                    },
-                    {
-                      "key": "asr:whisper",
-                      "title": "Whisper",
-                      "detail": "",
-                      "checked": false,
-                      "enabled": false
                     }
                   ],
                   "tone": "none",
