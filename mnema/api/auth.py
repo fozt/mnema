@@ -12,6 +12,7 @@ from starlette.concurrency import run_in_threadpool
 from ..i18n import _
 from ..install_setup import server_token
 from ..jobs import NODE_OWNER
+from ..users import OWNER, as_user
 
 # The only way in without a token: exchanging an invitation for a device token.
 CLAIM_PATH = "/api/devices/claim"
@@ -58,4 +59,5 @@ def add_auth_middleware(app: FastAPI) -> None:
                     {"detail": _("A new invitation from the server is needed")}, status_code=401
                 )
             request.state.owner = owner
-        return await call_next(request)
+        with as_user(OWNER):  # the server mode needs a user: every caller is the owner for now
+            return await call_next(request)

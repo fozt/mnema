@@ -118,7 +118,7 @@ def begin(config: Any, *, part: dict[str, float] | None = None) -> Run:
             "summary_lang": config.summary_lang,
             "server": host(config.runner),
             "model": llm.model,  # the active cloud model; None — none chosen
-            "source": llm.source,  # env | unconfigured
+            "source": llm.source,  # env | user (own model of a server user) | unconfigured
         }
     except Exception:  # noqa: BLE001 - history is informational, it never fails processing
         logger.warning("could not collect settings for the processing history", exc_info=True)

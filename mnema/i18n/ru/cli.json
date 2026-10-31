@@ -240,5 +240,8 @@
   "add a user and print an invitation": "добавить пользователя и напечатать приглашение",
   "user name, for example anna": "имя пользователя, например anna",
   "revoke the user's devices and invitations, the recordings stay": "отозвать устройства и приглашения пользователя, записи останутся",
-  "user name": "имя пользователя"
+  "user name": "имя пользователя",
+  "own: {model}": "своя: {model}",
+  "shared": "общая",
+  "whose model: a user from mnema users, the shared server model by default": "чья модель: пользователь из mnema users, по умолчанию общая модель сервера"
 }

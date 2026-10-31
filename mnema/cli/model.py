@@ -1,20 +1,23 @@
 """`mnema model`: the cloud model of this machine in four steps — provider, key, model, check.
 
 Writes MNEMA_MODEL and MNEMA_API_KEY lines to ~/.config/mnema/.env, which `mnema serve` reads
-on every request. The key is never printed in full; Ctrl-C exits without changes. The step
-rules are shared with the Mac model window (providers.check_key, claude.check_model); this
-module is only terminal input and output.
+on every request; with --user, to the user's own file ~/.config/mnema/users/<name>.env. The
+key is never printed in full; Ctrl-C exits without changes. The step rules are shared with the
+Mac model window (providers.check_key, claude.check_model); this module is only terminal input
+and output.
 """
 
 from __future__ import annotations
 
 import getpass
 import os
+from pathlib import Path
 
 from rich.text import Text
 
 import mnema.cli as _cli
 
+from .. import users
 from ..core.base import MediaError
 from ..i18n import _
 from ..llm import providers
@@ -22,6 +25,7 @@ from ..llm.config import MODEL_GROUP, Credentials, LLMSettings, credentials_for,
 from ..llm.errors import Refusal
 from ..llm.providers import TITLES, ModelInfo, Provider
 from ..llm.redact import add_secret, mask
+from .ui import die
 
 _PROVIDERS = list(Provider)
 
@@ -115,15 +119,43 @@ def _overridden() -> None:
         )
 
 
-def _configure() -> None:
+def _server_user(raw: str | None) -> str | None:
+    """The user of --user on this computer's server; None — the shared model."""
+    from ..devices import DeviceStore, devices_db
+    from ..install_setup import server_root
+
+    if raw is None or raw.lower() == users.OWNER:
+        return None
+    try:
+        name = users.valid_name(raw)
+    except MediaError as e:
+        die(str(e))
+        return None
+    db = devices_db(server_root())
+    found = DeviceStore(db).user(name) if db.is_file() else None
+    if found is None or found.removed:
+        die(users.no_user(name))
+    return name
+
+
+def _file(user: str | None) -> Path:
     from .. import config
+
+    return config.user_env_file() if user is None else users.user_env_file(user)
+
+
+def _configure(user: str | None) -> None:
     from ..llm.config import save_model
 
-    _say(current_line())
-    settings = LLMSettings()
-    found = providers.provider_of(settings.model or "")
+    _say(current_line(user=user))
+    with users.as_user(user):
+        settings = LLMSettings()
+    # a user's choice starts from her own file only, never from the shared model and key
+    mine = user is None or settings.source == "user"
+    found = providers.provider_of(settings.model or "") if mine else None
     provider = _provider(found[0] if found else None)
-    saved = settings.provider_key(provider)  # a gateway key is never offered to a provider
+    # a gateway key is never offered to a provider
+    saved = settings.provider_key(provider) if mine else None
     current = found[1] if found is not None and found[0] == provider else None
     key, models = _key(provider, saved)
     while True:
@@ -136,37 +168,33 @@ def _configure() -> None:
         if refusal.key:
             key, models = _key(provider, saved)
     _say(_("The model answers"), "green")
-    save_model(name, key)
-    _say(
-        _(
-            "Saved to {path}: {model}, key {key}",
-            path=config.user_env_file(),
-            model=name,
-            key=mask(key),
-        )
-    )
+    save_model(name, key, user=user)
+    _say(_("Saved to {path}: {model}, key {key}", path=_file(user), model=name, key=mask(key)))
     _say(_("The server picks up the model without a restart"))
-    _overridden()
+    if user is None:
+        _overridden()
 
 
 def cmd_model(args) -> None:
     """`mnema model`: provider, key, model, check; --show prints the current one; --remove
-    removes it."""
-    from .. import config
-
+    removes it. --user: the own model of a server user, --remove puts her on the shared one."""
+    user = _server_user(args.user)
+    if user is not None:
+        os.umask(0o077)  # docker exec does not inherit the server's umask
     if args.show:
-        _say(current_line())
+        _say(current_line(user=user))
         return
     if args.remove:
         from ..llm.config import remove_model
 
-        removed = remove_model()
-        path = config.user_env_file()
+        removed = remove_model(user=user)
+        path = _file(user)
         _say(
             _("Model removed from {path}", path=path)
             if removed
             else _("No model in {path}", path=path)
         )
-        _overridden()
+        if user is None:
+            _overridden()
         return
-    _configure()
+    _configure(user)
