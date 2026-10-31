@@ -13,14 +13,11 @@ import pytest
 
 
 def _running(pid):
-    path = Path(f"/proc/{pid}/stat")
-    try:
-        return path.read_text().split()[2] != "Z"
-    except (FileNotFoundError, ProcessLookupError):
-        return False
+    """Alive and not a zombie: ps answers the same on Linux and macOS."""
+    state = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True)
+    return bool(state.stdout.strip()) and not state.stdout.strip().startswith("Z")
 
 
-@pytest.mark.skipif(sys.platform != "linux", reason="checks descendants through /proc")
 @pytest.mark.parametrize("abrupt", [False, True])
 def test_parent_exit_stops_model_process_and_its_native_child(tmp_path, abrupt):
     ready = tmp_path / "probe-ready"
@@ -87,7 +84,6 @@ input()
             shutil.rmtree(child["temp"], ignore_errors=True)
 
 
-@pytest.mark.skipif(sys.platform != "linux", reason="checks the process through /proc")
 def test_parent_kill_during_streaming_warmup_stops_model_process(tmp_path):
     log = tmp_path / "wlk.log"
     code = """

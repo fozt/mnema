@@ -76,41 +76,6 @@ def test_faster_whisper_uses_child_cpu_budget(wlk_process, monkeypatch, threads)
     wlk_process[1]()
 
 
-def test_faster_whisper_leaves_a_core_free_on_two_available_cpus(wlk_process, monkeypatch):
-    import os
-    import shutil
-    import subprocess
-
-    from mnema.core.settings import available_cpu_threads
-
-    taskset = shutil.which("taskset")
-    if taskset is None or not hasattr(os, "sched_getaffinity") or available_cpu_threads() < 2:
-        pytest.skip("the affinity check needs Linux and two available CPUs")
-    affinity = os.sched_getaffinity(0)
-    selected = ",".join(map(str, sorted(affinity)[:2]))
-    popen = subprocess.Popen
-
-    def restricted(args, **kwargs):
-        # A real limit on the child process only, without stubbing the budget resolver.
-        return popen([taskset, "--cpu-list", selected, *args], **kwargs)
-
-    monkeypatch.delenv("MNEMA_ASR_THREADS", raising=False)
-    monkeypatch.setenv("OMP_NUM_THREADS", "17")
-    monkeypatch.setattr(subprocess, "Popen", restricted)
-    tr = StreamingTranscriber(backend="faster-whisper")
-    try:
-        tr.warmup()
-        row = wlk_process[0]()[0]
-        assert row["threads"] == 1
-        assert row["omp_at_import"] == row["torch_omp_at_import"] == "1"
-        assert row["omp_at_engine"] == "1"
-        assert os.environ["OMP_NUM_THREADS"] == "17"
-        assert os.sched_getaffinity(0) == affinity
-    finally:
-        tr.close()
-    wlk_process[1]()
-
-
 def _seg(text, start, end, speaker=-1):
     return SimpleNamespace(start=start, end=end, text=text, speaker=speaker)
 

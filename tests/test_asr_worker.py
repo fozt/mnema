@@ -152,7 +152,6 @@ def test_cancel_before_start_does_not_create_process(subprocess_engine):
     assert subprocess_engine == []
 
 
-@pytest.mark.skipif(sys.platform != "linux", reason="проверка состояния потомка через /proc")
 def test_cancel_stops_ffmpeg_like_descendant(subprocess_engine, tmp_path):
     pid_file = tmp_path / "pid"
 
@@ -160,13 +159,17 @@ def test_cancel_stops_ffmpeg_like_descendant(subprocess_engine, tmp_path):
         if message == "начал":
             raise MediaError("stop")
 
+    def running(pid: str) -> bool:
+        state = subprocess.run(["ps", "-o", "stat=", "-p", pid], capture_output=True, text=True)
+        return bool(state.stdout.strip()) and not state.stdout.strip().startswith("Z")
+
     with pytest.raises(MediaError, match="stop"):
         w.run("fixture", {"mode": "descendant", "pid_file": str(pid_file)}, on=cancel)
-    stat = Path(f"/proc/{pid_file.read_text()}/stat")
+    pid = pid_file.read_text()
     deadline = time.monotonic() + 2
-    while stat.exists() and stat.read_text().split()[2] != "Z" and time.monotonic() < deadline:
+    while running(pid) and time.monotonic() < deadline:
         time.sleep(0.01)
-    assert not stat.exists() or stat.read_text().split()[2] == "Z"
+    assert not running(pid)
 
 
 def test_public_transcribe_forwards_request_and_inherited_thread_budget(
