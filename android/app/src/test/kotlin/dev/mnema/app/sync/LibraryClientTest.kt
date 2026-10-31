@@ -1,5 +1,6 @@
 package dev.mnema.app.sync
 
+import dev.mnema.app.i18n.tr
 import dev.mnema.app.server.Connection
 import dev.mnema.app.server.RunnerClient
 import java.io.IOException
@@ -7,6 +8,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.SerializationException
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
+import mockwebserver3.SocketEffect
 import org.junit.After
 import org.junit.Assert.*
 import org.junit.Before
@@ -57,6 +59,24 @@ class LibraryClientTest {
         val section = server.takeRequest()
         assertEquals("DELETE", section.method)
         assertEquals("Работа & Учёба", section.url.queryParameter("path"))
+    }
+
+    @Test fun readOverAConnectionTheServerClosedWhileIdleIsSentAgainOverANewOne() = runBlocking<Unit> {
+        val manifest = """{"records":[],"sections":[]}"""
+        val client = client()
+        server.enqueue(MockResponse.Builder().body(manifest).onResponseEnd(SocketEffect.CloseSocket()).build())
+        server.enqueue(json(manifest))
+        client.manifest()
+        assertEquals(Manifest(), client.manifest())
+        assertEquals(0, server.takeRequest().connectionIndex)
+        assertEquals(1, server.takeRequest().connectionIndex)
+    }
+
+    @Test fun refusedConnectionReportsTheServerUnavailable() {
+        val gone = MockWebServer(); gone.start()
+        val url = gone.url("/").toString(); gone.close()
+        val error = assertThrows(SyncException::class.java) { runBlocking { LibraryClient(Connection(url, "device-token"), http).manifest() } }
+        assertEquals(tr("The sync server is unavailable; files are kept"), error.message)
     }
 
     @Test fun invalidHashUtf8MissingManifestOrImpreciseTimesAreNotAccepted() {

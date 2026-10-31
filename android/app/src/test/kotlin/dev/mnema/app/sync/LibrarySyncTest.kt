@@ -319,7 +319,7 @@ class LibrarySyncTest {
             if (req.method == "GET" && req.target.endsWith(FileName.META.fileName)) {
                 downloads++
                 if (downloads == 1) assertTrue(loadCheckpoint(checkpoint).records.isEmpty())
-                if (downloads == 2) dropped() else response
+                if (downloads >= 2) dropped() else response
             } else response
         }
         assertTrue(runBlocking { engine().resolveBulk(listOf(aid, bid), true) }.errors.isNotEmpty())

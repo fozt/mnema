@@ -5,6 +5,9 @@ import dev.mnema.app.server.Connection
 import dev.mnema.app.server.RunnerClient
 import dev.mnema.app.server.parseConnection
 import java.io.IOException
+import java.io.InterruptedIOException
+import java.net.ConnectException
+import java.net.UnknownHostException
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.serialization.DeserializationStrategy
 import kotlinx.serialization.json.jsonObject
@@ -20,7 +23,7 @@ import okhttp3.Response
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
-/** One selected server; an ambiguous reply is checked by the next sync, not by retrying an HTTP write. */
+/** One selected server; an ambiguous reply to a write is checked by the next sync, not by retrying the write. */
 class LibraryClient(connection: Connection, http: OkHttpClient? = null) : AutoCloseable {
     private val connection = connection.copy(url = parseConnection(connection.url).url)
     val server: String get() = connection.url
@@ -84,17 +87,11 @@ class LibraryClient(connection: Connection, http: OkHttpClient? = null) : AutoCl
 
     private data class Reply(val code: Int, val headers: Headers, val bytes: ByteArray)
     private suspend fun send(request: Request): Reply {
-        val reply = suspendCancellableCoroutine { continuation ->
-            val call = http.newCall(request)
-            continuation.invokeOnCancellation { call.cancel() }
-            call.enqueue(object : Callback {
-                override fun onFailure(call: Call, e: IOException) { continuation.resumeWithException(unreachable()) }
-                override fun onResponse(call: Call, response: Response) {
-                    val result = try { response.use { Reply(it.code, it.headers, it.body.bytes()) } }
-                    catch (_: IOException) { continuation.resumeWithException(unreachable()); return }
-                    continuation.resume(result)
-                }
-            })
+        val reply = try { exchange(request) } catch (e: IOException) {
+            // a read is sent again once over a new connection when the pooled one was dropped before any reply
+            if (e is SyncException || request.method != "GET" || e is ConnectException || e is UnknownHostException || e is InterruptedIOException) throw unreachable()
+            http.connectionPool.evictAll()
+            try { exchange(request) } catch (_: IOException) { throw unreachable() }
         }
         when (reply.code) {
             in 200..299 -> return reply
@@ -103,6 +100,19 @@ class LibraryClient(connection: Connection, http: OkHttpClient? = null) : AutoCl
             401, 403 -> throw SyncException(tr("A new invitation from the server is needed"))
             else -> throw SyncException(tr("Could not read or change the server library"))
         }
+    }
+
+    private suspend fun exchange(request: Request): Reply = suspendCancellableCoroutine { continuation ->
+        val call = http.newCall(request)
+        continuation.invokeOnCancellation { call.cancel() }
+        call.enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) { continuation.resumeWithException(e) }
+            override fun onResponse(call: Call, response: Response) {
+                val result = try { response.use { Reply(it.code, it.headers, it.body.bytes()) } }
+                catch (_: IOException) { continuation.resumeWithException(unreachable()); return }
+                continuation.resume(result)
+            }
+        })
     }
 
     private fun <T> decode(reply: Reply, serializer: DeserializationStrategy<T>): T = try {

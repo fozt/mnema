@@ -782,6 +782,32 @@ def test_serve_does_not_load_speech_engines_at_start(monkeypatch, tmp_path):
                 handler.close()
 
 
+def test_serve_keeps_idle_connections_longer_than_clients_pool_them(monkeypatch, tmp_path):
+    """With uvicorn's own 5 s the server closed a connection the phone (30 s pool) or httpx (5 s)
+    was about to reuse, and the phone's sync said the server was unavailable."""
+    import logging
+    import threading
+
+    import httpx
+    import uvicorn
+
+    from mnema.cli.commands import cmd_serve
+
+    monkeypatch.setattr(threading.Thread, "start", lambda thread: thread.run())
+    logger = logging.getLogger("mnema")
+    handlers = logger.handlers[:]
+    try:
+        with patch("uvicorn.run") as run:
+            cmd_serve(_serve_args("127.0.0.1", dir_=str(tmp_path)))
+    finally:
+        for handler in logger.handlers[:]:
+            if handler not in handlers:
+                logger.removeHandler(handler)
+                handler.close()
+    served = uvicorn.Config(*run.call_args.args, **run.call_args.kwargs)
+    assert served.timeout_keep_alive > max(30, httpx.Limits().keepalive_expiry or 0)
+
+
 def test_serve_takes_this_computers_server_token_not_the_client_token(tmp_path, monkeypatch):
     """`mnema serve` on a PC connected to a VPS: the MNEMA_TOKEN line of ~/.config/mnema/.env is
     this device's token at the VPS; its own server admits by its own token (server.env)."""
