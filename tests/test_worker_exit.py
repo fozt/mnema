@@ -85,11 +85,17 @@ input()
 
 
 def test_parent_kill_during_streaming_warmup_stops_model_process(tmp_path):
-    log = tmp_path / "wlk.log"
+    from mnema.core import parakeet
+
+    log = tmp_path / "live.log"
+    folder = tmp_path / "onnx"
+    folder.mkdir()
+    for name in parakeet.ONNX_FILES:
+        (folder / name).write_text("<blk> 0\n")
     code = """
 import json, time
 from mnema.live.asr import StreamingTranscriber
-transcriber = StreamingTranscriber(model='wait')
+transcriber = StreamingTranscriber()
 transcriber.start_warmup()
 while transcriber._worker is None:
     time.sleep(0.01)
@@ -99,7 +105,9 @@ input()
     env = {
         **os.environ,
         "PYTHONPATH": os.pathsep.join([str(Path(__file__).parent / "stubs"), os.getcwd()]),
-        "MNEMA_TEST_WLK_LOG": str(log),
+        "MNEMA_TEST_LIVE_LOG": str(log),
+        "MNEMA_TEST_LIVE_MODE": "wait",
+        "MNEMA_PARAKEET_ONNX_DIR": str(folder),
     }
     parent = subprocess.Popen(
         [sys.executable, "-c", code],

@@ -272,16 +272,28 @@ def _no_update_network(monkeypatch):
 
 
 @pytest.fixture
-def wlk_process(monkeypatch, tmp_path):
-    """Real child processes with the external WhisperLiveKit stub."""
+def live_process(monkeypatch, tmp_path):
+    """Real live session processes with the external onnxruntime stub (tests/stubs): started()
+    and stopped() wait for the encoder rows, word() sets the word the stub recognizes."""
     import json
     import os
     import time
     from pathlib import Path
+    from types import SimpleNamespace
 
-    log = tmp_path / "wlk-processes.jsonl"
+    from mnema.core import parakeet
+
+    log = tmp_path / "live-processes.jsonl"
+    folder = tmp_path / "live-onnx"
+    folder.mkdir()
+    for name in parakeet.ONNX_FILES:
+        (folder / name).write_bytes(b"graph")
     monkeypatch.setenv("PYTHONPATH", str(Path(__file__).parent / "stubs"))
-    monkeypatch.setenv("MNEMA_TEST_WLK_LOG", str(log))
+    monkeypatch.setenv("MNEMA_TEST_LIVE_LOG", str(log))
+    monkeypatch.setenv("MNEMA_PARAKEET_ONNX_DIR", str(folder))
+
+    def word(text):
+        (folder / parakeet.VOCAB).write_text(f"\u2581{text} 0\n<blk> 1\n", encoding="utf-8")
 
     def started(count=1):
         deadline = time.monotonic() + 10
@@ -292,7 +304,7 @@ def wlk_process(monkeypatch, tmp_path):
             if len(rows) >= count:
                 return rows
             time.sleep(0.01)
-        pytest.fail("the WLK child process did not start")
+        pytest.fail("the live process did not start")
 
     def stopped(count=1):
         rows = started(count)
@@ -301,7 +313,8 @@ def wlk_process(monkeypatch, tmp_path):
                 os.kill(row["pid"], 0)
         return rows
 
-    return started, stopped
+    word("hello")
+    return SimpleNamespace(started=started, stopped=stopped, word=word)
 
 
 @pytest.fixture

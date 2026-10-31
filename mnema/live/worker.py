@@ -1,11 +1,10 @@
-"""Child process of one WhisperLiveKit streaming session."""
+"""Child process of one live session: Parakeet on ONNX, phrase by phrase (live/asr.py)."""
 
 from __future__ import annotations
 
 import base64
 import contextlib
 import json
-import os
 import queue
 import sys
 import threading
@@ -23,32 +22,25 @@ def main() -> None:
         def read_input() -> None:
             for line in sys.stdin:
                 incoming.put(line)
-            # The parent is gone and will never close us, even while warmup is loading
-            # the model: remove ourselves and the ffmpeg children now.
+            # The parent is gone and will never close us, even while the model is loading:
+            # remove ourselves now.
             parent_gone()
 
         threading.Thread(target=read_input, name="live-input", daemon=True).start()
         with contextlib.redirect_stdout(sys.stderr):
-            from ..core.backends import _asr_cpu_threads
-            from ..core.settings import asr_thread_budget
+            from .asr import PhraseTranscriber
 
-            with asr_thread_budget(options.get("threads")):
-                # WLK does not pass cpu_threads to faster-whisper; CT2 takes its budget
-                # from OMP_NUM_THREADS. Set only in this child, before the heavy imports.
-                os.environ["OMP_NUM_THREADS"] = str(_asr_cpu_threads())
-                from .asr import _InProcessTranscriber
-
-                transcriber = _InProcessTranscriber(**options)
-                transcriber.warmup()
-                emit({"type": "ready"})
-                while True:
-                    request = json.loads(incoming.get())
-                    if request["type"] == "finish":
-                        result = transcriber.finish()
-                        emit({"type": "done", "value": result.model_dump()})
-                        return
-                    transcriber.feed(base64.b64decode(request["pcm"], validate=True))
-                    emit({"type": "chunk", "value": transcriber.poll().model_dump()})
+            transcriber = PhraseTranscriber(**options)
+            transcriber.warmup()
+            emit({"type": "ready"})
+            while True:
+                request = json.loads(incoming.get())
+                if request["type"] == "finish":
+                    result = transcriber.finish()
+                    emit({"type": "done", "value": result.model_dump()})
+                    return
+                transcriber.feed(base64.b64decode(request["pcm"], validate=True))
+                emit({"type": "chunk", "value": transcriber.poll().model_dump()})
     except Exception as exc:
         import logging
 

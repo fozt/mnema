@@ -260,10 +260,10 @@ def test_one_user_cannot_take_every_waiting_place(srv):
     assert _job(srv, "owner", op="wait", path=_upload(srv, "owner")).status_code == 200
 
 
-def test_live_text_takes_devices_of_users_until_removed(srv, wlk_process):
+def test_live_text_takes_devices_of_users_until_removed(srv, live_process):
     with srv.client.websocket_connect("/api/live", headers=srv.h["anna"]) as ws:
         assert ws.receive_json() == {"type": "ready"}
-    wlk_process[1]()
+    live_process.stopped()
     assert srv.app.state.devices.remove_user("anna") is True
     with (
         pytest.raises(WebSocketDisconnect) as refused,

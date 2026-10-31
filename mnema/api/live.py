@@ -20,7 +20,7 @@ from .auth import NODE, bearer, caller
 logger = logging.getLogger(__name__)
 # the client sends PCM only after ready, so idle time counts from ready
 _LIVE_IDLE_TIMEOUT = 120.0
-# the child waits 120 s for the model itself; the margin covers its start and a hang before warmup
+# loading the model takes seconds (a missing one is refused at once): this is a hang
 _LIVE_WARMUP_TIMEOUT = 180.0
 
 
@@ -41,12 +41,7 @@ def register_live_routes(app: FastAPI) -> None:
 
     async def _live(ws: WebSocket) -> None:
         await ws.accept()
-        transcriber = StreamingTranscriber(
-            lang=ws.query_params.get("lang") or None,
-            policy="simulstreaming",
-            model="large-v3",
-            backend="whisper",
-        )
+        transcriber = StreamingTranscriber(lang=ws.query_params.get("lang") or None)
 
         heard = time.monotonic()
 

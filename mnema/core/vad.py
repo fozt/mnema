@@ -14,7 +14,7 @@ from typing import Any
 
 SR = 16000
 MODEL = Path(__file__).with_name("silero_vad.onnx")
-_WINDOW, _CONTEXT = 512, 64
+WINDOW, _CONTEXT = 512, 64  # samples of one probability and of the context before it
 _THRESHOLD = 0.5
 _MIN_SPEECH_MS, _MIN_SILENCE_MS, _PAD_MS, _MIN_SILENCE_AT_MAX_MS = 250, 100, 30, 98
 
@@ -43,24 +43,36 @@ def _session() -> Any:
         return _SESSION
 
 
-def probabilities(audio: Any) -> list[float]:
-    """Speech probability of every 512-sample window (the last one padded with zeros)."""
-    import numpy as np
+class Stream:
+    """Speech probabilities of a stream, window after window: the model state and context go
+    from one window to the next, so a track fed in pieces gets what probabilities() gives."""
 
-    session = _session()
-    state = np.zeros((2, 1, 128), np.float32)
-    context = np.zeros(_CONTEXT, np.float32)
-    sr = np.array(SR, np.int64)
-    probs: list[float] = []
-    for start in range(0, len(audio), _WINDOW):
-        chunk = np.zeros(_WINDOW, np.float32)
-        piece = audio[start : start + _WINDOW]
+    def __init__(self) -> None:
+        import numpy as np
+
+        self._session = _session()
+        self._state = np.zeros((2, 1, 128), np.float32)
+        self._context = np.zeros(_CONTEXT, np.float32)
+        self._sr = np.array(SR, np.int64)
+
+    def window(self, piece: Any) -> float:
+        """The probability of the next ≤ WINDOW samples (a shorter piece is padded with zeros)."""
+        import numpy as np
+
+        chunk = np.zeros(WINDOW, np.float32)
         chunk[: len(piece)] = piece
-        x = np.concatenate([context, chunk])[None]
-        out, state = session.run(None, {"input": x, "state": state, "sr": sr})
-        probs.append(float(np.float32(out[0, 0])))
-        context = chunk[-_CONTEXT:]
-    return probs
+        x = np.concatenate([self._context, chunk])[None]
+        out, self._state = self._session.run(
+            None, {"input": x, "state": self._state, "sr": self._sr}
+        )
+        self._context = chunk[-_CONTEXT:]
+        return float(np.float32(out[0, 0]))
+
+
+def probabilities(audio: Any) -> list[float]:
+    """Speech probability of every WINDOW-sample window (the last one padded with zeros)."""
+    stream = Stream()
+    return [stream.window(audio[start : start + WINDOW]) for start in range(0, len(audio), WINDOW)]
 
 
 def speech_timestamps(audio: Any, *, max_speech_duration_s: float = math.inf) -> list[dict]:
@@ -74,7 +86,7 @@ def timestamps(
     """Window probabilities → spans; silero 6.2.1 line by line (use_max_poss_sil_at_max_speech)."""
     min_speech = SR * _MIN_SPEECH_MS / 1000
     pad = SR * _PAD_MS / 1000
-    max_speech = SR * max_speech_duration_s - _WINDOW - 2 * pad
+    max_speech = SR * max_speech_duration_s - WINDOW - 2 * pad
     min_silence = SR * _MIN_SILENCE_MS / 1000
     min_silence_at_max = SR * _MIN_SILENCE_AT_MAX_MS / 1000
     neg_threshold = max(_THRESHOLD - 0.15, 0.01)
@@ -86,7 +98,7 @@ def timestamps(
     possible_ends: list[tuple[int, int]] = []
 
     for i, prob in enumerate(probs):
-        cur = _WINDOW * i
+        cur = WINDOW * i
         if prob >= _THRESHOLD and temp_end:
             silence = cur - temp_end
             if silence > min_silence_at_max:

@@ -2,7 +2,8 @@
 
 The boundary is the node's HTTP API and WebSocket (TestClient) with a device of the owner and
 one of anna; each has her model in users/<name>.env. External boundaries are mocked:
-litellm.completion, the providers' network (providers.TRANSPORT) and the WLK child (stub).
+litellm.completion, the providers' network (providers.TRANSPORT) and onnxruntime of the live
+process (stub).
 """
 
 from __future__ import annotations
@@ -116,7 +117,7 @@ def test_each_user_sees_her_own_model(srv):
 
 
 def test_every_server_answer_works_in_the_server_mode_with_the_user_keys(
-    srv, monkeypatch, caplog, wlk_process
+    srv, monkeypatch, caplog, live_process
 ):
     """No route or queued job of the server mode is left without a user (that would be a
     RuntimeError); each works with the asking user's model and keys, and no answer, remark or
@@ -163,10 +164,13 @@ def test_every_server_answer_works_in_the_server_mode_with_the_user_keys(
 
     with c.websocket_connect("/api/live?lang=ru", headers=anna) as ws:
         assert ws.receive_json() == {"type": "ready"}
-        ws.send_bytes(b"audio")
+        ws.send_bytes(b"\x00\x40\x00\xc0" * 8000)  # a second of loud PCM
         ws.send_json({"type": "end"})
-        assert [s["text"] for s in ws.receive_json()["committed"]] == ["hello"]
-    wlk_process[1]()
+        texts = []
+        while not texts:
+            texts = [s["text"] for s in ws.receive_json()["committed"]]
+        assert texts == [" hello"]
+    live_process.stopped()
 
     shown = [a.text for a in answers] + [str(job)] + [caplog.text]
     for key in (OWNER_KEY, ANNA_KEY, ANNA_ASR_KEY):
