@@ -29,11 +29,11 @@ dependencies = [
 [project.optional-dependencies]
 # Recognition engines, one extra each: Engine.extra in mnema/core/backends.py names it, and
 # mnema/extras.py says which of them the Mac app ships.
+# Parakeet Ultra and the silero VAD on ONNX Runtime (CPU); the weights come from the HF hub
 parakeet = [
-    "parakeet-mlx>=0.5.3; sys_platform == 'darwin' and platform_machine == 'arm64'",  # Ultra on the GPU
-    "transformers>=4.57",  # ParakeetEncoder on Linux; tokenizers and safetensors everywhere
-    "silero-vad",  # splits long recordings at pauses (offline, no gated models or HF_TOKEN)
-    "torch; sys_platform == 'linux'",
+    "onnxruntime>=1.20",
+    "numpy",
+    "huggingface_hub",
 ]
 whisper = [
     "mlx-whisper; sys_platform == 'darwin'",   # Whisper on Apple Silicon
@@ -106,8 +106,6 @@ build-backend = "hatchling.build"
 
 [tool.uv]
 override-dependencies = [
-    # transformers 5 on macOS for ParakeetEncoder.
-    "transformers>=5.0.0; sys_platform == 'darwin'",
     # WhisperX on Linux needs huggingface-hub <1, which transformers 5 does not support.
     "transformers>=4.57,<5; sys_platform == 'linux'",
 ]

@@ -13,7 +13,7 @@ from mnema.core.base import MediaError
 from mnema.core.models import Transcript
 from mnema.server import create_app
 
-_REAL_ENGINES = ("torch", "silero_vad", "gigaam", "mlx_whisper", "whisperx", "mlx")
+_REAL_ENGINES = ("onnxruntime", "gigaam", "mlx_whisper", "whisperx", "mlx")
 
 
 class Klingon(backends.Engine):

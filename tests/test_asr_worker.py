@@ -222,26 +222,22 @@ suppress_debug_info = False
 def transcription(**kw):
     return {"text": "услышано с ключом " + kw["api_key"]}
 """,
-    "silero_vad.py": """
-def load_silero_vad():
-    return object()
-def get_speech_timestamps(audio, model, **kw):
-    return [{"start": 0, "end": 16000}]
-""",
-    "torch.py": """
+    "onnxruntime.py": """
 import numpy
-def get_num_threads():
-    return 1
-def set_num_threads(n):
+class SessionOptions:
     pass
-from_numpy = numpy.asarray
+class InferenceSession:  # silero hears speech everywhere
+    def __init__(self, path, options=None, providers=None):
+        pass
+    def run(self, names, feeds):
+        return [numpy.array([[0.9]], numpy.float32), feeds["state"]]
 """,
 }
 
 
 def test_real_worker_gives_the_key_from_the_pipe_to_the_cloud_engine(monkeypatch, tmp_path):
     """The real recognition process: the key sent with the job is the one the OpenAI request
-    carries. The child's boundaries are stubs: litellm, silero-vad, torch and ffprobe."""
+    carries. The child's boundaries are stubs: litellm, onnxruntime and ffprobe."""
     import wave
 
     from mnema import config
@@ -291,7 +287,7 @@ except MediaError:
     pass
 else:
     raise AssertionError('missing file must fail')
-assert not any(x in sys.modules for x in ('torch', 'transformers', 'mlx.core', 'silero_vad'))
+assert not any(x in sys.modules for x in ('torch', 'transformers', 'onnxruntime', 'mlx.core'))
 """
     subprocess.run(
         [sys.executable, "-c", code, str(tmp_path / "missing.wav")], check=True, timeout=15

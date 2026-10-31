@@ -64,6 +64,8 @@ class RuntimeSettings(BaseSettings):
     asr_threads: ASRThreads | None = Field(default=None, validation_alias="MNEMA_ASR_THREADS")
     # Log level of mnema.* (runner and its worker processes); independent of uvicorn's level.
     log_level: str = Field(default="INFO", validation_alias="MNEMA_LOG_LEVEL")
+    # A folder with ready Parakeet ONNX files instead of the download (same names).
+    parakeet_onnx_dir: Path | None = Field(default=None, validation_alias="MNEMA_PARAKEET_ONNX_DIR")
 
     @classmethod
     def settings_customise_sources(

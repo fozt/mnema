@@ -34,7 +34,7 @@ def local_packages(monkeypatch):
             object()
             if n in ("gigaam", "whisperx")
             else None
-            if n in ("silero_vad", "mlx_whisper")
+            if n in ("onnxruntime", "mlx_whisper")
             else find(n, *a, **kw)
         ),
     )
@@ -91,7 +91,7 @@ def test_uninstalled_engines_are_not_offered(monkeypatch):
         importlib.util,
         "find_spec",
         lambda n, *a, **kw: (
-            None if n in ("gigaam", "whisperx", "silero_vad", "mlx_whisper") else find(n, *a, **kw)
+            None if n in ("gigaam", "whisperx", "onnxruntime", "mlx_whisper") else find(n, *a, **kw)
         ),
     )
     assert node_settings.asr_choices() == []

@@ -38,7 +38,7 @@ def test_asr_options_come_from_the_server_or_this_mac(tmp_path, monkeypatch, sta
     monkeypatch.setenv("MNEMA_RUNNER", "http://remote-node:8765")
     monkeypatch.setenv("MNEMA_TOKEN", "remote-token")
     find = importlib.util.find_spec
-    engines = {"gigaam": object(), "torch": None, "whisperx": None, "mlx_whisper": None}
+    engines = {"gigaam": object(), "onnxruntime": None, "whisperx": None, "mlx_whisper": None}
     monkeypatch.setattr(  # only GigaAM is installed
         importlib.util,
         "find_spec",
@@ -170,7 +170,7 @@ def test_mac_without_gigaam_works_a_saved_gigaam_as_automatic(tmp_path, monkeypa
     monkeypatch.setattr(base, "STANDALONE", True)
     monkeypatch.setenv("MNEMA_RUNNER", "http://remote-node:8765")
     find = importlib.util.find_spec
-    engines = {"gigaam": None, "silero_vad": None, "mlx_whisper": None, "whisperx": object()}
+    engines = {"gigaam": None, "onnxruntime": None, "mlx_whisper": None, "whisperx": object()}
     monkeypatch.setattr(
         importlib.util,
         "find_spec",

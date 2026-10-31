@@ -1,26 +1,25 @@
-"""Cloud recognition is an engine: silero-vad cuts the track into utterances, each one is a single
-OpenAI request with the track's previous text as a prompt. The boundaries are
-litellm.transcription, silero-vad and torch."""
+"""Cloud recognition is an engine: this machine's speech search cuts the track into utterances,
+each one is a single OpenAI request with the track's previous text as a prompt. The boundaries
+are litellm.transcription and this machine's recognizer (on the server, the silero session)."""
 
 from __future__ import annotations
 
 import importlib.util
 import io
-import sys
 import threading
 import types
 import wave
 
 import httpx
 import litellm
-import numpy as np
 import pytest
 
 from mnema.cli.parser import build_parser
-from mnema.core import backends
+from mnema.core import asr_engine, backends
 from mnema.core.base import MediaError
 from mnema.core.models import Transcript
 from mnema.live import remarks
+from tests import onnx_stubs
 
 SR = 16000
 KEY = "sk-proj-cloud-engine-test"
@@ -28,19 +27,14 @@ KEY = "sk-proj-cloud-engine-test"
 
 @pytest.fixture
 def speech(monkeypatch):
-    """silero-vad finds the given speech spans (seconds) in any audio."""
+    """This machine's speech search finds the given spans (seconds) in any track."""
     spans: list[tuple[float, float]] = []
-    torch = types.SimpleNamespace(
-        from_numpy=np.asarray, get_num_threads=lambda: 1, set_num_threads=lambda n: None
-    )
-    vad = types.SimpleNamespace(
-        load_silero_vad=lambda: object(),
-        get_speech_timestamps=lambda *a, **k: [
-            {"start": int(s * SR), "end": int(e * SR)} for s, e in spans
-        ],
-    )
-    monkeypatch.setitem(sys.modules, "torch", torch)
-    monkeypatch.setitem(sys.modules, "silero_vad", vad)
+
+    class Recognizer:
+        def speech(self, wav, *, max_s):
+            return [(int(s * SR), int(e * SR)) for s, e in spans]
+
+    monkeypatch.setattr(asr_engine, "local_recognizer", Recognizer)
     return spans
 
 
@@ -171,7 +165,7 @@ def test_automatic_choice_never_goes_to_the_cloud(monkeypatch) -> None:
     listed among this machine's engines; the CLI takes both OpenAI models by name."""
     find = importlib.util.find_spec
     monkeypatch.setattr(
-        importlib.util, "find_spec", lambda n, *a, **k: object() if n == "silero_vad" else find(n)
+        importlib.util, "find_spec", lambda n, *a, **k: object() if n == "onnxruntime" else find(n)
     )
     monkeypatch.setattr(backends, "ENGINES", (backends.CloudBackend,))
     with pytest.raises(MediaError):
@@ -180,3 +174,16 @@ def test_automatic_choice_never_goes_to_the_cloud(monkeypatch) -> None:
     for model in backends.CLOUD_MODELS:
         args = build_parser().parse_args(["transcribe", "call.mp3", "--backend", model])
         assert backends.select_backend(args.backend).name == model
+
+
+def test_on_the_server_the_track_is_cut_where_silero_hears_speech(tmp_path, sent, monkeypatch):
+    """Without a Mac helper the pauses come from the silero session: one request for the
+    speech it heard, timed by its spans."""
+    onnx_stubs.install(
+        monkeypatch, silero_vad=onnx_stubs.silero(onnx_stubs.speech_probs([(1, 3)], 4))
+    )
+    tr = _recognize(_track(tmp_path / "mic.wav", 4))
+    assert len(sent.calls) == 1 and sent.calls[0]["seconds"] == pytest.approx(2.0, abs=0.1)
+    (segment,) = tr.segments
+    assert segment.start == pytest.approx(1.0, abs=0.05)
+    assert segment.end == pytest.approx(3.0, abs=0.05)
