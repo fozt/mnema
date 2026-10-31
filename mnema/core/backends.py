@@ -10,12 +10,15 @@ from __future__ import annotations
 import logging
 import tempfile
 import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any, ClassVar, Protocol, runtime_checkable
 
 from ..i18n import _
 from . import asr_engine, base, parakeet, vad
-from .asr_engine import REPLY_GAP_S, SR, group_speech
+from .asr_engine import REPLY_GAP_S, SR, Word, group_speech
 from .audio import extract_audio
 from .base import MediaError, Progress, noop
 from .models import Segment, Transcript
@@ -132,15 +135,80 @@ class ParakeetBackend(Engine):
         without a hint; without one the language is named from the recognized text."""
         if not self.supports(lang):
             raise OnlyCloud
-        with tempfile.TemporaryDirectory() as tmp:
-            wav = extract_audio(src, Path(tmp) / "audio.wav", pad_start_ms=300, on=on)
-            words = asr_engine.local_recognizer().words(wav, on=on)
+        words = _words_together(src)
+        if words is None:
+            with tempfile.TemporaryDirectory() as tmp:
+                wav = _track_wav(src, Path(tmp) / "audio.wav", on)
+                words = asr_engine.local_recognizer().words(wav, on=on)
         segments = asr_engine.replies(words)
         if lang is None:
             lang = parakeet.guess_lang(" ".join(s.text for s in segments))
         segments = parakeet.tidy(segments, lang)
         text = " ".join(s.text for s in segments).strip()
         return Transcript(text=text, segments=segments, language=lang)
+
+
+def _track_wav(src: Path, dst: Path, on: Progress) -> Path:
+    return extract_audio(src, dst, pad_start_ms=300, on=on)
+
+
+class _Together:
+    """Tracks of one recording for one mnema-asr request; words are kept until asked for."""
+
+    def __init__(self, sources: list[Path], on: Progress) -> None:
+        self.sources = [s.resolve() for s in sources]
+        self.on = on
+        self.words: dict[Path, list[Word]] | None = None
+        self.failed = False
+
+    def recognize(self) -> dict[Path, list[Word]]:
+        from .mac_helper import MacHelper
+
+        def extracting(fraction: float | None, message: str) -> None:
+            self.on(None, message)  # the share of the recognition, not of the extraction
+
+        with tempfile.TemporaryDirectory() as tmp:
+            wavs = [
+                _track_wav(s, Path(tmp) / f"{i}.wav", extracting)
+                for i, s in enumerate(self.sources)
+            ]
+            tracks = MacHelper().tracks(wavs, on=self.on)
+        return dict(zip(self.sources, tracks, strict=True))
+
+
+_TOGETHER: ContextVar[_Together | None] = ContextVar("mnema_tracks_together", default=None)
+
+
+@contextmanager
+def recognized_together(sources: list[Path], on: Progress = noop) -> Iterator[None]:
+    """On the Mac, Parakeet recognizes the tracks of one recording in one mnema-asr request, so
+    the model loads once: the first track asked for brings the words of all of them (progress
+    over all tracks goes to on, a stop from on stops the helper), the others take theirs. A
+    failed request leaves each later track to its own request. Elsewhere, and for the cloud,
+    every track goes as before."""
+    if not base.STANDALONE or len(sources) < 2:
+        yield
+        return
+    token = _TOGETHER.set(_Together(sources, on))
+    try:
+        yield
+    finally:
+        _TOGETHER.reset(token)
+
+
+def _words_together(src: Path) -> list[Word] | None:
+    """The track's words from the recording's one request, or None: recognize it alone."""
+    together = _TOGETHER.get()
+    key = src.resolve()
+    if together is None or together.failed or key not in together.sources:
+        return None
+    if together.words is None:
+        try:
+            together.words = together.recognize()
+        except MediaError:
+            together.failed = True
+            raise
+    return together.words.pop(key, None)
 
 
 # OpenAI in the cloud: the user's choice is the model, the key is the user's recognition key

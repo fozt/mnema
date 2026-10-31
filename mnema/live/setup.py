@@ -609,50 +609,71 @@ def _refine_tracks(
     langs = {track.label: chosen for track, _wav in candidates}
     if on_lang is not None and chosen:
         on_lang(dict.fromkeys(langs, chosen))
-    slices = phased(on_asr, *([1.0] * len(candidates)))
-    t_asr = time.monotonic()
-    for (track, wav), sl in zip(candidates, slices, strict=True):
-        lang = langs[track.label]
-        entry = run.tracks[track.label] = _meta.TrackRun(lang=lang, seconds=_wav_length(wav))
-        sl(None, _recognizing(track.label))
+    reached = [0.0]
 
-        def track_progress(
-            fraction: float | None, message: str, *, _sl=sl, _label=track.label
-        ) -> None:
+    def forward(fraction: float | None, message: str) -> None:
+        # never back: one request recognizes every track while the first is being asked for
+        if fraction is not None:
+            fraction = reached[0] = max(reached[0], fraction)
+        on_asr(fraction, message)
+
+    def progress_of(sl: Progress, label: str) -> Progress:
+        def track_progress(fraction: float | None, message: str) -> None:
             generic = message in (RECOGNIZING, _(RECOGNIZING))
-            _sl(fraction, _recognizing(_label) if generic else message)
+            sl(fraction, _recognizing(label) if generic else message)
 
-        t0 = time.monotonic()
-        try:
-            segs, tr = _refine_track(prepared, track, wav, track_progress, lang)
-            # Step timings go to the log (bar.log), so slow steps are easy to find.
-            logger.info(
-                "recognition %s: %.0f s for ~%.0f s of audio",
-                track.label, time.monotonic() - t0, wav.stat().st_size / 32000,
-            )  # fmt: skip
-        except Exception as e:  # noqa: BLE001 - fall back to the live text, finalization goes on
-            live_kept = any(s.text.strip() for s in track.committed)
-            # The reason in the user's words (cloud: "request limit exceeded"); details go to
-            # the log, since engine text may point to the terminal.
-            entry.error = str(e) if isinstance(e, _NoSpeech) else _remarks.node_asr_reason(e)
-            logger.warning("could not recognize track %s", track.label, exc_info=True)
-            if isinstance(e, _NoSpeech):
-                warnings.append(_remarks.asr_no_speech(track.label, live_kept=live_kept))
-            else:
-                warnings.append(_remarks.asr_failed(track.label, e, live_kept=live_kept))
+        return track_progress
+
+    slices = phased(forward, *([1.0] * len(candidates)))
+    progress = [
+        progress_of(sl, track.label) for (track, _wav), sl in zip(candidates, slices, strict=True)
+    ]
+
+    def together(fraction: float | None, message: str) -> None:
+        """A fraction of all tracks in one request → the slice of the track it is in."""
+        count = len(progress)
+        index = 0 if fraction is None else min(int(fraction * count), count - 1)
+        progress[index](None if fraction is None else fraction * count - index, message)
+
+    from ..core.backends import recognized_together
+
+    t_asr = time.monotonic()
+    with recognized_together([wav for _track, wav in candidates], on=together):
+        for (track, wav), sl, track_progress in zip(candidates, slices, progress, strict=True):
+            lang = langs[track.label]
+            entry = run.tracks[track.label] = _meta.TrackRun(lang=lang, seconds=_wav_length(wav))
+            sl(None, _recognizing(track.label))
+            t0 = time.monotonic()
+            try:
+                segs, tr = _refine_track(prepared, track, wav, track_progress, lang)
+                # Step timings go to the log (bar.log), so slow steps are easy to find.
+                logger.info(
+                    "recognition %s: %.0f s for ~%.0f s of audio",
+                    track.label, time.monotonic() - t0, wav.stat().st_size / 32000,
+                )  # fmt: skip
+            except Exception as e:  # noqa: BLE001 - fall back to the live text, finalization goes on
+                live_kept = any(s.text.strip() for s in track.committed)
+                # The reason in the user's words (cloud: "request limit exceeded"); details go
+                # to the log, since engine text may point to the terminal.
+                entry.error = str(e) if isinstance(e, _NoSpeech) else _remarks.node_asr_reason(e)
+                logger.warning("could not recognize track %s", track.label, exc_info=True)
+                if isinstance(e, _NoSpeech):
+                    warnings.append(_remarks.asr_no_speech(track.label, live_kept=live_kept))
+                else:
+                    warnings.append(_remarks.asr_failed(track.label, e, live_kept=live_kept))
+                sl(1.0, "")
+                continue
+            entry.engine = tr.engine
+            entry.lang = tr.language or lang
+            if entry.lang:
+                languages[track.label] = entry.lang
+            track.committed = segs
+            # An empty result over empty live text (rec mode: NullTranscriber) is NOT refined:
+            # otherwise the UI would take emptiness for success (_refine_track's guard is
+            # silent without live text).
+            if segs:
+                refined.append(track.label)
             sl(1.0, "")
-            continue
-        entry.engine = tr.engine
-        entry.lang = tr.language or lang
-        if entry.lang:
-            languages[track.label] = entry.lang
-        track.committed = segs
-        # An empty result over empty live text (rec mode: NullTranscriber) is NOT refined:
-        # otherwise the UI would take emptiness for success (_refine_track's guard is silent
-        # without live text).
-        if segs:
-            refined.append(track.label)
-        sl(1.0, "")
     run.steps["asr"] = _took(t_asr)
     if on_lang is not None and not chosen and languages:
         on_lang(dict(languages))

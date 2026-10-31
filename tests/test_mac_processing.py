@@ -652,3 +652,94 @@ def test_mac_recognizes_through_mnema_asr_and_fetches_the_model_first(
     assert helper.config()["installed"]["parakeet"]
     run = meta.last(result.base)
     assert run is not None and {t.engine for t in run.tracks.values()} == {"parakeet"}
+
+
+def _mac_helper(monkeypatch, tmp_path, **config):
+    """mnema-asr of Mnema.app (the stub) with the model downloaded; ffprobe and ffmpeg stubbed."""
+    import importlib
+
+    from mnema.core import backends, mac_helper
+    from mnema.core.probe import MediaInfo
+    from tests.mac_helper_stub import Helper
+
+    transcribe_mod = importlib.import_module("mnema.core.transcribe")
+    monkeypatch.setattr(mac_helper.platform, "machine", lambda: "arm64")
+    helper = Helper(tmp_path / "app")
+    helper.configure(**config)
+    monkeypatch.setenv("MNEMA_ASR", str(helper.path))
+    monkeypatch.setattr(
+        transcribe_mod,
+        "probe",
+        lambda p: MediaInfo(path=p, duration=1.0, size=1, audio_codec="pcm", video_codec=None),
+    )
+    monkeypatch.setattr(backends, "extract_audio", lambda s, d, **kw: Path(shutil.copyfile(s, d)))
+    return helper
+
+
+_TWO_TRACKS = {
+    "tracks": [
+        {"words": [{"text": "Привет,", "start": 0.0, "end": 0.4}]},
+        {"words": [{"text": "Здравствуйте.", "start": 0.5, "end": 0.9}]},
+    ]
+}
+
+
+def test_mac_recognizes_both_tracks_with_one_model_load(monkeypatch, tmp_path, sources) -> None:
+    """Both tracks of a recording go to mnema-asr in one request; each gets its own words,
+    language, engine and progress line."""
+    helper = _mac_helper(monkeypatch, tmp_path, result={"transcribe": _TWO_TRACKS})
+    _model(monkeypatch)
+    steps: list[str] = []
+    folder = _recording(tmp_path / "mac")
+    result, _full = recording_client.recover_on_node(
+        folder,
+        LiveConfig(mix_audio=False),
+        None,
+        on=lambda fraction, message: steps.append(message),
+    )
+    [call] = helper.calls()
+    assert call["request"]["operation"] == "transcribe"
+    assert len(call["request"]["payload"]["wavs"]) == 2
+    transcript = (result.base / "transcript.txt").read_text(encoding="utf-8")
+    assert "Привет," in transcript and "Здравствуйте." in transcript
+    run = meta.last(result.base)
+    assert run is not None and set(run.tracks) == {"mic", "system"}
+    assert {(t.engine, t.lang) for t in run.tracks.values()} == {("parakeet", "ru")}
+    assert {"Распознаю микрофон…", "Распознаю системный звук…"} <= set(steps)
+
+
+def test_a_failed_request_of_both_tracks_is_told_per_track(monkeypatch, tmp_path, sources):
+    """The helper could not read the audio: each track has its own remark (the second one tried
+    alone), the recording keeps its audio."""
+    helper = _mac_helper(monkeypatch, tmp_path, fail={"transcribe": "bad_audio"})
+    _model(monkeypatch)
+    result, _full = recording_client.recover_on_node(
+        _recording(tmp_path / "mac"), LiveConfig(mix_audio=False), None
+    )
+    assert [len(c["request"]["payload"]["wavs"]) for c in helper.calls()] == [2, 1]
+    causes = [r.cause for r in result.remarks if r.step == "asr"]
+    assert causes == [
+        "Не удалось распознать дорожку «Микрофон»: не удалось прочитать звук записи",
+        "Не удалось распознать дорожку «Системный звук»: не удалось прочитать звук записи",
+    ]
+
+
+def test_stopping_the_request_of_both_tracks_stops_the_helper(monkeypatch, tmp_path, sources):
+    import os
+
+    """Stopping while the one request downloads the model: the stop propagates as is and no
+    helper is left running."""
+    helper = _mac_helper(monkeypatch, tmp_path, installed={"parakeet": False}, hang=True)
+
+    def on(fraction: float | None, message: str) -> None:
+        if message.startswith("Скачиваю модель распознавания"):
+            raise FinalizeCancelled
+
+    with pytest.raises(FinalizeCancelled):
+        recording_client.recover_on_node(
+            _recording(tmp_path / "mac"), LiveConfig(mix_audio=False), None, on=on
+        )
+    assert [c["request"]["operation"] for c in helper.calls()] == ["transcribe", "download"]
+    for call in helper.calls():
+        with pytest.raises(ProcessLookupError):
+            os.kill(call["pid"], 0)
