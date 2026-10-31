@@ -1,0 +1,52 @@
+{
+  "version": 1,
+  "about": "mnema-asr protocol: a request per line on stdin, replies per line on stdout. Requests are what Python sends; replies are what the helper answers. bad_requests all get the protocol error code. Texts for people are Python's, by code and stage.",
+  "requests": {
+    "models": {"operation": "models", "payload": {}},
+    "download": {"operation": "download", "payload": {"id": "parakeet"}},
+    "download_vad": {"operation": "download", "payload": {"id": "vad"}},
+    "transcribe": {"operation": "transcribe", "payload": {"id": "parakeet", "wavs": ["/tmp/rec/mic.wav", "/tmp/rec/system.wav"]}},
+    "speech": {"operation": "speech", "payload": {"wav": "/tmp/rec/system.wav"}}
+  },
+  "bad_requests": [
+    "not json",
+    "[]",
+    "{\"payload\": {}}",
+    "{\"operation\": \"fly\", \"payload\": {}}",
+    "{\"operation\": \"download\", \"payload\": {}}",
+    "{\"operation\": \"transcribe\", \"payload\": {\"id\": \"parakeet\", \"wavs\": []}}",
+    "{\"operation\": \"transcribe\", \"payload\": {\"id\": \"parakeet\", \"wav\": \"/tmp/rec/mic.wav\"}}",
+    "{\"operation\": \"speech\", \"payload\": {\"wav\": 3}}"
+  ],
+  "replies": {
+    "progress": {"v": 1, "type": "progress", "stage": "download", "fraction": 0.25},
+    "progress_unknown": {"v": 1, "type": "progress", "stage": "load", "fraction": null},
+    "models": {
+      "v": 1,
+      "type": "result",
+      "value": [
+        {
+          "id": "parakeet",
+          "title": "Parakeet Ultra",
+          "langs": ["bg", "hr", "cs", "da", "nl", "en", "et", "fi", "fr", "de", "el", "hu", "it", "lv", "lt", "mt", "pl", "pt", "ro", "sk", "sl", "es", "sv", "ru", "uk"],
+          "size": 633377927,
+          "installed": false
+        }
+      ]
+    },
+    "download": {"v": 1, "type": "result", "value": {"ok": true}},
+    "transcribe": {
+      "v": 1,
+      "type": "result",
+      "value": {
+        "tracks": [
+          {"words": [{"text": "Привет,", "start": 0.32, "end": 0.64}, {"text": "как", "start": 0.72, "end": 0.88}]},
+          {"words": []}
+        ]
+      }
+    },
+    "speech": {"v": 1, "type": "result", "value": {"segments": [[4096, 20480], [32768, 61440]]}},
+    "error": {"v": 1, "type": "error", "code": "no_model", "detail": "parakeet is not downloaded"}
+  },
+  "error_codes": ["no_model", "no_space", "download_failed", "bad_audio", "unsupported_mac", "protocol", "failed"]
+}
