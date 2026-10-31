@@ -265,7 +265,7 @@ class MenuEnv(BaseModel):
     model: str | None = None  # this Mac's model without the key; None — not set (or not a Mac)
     mac: bool = False  # standalone Mac (base.STANDALONE)
     asr_choices: list[tuple[str, str]] = Field(default_factory=list)  # the engines of the place
-    asr_key: bool = False  # the cloud recognition key is where the cloud recognizes
+    asr_key: str | None = None  # the cloud recognition key where the cloud recognizes, masked
     update: str = ""  # the newer version, "0.4.0"; empty — nothing or not checked
     update_error: str = ""  # the last check or update failed: the reason
     update_step: str = ""  # an update is running: its step

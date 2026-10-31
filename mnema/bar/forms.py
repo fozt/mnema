@@ -185,12 +185,14 @@ class ModelFlow:
     window closes, and in redact; the window state shows only "Keep …a1B2".
     With a connected server (server) the model is the user's on the server: the same steps go to
     /api/model* and the server checks and keeps it; this Mac's .env is not touched. current is
-    the server's model as the settings know it."""
+    the server's model as the settings know it. saved: the model was kept, by the server also
+    when the window closed during its check."""
 
     def __init__(self, server: Connection | None = None, *, current: str | None = None) -> None:
         from ..llm.config import LLMSettings
 
         self.closed = False
+        self.saved = False
         self._server = _user_server(server)
         self._current = current if server is not None else LLMSettings().model
         found = providers.provider_of(self._current or "")
@@ -345,6 +347,7 @@ class ModelFlow:
                 )
             except (MediaError, httpx.HTTPError) as e:
                 return None if self.closed else self._model_form(model, _error(e))
+            self.saved = True
             return None
         try:
             refusal = check_model(credentials_for(name, self._key), on=self._stop_if_closed)
@@ -359,6 +362,7 @@ class ModelFlow:
                 else self._model_form(model, refusal.text)
             )
         save_model(name, self._key)
+        self.saved = True
         return None
 
     def submit(self, values: dict[str, str], *, force: bool) -> FormAsk | None:
@@ -393,12 +397,13 @@ class KeyFlow:
     """A window with one key: the OpenAI key for cloud recognition (kind "asr"), kept by the
     connected server or, without one, in this Mac's .env; the DeepL key for live translation
     (kind "deepl"), on the server only. The check is the server's or providers.check_key; the
-    key lives only in the window field and in redact."""
+    key lives only in the window field and in redact. saved as in ModelFlow."""
 
     checks = True
 
     def __init__(self, kind: Literal["asr", "deepl"], server: Connection | None) -> None:
         self.closed = False
+        self.saved = False
         self._kind = kind
         self._server = _user_server(server)
 
@@ -438,6 +443,7 @@ class KeyFlow:
                 self._server.save_deepl_key(key)
         except (MediaError, httpx.HTTPError) as e:
             return None if self.closed else self._form(_error(e))
+        self.saved = self._server is not None
         if self.closed:
             return None
         if self._server is None:
@@ -445,4 +451,5 @@ class KeyFlow:
                 set_env({"MNEMA_ASR_API_KEY": key})
             except OSError as e:
                 return self._form(_("Could not save: {error}", error=e.strerror or e))
+            self.saved = True
         return None

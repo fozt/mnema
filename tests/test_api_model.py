@@ -163,6 +163,35 @@ def test_a_refused_key_or_model_says_which_step_to_go_back_to(srv, net, llm) -> 
     assert _lines("anna") == ""
 
 
+def test_a_model_that_answers_too_late_is_refused_and_not_saved(srv, net, monkeypatch) -> None:
+    """The check has a time limit, so the app gets an answer before it stops waiting: past it
+    the model step is refused, and a late answer saves nothing."""
+    import threading
+
+    import litellm
+
+    from mnema.api import model
+
+    client, _http, _tokens = srv
+    answer = threading.Event()
+
+    def completion(**kw):
+        answer.wait(10)
+        return iter([model_stubs.chunk("готово")])
+
+    monkeypatch.setattr(litellm, "completion", completion)
+    monkeypatch.setattr(model, "MODEL_CHECK_SECONDS", 0.2)
+    with pytest.raises(ServerError) as refused:
+        client("anna").save_model("gemini/gemini-flash-latest", GOOD)
+    answer.set()
+    assert (refused.value.status, refused.value.retry) == (400, "model")
+    assert str(refused.value) == "Модель не ответила вовремя. Попробуйте ещё раз"
+    for t in threading.enumerate():
+        if t.name == "mnema-model-check":
+            t.join(5)
+    assert _lines("anna") == ""
+
+
 def test_removing_the_model_keeps_the_other_keys(srv, net, llm) -> None:
     client, _http, _tokens = srv
     anna = client("anna")

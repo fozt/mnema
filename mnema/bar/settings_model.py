@@ -129,6 +129,17 @@ def _model_rows(env: MenuEnv) -> list[SettingsField]:
     ]
 
 
+def _asr_key_rows(env: MenuEnv) -> list[SettingsField]:
+    """Mac in the cloud: the OpenAI key masked and the button that sets or replaces it."""
+    f = SettingsField
+    if env.asr_key is None:
+        return [f(kind=FieldKind.BUTTON, title=_("Set the OpenAI key…"), key="asr_key_setup")]
+    return [
+        f(kind=FieldKind.STATUS, title=_("OpenAI key"), value=env.asr_key),
+        f(kind=FieldKind.BUTTON, title=_("Change the OpenAI key…"), key="asr_key_setup"),
+    ]
+
+
 def _translation_rows(env: MenuEnv) -> list[SettingsField]:
     """Mac with a server: live translation by the user's DeepL key or by the model."""
     f = SettingsField
@@ -251,10 +262,8 @@ def settings_model(
             value=dict(options).get(prefs.asr, prefs.asr),
         ),
     ]
-    if env.mac and recognition_at(prefs, env) == Recognition.CLOUD and not env.asr_key:
-        processing.append(
-            f(kind=FieldKind.BUTTON, title=_("Set the OpenAI key…"), key="asr_key_setup")
-        )
+    if env.mac and recognition_at(prefs, env) == Recognition.CLOUD:
+        processing += _asr_key_rows(env)
     if env.mac:
         processing += _model_rows(env)
     processing += [
