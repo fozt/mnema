@@ -336,11 +336,20 @@ def absolute_links(tree: Path) -> list[Path]:
 
 def build_swift(cache: Path) -> dict[str, Path]:
     """The panel and mnema-asr, release builds; FluidAudio's resource bundles (text to speech)
-    stay out of the app."""
+    stay out of the app. The object times in the debug map are zero (ZERO_AR_DATE): mnema-asr is
+    part of the runtime, the same sources must give the same bytes."""
     cmd = ["swift", "build", "-c", "release", "--package-path", SWIFT_PACKAGE, "--scratch-path"]
+    env = {**os.environ, "ZERO_AR_DATE": "1"}
     for product in SWIFT_PRODUCTS:
-        run([*cmd, cache, "--product", product])
+        run([*cmd, cache, "--product", product], env=env)
     return {product: cache / "release" / product for product in SWIFT_PRODUCTS}
+
+
+def strip_debug_map(binary: Path) -> None:
+    """Drop the debug map (the paths of the build's object files), before signing."""
+    run(["strip", "-S", binary])
+    if " OSO " in run(["nm", "-ap", binary], capture_output=True, text=True).stdout:
+        raise SystemExit(f"{binary.name} still names the object files of the build")
 
 
 def compile_bytecode(python: Path, app: Path) -> None:
@@ -405,15 +414,17 @@ def scrub_all(app: Path) -> None:
         raise SystemExit("libraries outside the bundle:\n" + "\n".join(broken[:20]))
 
 
-def runtime_inputs(requirements: Path, ffmpeg: Path | None) -> str:
+def runtime_inputs(requirements: Path, ffmpeg: Path | None, swift_build: Path) -> str:
     """What the runtime is built from. The same inputs must give the same runtime key: the release
-    check fails otherwise."""
+    check fails otherwise. swift_build is the scratch path of build_swift: mnema-asr keeps the path
+    of a FluidAudio resource bundle under it (the release builds in the same folder every time)."""
     digest = hashlib.sha256()
 
     def add(name: str, data: bytes) -> None:
         digest.update(name.encode() + b"\0" + hashlib.sha256(data).digest())
 
     add("python", PYTHON_VERSION.encode())
+    add("swift build", str(swift_build).encode())
     add("requirements", requirements.read_bytes())
     for tool in ("uv", "swift"):
         add(tool, run([tool, "--version"], capture_output=True).stdout)
@@ -524,6 +535,7 @@ def assemble(out: Path, ffmpeg: Path | None, version: str, sources: bool = False
     say("building the Swift panel and mnema-asr")
     for product, built in build_swift(work / "swift").items():
         shutil.copy2(built, app / "Contents" / "MacOS" / product)
+        strip_debug_map(app / "Contents" / "MacOS" / product)
     say("copying Python")
     python = copy_python(managed_python(), res / "python")
     say("installing packages")
@@ -556,7 +568,7 @@ def assemble(out: Path, ffmpeg: Path | None, version: str, sources: bool = False
         raise SystemExit(f"links leave the bundle: {', '.join(map(str, links[:5]))}")
     scrub_all(app)
     say("signing")
-    say(f"runtime key {seal(app, runtime_inputs(requirements, ffmpeg))}")
+    say(f"runtime key {seal(app, runtime_inputs(requirements, ffmpeg, work / 'swift'))}")
     return app
 
 
