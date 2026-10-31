@@ -20,7 +20,7 @@ data class RecordingParams(
     val summary: Boolean = true,
     val summary_lang: String? = null,
     val part: Part? = null,
-    // why the other side had no audio at all: blocked — a call was going, none — there was no call; refines the server's remark
+    // why the other side had no audio at all: blocked — a call was going (the server then remarks the other side is not recorded), none — there was no call
     val silent_reason: Map<String, String> = emptyMap(),
     val recording_error: String? = null,
     val retitle: Boolean? = null,

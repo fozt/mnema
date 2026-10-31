@@ -467,6 +467,38 @@ def test_linux_without_server_keeps_the_recording(tmp_path) -> None:
     assert _files(folder) == before
 
 
+def test_silent_track_on_the_mac_is_no_remark(monkeypatch, tmp_path, sources) -> None:
+    """The Mac decides silence itself: the silent system track is not recognized, not mixed
+    into recording.mp3 and not a remark; the history names it."""
+    recognized: list[str] = []
+
+    def transcribe(op, path, params, **kw):
+        recognized.append(Path(path).stem)
+        return {
+            "text": WORDS,
+            "segments": [{"start": 0, "end": 1, "text": WORDS}],
+            "language": "ru",
+        }
+
+    monkeypatch.setattr(setup, "dispatch", transcribe)
+    mixed: list[list[str]] = []
+    monkeypatch.setattr(
+        audio, "mix", lambda inputs, dst, **kw: mixed.append([p.stem for p in inputs]) or dst
+    )
+    _model(monkeypatch)
+    folder = _recording(tmp_path / "notes")
+    with wave.open(str(folder / "system.wav"), "wb") as out:
+        out.setnchannels(1)
+        out.setsampwidth(2)
+        out.setframerate(16000)
+        out.writeframes(array.array("h", [0] * 16000).tobytes())
+    result, full = recording_client.recover_on_node(folder, LiveConfig(), None)
+    assert full and recognized == ["mic"] and mixed == []
+    assert result.silent_labels == ["system"] and result.remarks == []
+    run = meta.last(result.base)
+    assert run is not None and (run.status, run.silent, run.notes) == ("ok", ["system"], [])
+
+
 def test_mac_with_a_server_that_refuses_the_summary_keeps_the_transcript(
     monkeypatch, tmp_path, sources
 ) -> None:

@@ -17,7 +17,6 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import datetime, timedelta, tzinfo
 from enum import StrEnum
-from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -332,38 +331,21 @@ def asr_failed(label: str, reason: str | Exception, *, live_kept: bool) -> Remar
 
 
 OTHER_SIDE_SILENT = "other_side_silent"  # code: the other side was not recorded, cause known
-_OTHER_SIDE_SILENT = {
-    "blocked": "the phone did not provide the call audio",
-    "none": "there was no call",
-}
 
 
-_SILENT_HINTS = {
-    "system": "If the other side could be heard, check the permission to record system audio",
-    "mic": "If you could be heard, check the microphone and the recording permission",
-}
-
-
-def track_silent(label: str, reason: Literal["blocked", "none"] | None = None) -> Remark:
-    """reason for the other side: blocked — a call went on but no audio came, none — no call."""
-    source = _source(label)
-    short = _("No sound on the “{source}” track", source=source)
-    if label == "system" and reason is not None:
-        return Remark(
-            step=Step.ASR,
-            cause=_(
-                "The “{source}” track has no sound: {reason}",
-                source=source,
-                reason=_(_OTHER_SIDE_SILENT[reason]),
-            ),
-            short=short,
-            code=OTHER_SIDE_SILENT,
-        )
+def other_side_blocked() -> Remark:
+    """A call went on but the phone gave none of its audio: the other side is not recorded.
+    A silent track by itself is no remark."""
+    source = _source("system")
     return Remark(
         step=Step.ASR,
-        cause=_("The “{source}” track has no sound", source=source),
-        hint=_(_SILENT_HINTS[label]) if label in _SILENT_HINTS else "",
-        short=short,
+        cause=_(
+            "The “{source}” track has no sound: {reason}",
+            source=source,
+            reason=_("the phone did not provide the call audio"),
+        ),
+        short=_("No sound on the “{source}” track", source=source),
+        code=OTHER_SIDE_SILENT,
     )
 
 

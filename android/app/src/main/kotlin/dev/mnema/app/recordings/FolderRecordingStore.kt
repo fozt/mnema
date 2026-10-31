@@ -417,7 +417,7 @@ private fun recordingRemarks(meta: JsonObject?, problem: String?): List<String> 
     return (listOfNotNull(problem?.takeIf { it.isNotBlank() }) + remarks).distinct()
 }
 
-// code of the remarks.track_silent remark with a reason, checked by fixture silent-reason-v1
+// code of the remarks.other_side_blocked remark, checked by fixture silent-reason-v1
 private const val OTHER_SIDE_SILENT = "other_side_silent"
 
 /** The short text of the remark that the other side's voice was not recorded, while the last run in history ([Meta.lastRun]) has it. */

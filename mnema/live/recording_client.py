@@ -299,7 +299,7 @@ def _result(base: Path, run: meta.Run) -> LiveResult:
         translation_md=existing("translation.md"),
         recordings=[p for p in base.glob("*.wav") if p.is_file()],
         refined_labels=[label for label, track in run.tracks.items() if not track.error],
-        silent_labels=[t for t in ("mic", "system") if remarks.track_silent(t) in run.notes],
+        silent_labels=list(run.silent),
         languages={label: track.lang for label, track in run.tracks.items() if track.lang},
         remarks=remarks.merged(run.notes),
         info=list(run.info),

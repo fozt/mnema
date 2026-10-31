@@ -297,7 +297,7 @@ class RecordingParams(_RecordingFinalization):
 
     part: Part | None = None
     # why the other side had no sound at all (the phone's report): blocked — a call was going on,
-    # none — there was no call; refines the remark on the silence the server found
+    # none — there was no call; blocked on a track the server found silent gives a remark
     silent_reason: dict[Literal["system"], Literal["blocked", "none"]] = Field(default_factory=dict)
     tracks: dict[str, str] = Field(default_factory=dict)
     partial: bool = False  # a track failed: True keeps the others' text, False fails without files

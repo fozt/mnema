@@ -1795,7 +1795,8 @@ def test_transcript_opens_only_after_node_result_and_follows_renamed_folder(
 
     def model(system, content, **k):
         naming.append([(i.key, i.title) for i in menu(rt.state, rt.prefs, MenuEnv())])
-        return "Итоги недели"
+        found = {"title": "Итоги недели", "about": "Итоги.", "summary": ["Итоги."]}
+        return json.dumps(found, ensure_ascii=False)
 
     monkeypatch.setattr(claude, "_stream_text", model)
     shown: list[list[tuple]] = []

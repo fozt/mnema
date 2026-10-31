@@ -196,9 +196,9 @@ def test_recording_without_model_and_recording_notices(tmp_path, monkeypatch):
     run = result["run"]
     assert run["notes"][0]["step"] == "record"
     assert "Запись оборвалась" in run["remarks"][0]
-    assert any(
-        "микрофон" in text.lower() and "нет звука" in text.lower() for text in run["remarks"]
-    )
+    # a silent track is normal: the history keeps it, no remark is made
+    assert run["silent"] == ["mic"]
+    assert not any("нет звука" in text.lower() for text in run["remarks"])
     assert any(
         text.startswith("Не настроена модель")
         and "Задайте модель в настройках Mnema на Mac" in text
@@ -215,18 +215,20 @@ SILENT_REASONS = json.loads(
 @pytest.mark.parametrize(
     "case", [c for c in SILENT_REASONS if c["reason"]], ids=lambda c: c["name"]
 )
-def test_silent_other_side_remark_says_why(tmp_path, monkeypatch, case):
-    """The server decides silence from the uploaded track; the phone's reason refines the
-    remark."""
+def test_silent_other_side_remark_only_when_the_call_audio_was_blocked(tmp_path, monkeypatch, case):
+    """The server decides silence from the uploaded track; a remark is made only when the phone
+    says a call went on and its audio was not given: the other side is not recorded."""
     _no_model(monkeypatch)
     client = TestClient(create_app(tmp_path))
     job = _start(client, quiet=("system",), silent_reason={"system": case["reason"]})
     run = _wait(client, job)["result"]["run"]
+    assert run["silent"] == ["system"]
     notes = [n for n in run["notes"] if n["step"] == "asr"]
-    assert [(n["cause"], n["short"], n["code"]) for n in notes] == [
-        (case["cause"], case["short"], case["code"])
+    expected = [(case["cause"], case["short"], case["code"])] if case["code"] else []
+    assert [(n["cause"], n["short"], n["code"]) for n in notes] == expected
+    assert [t for t in run["remarks"] if "нет звука" in t] == [
+        t for t in run["remarks"] if case["cause"] and t.startswith(case["cause"])
     ]
-    assert any(text.startswith(case["cause"]) for text in run["remarks"])
     _clean(tmp_path)
 
 
@@ -240,18 +242,15 @@ def test_reason_of_silence_does_not_silence_a_sounding_track(tmp_path, monkeypat
 
 
 def test_both_silent_tracks_are_a_recording_without_speech(tmp_path, monkeypatch):
-    """The server decides silence: with both tracks silent, processing finishes without text,
-    the history has a remark per track, and the recording is "no speech" and can be processed
-    again."""
+    """The server decides silence: with both tracks silent, processing finishes without text
+    and without remarks, the history names the silent tracks, and the recording is "no speech"
+    and can be processed again."""
     _no_model(monkeypatch)
     client = TestClient(create_app(tmp_path))
     result = _wait(client, _start(client, quiet=("mic", "system")))["result"]
     run = result["run"]
     assert (result["files"], run["status"]) == ({}, "ok")
-    assert [n["cause"] for n in run["notes"]] == [
-        remarks.track_silent("mic").cause,
-        remarks.track_silent("system").cause,
-    ]
+    assert (run["notes"], run["silent"]) == ([], ["mic", "system"])
     sizes = {"mic.wav": 64044, "system.wav": 64044}
     assert meta.record_state(sizes, {"runs": [run]}) is meta.RecordState.NO_SPEECH
     _clean(tmp_path)
@@ -374,10 +373,8 @@ def test_summary_without_model_refused_before_claim(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("long", [False, True])
-def test_live_text_finalization_uses_normal_summary_threshold_without_asr(
-    tmp_path, monkeypatch, long
-):
-    calls = _model(monkeypatch, lambda: ANSWER if long else "Приветствие")
+def test_live_text_finalization_summarizes_any_length_without_asr(tmp_path, monkeypatch, long):
+    calls = _model(monkeypatch)
     monkeypatch.setattr(setup, "dispatch", lambda *a, **k: pytest.fail("ASR already done"))
     client = TestClient(create_app(tmp_path))
     path = _upload(client, "transcript.txt", (WORDS if long else "Привет.").encode())
@@ -397,9 +394,8 @@ def test_live_text_finalization_uses_normal_summary_threshold_without_asr(
     result = _wait(client, response.json()["id"])["result"]
     assert result["run"]["status"] == "ok" and result["run"]["kind"] == "process"
     assert "transcript.txt" not in result["files"]
-    assert bool(result["files"].get("summary.txt")) is long
-    assert len(calls) == 1
-    assert not long or "summary" in calls[0]["messages"][0]["content"]
+    assert result["files"].get("summary.txt")
+    assert len(calls) == 1 and "summary" in calls[0]["messages"][0]["content"]
 
 
 def test_live_text_without_model_still_finalizes_and_explains_missing_summary(
@@ -466,7 +462,7 @@ def test_live_text_translation_without_summary_uses_existing_finalization(tmp_pa
 def test_summary_write_failure_keeps_past_asr_notice_after_rename(tmp_path, monkeypatch):
     _model(monkeypatch)
     client = TestClient(create_app(tmp_path))
-    note = remarks.track_silent("system")
+    note = remarks.other_side_blocked()
     path = _upload(client, "transcript.txt", WORDS.encode())
     write = Path.write_text
 
@@ -565,30 +561,23 @@ def test_explicit_retitle_and_user_title_for_previously_named_folder(
     _clean(tmp_path)
 
 
-def test_timestamps_do_not_inflate_summary_threshold(tmp_path, monkeypatch):
-    short = "Проверим ошибки завтра. " * 20
+def test_short_recording_gets_title_and_summary_in_one_request(tmp_path, monkeypatch):
+    short = "Проверим ошибки завтра. "
 
     def transcribe(op, path, params, **kw):
         return {
             "text": short,
-            "segments": [
-                {"start": i * 2, "end": i * 2 + 1, "text": "Проверим ошибки завтра."}
-                for i in range(20)
-            ],
+            "segments": [{"start": 0, "end": 1, "text": "Проверим ошибки завтра."}],
             "language": "ru",
         }
 
     monkeypatch.setattr(setup, "dispatch", transcribe)
-    calls = _model(monkeypatch, lambda: "Проверка ошибок")
+    calls = _model(monkeypatch)
     client = TestClient(create_app(tmp_path))
     result = _wait(client, _start(client, labels=("mic",)))["result"]
-    from mnema.core.base import unstamped
-
-    transcript = result["files"]["transcript.txt"]
-    assert len(unstamped(transcript)) < 600 <= len(transcript)
-    assert result["files"]["summary.txt"] is None
-    assert result["folder"] == "2026-10-22_Проверка ошибок"
-    assert len(calls) == 1 and "summary" not in calls[0]["messages"][0]["content"]
+    assert result["files"]["summary.txt"].startswith("Готовим выпуск.")
+    assert result["folder"] == "2026-10-22_Подготовка выпуска"
+    assert len(calls) == 1 and "summary" in calls[0]["messages"][0]["content"]
 
 
 @pytest.mark.parametrize("failure", ["balance", "garbled"])
@@ -617,7 +606,7 @@ def test_summary_failure_keeps_files_and_name_then_retries_without_asr(
 
     monkeypatch.setattr(setup, "dispatch", unexpected_asr)
     client = TestClient(create_app(tmp_path))
-    prior = remarks.track_silent("system")
+    prior = remarks.other_side_blocked()
     params = {
         "started": STARTED,
         "name": "2026-10-22_Мой выпуск" if manual else NAME,
