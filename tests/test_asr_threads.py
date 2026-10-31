@@ -99,7 +99,7 @@ def test_asr_uses_configured_threads_after_vad_and_restores_caller(
                 backend().run(Path("call.wav"), lang="ru")
         else:
             assert backend().run(Path("call.wav"), lang="ru").text == "Привет."
-        assert events == [("load", 4), ("infer", 4)]
+        assert events == [("load", 15), ("infer", 15)]
         assert torch.get_num_threads() == 2
     finally:
         torch.set_num_threads(before)
@@ -110,8 +110,8 @@ def test_asr_uses_configured_threads_after_vad_and_restores_caller(
     "setting, available, expected",
     [
         *[("auto", n, n) for n in (6, 32)],
-        # unset: 4, but no more than available
-        *[(None, n, e) for n, e in ((2, 2), (6, 4))],
+        # unset: all but one core for the one running job
+        *[(None, n, e) for n, e in ((1, 1), (2, 1), (6, 5))],
         ("2", 24, 2),
         ("32", 24, 24),  # an explicit number is capped at what is available
     ],
@@ -134,13 +134,13 @@ def test_asr_cpu_budget_respects_available_cpus(monkeypatch, setting, available,
     ],
 )
 def test_asr_cpu_setting_has_one_validation_for_app_and_core(monkeypatch, value, expected):
-    """One check for the app and the core; an invalid value falls back to the default."""
+    """One check for the app and the core; an invalid value falls back to the default rule."""
     from mnema.config import Settings
-    from mnema.core.settings import DEFAULT_ASR_THREADS, RuntimeSettings
+    from mnema.core.settings import RuntimeSettings
 
     monkeypatch.setenv("MNEMA_ASR_THREADS", value)
     for cls in (Settings, RuntimeSettings):
-        assert cls().asr_threads == (DEFAULT_ASR_THREADS if expected is None else expected)
+        assert cls().asr_threads == expected
 
 
 def test_cpu_budget_falls_back_to_cpu_count_on_macos(monkeypatch):
@@ -154,6 +154,7 @@ def test_cpu_budget_falls_back_to_cpu_count_on_macos(monkeypatch):
 
 
 def test_cpu_budget_respects_cgroup_v2_cpuset_and_parent_quota(monkeypatch, cpu_environment):
+    monkeypatch.setenv("MNEMA_ASR_THREADS", "auto")
     monkeypatch.setattr(b.os, "sched_getaffinity", lambda _: set(range(32)), raising=False)
     cpu_environment.update(
         {
@@ -170,6 +171,7 @@ def test_cpu_budget_respects_cgroup_v2_cpuset_and_parent_quota(monkeypatch, cpu_
 
 
 def test_cpu_budget_respects_cgroup_v1_and_container_namespace(monkeypatch, cpu_environment):
+    monkeypatch.setenv("MNEMA_ASR_THREADS", "auto")
     monkeypatch.setattr(b.os, "sched_getaffinity", lambda _: set(range(32)), raising=False)
     cpu_environment.update(
         {

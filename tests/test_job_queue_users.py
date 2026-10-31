@@ -110,7 +110,7 @@ def test_the_half_limit_counts_a_waiting_job_of_another_user_too():
 
 
 def test_a_short_job_does_not_wait_for_a_long_one_of_any_user():
-    queue, probe = JobQueue(workers=1, pending=16), Probe()
+    queue, probe = JobQueue(workers=1, pending=16, memory=lambda: None), Probe()
     probe.add(queue, "long", user="a")
     probe.add(queue, "voice", user="b", short=True)
     assert probe.started(2) == ["long", "voice"]

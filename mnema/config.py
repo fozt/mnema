@@ -162,7 +162,8 @@ class Settings(RuntimeSettings):
     # the address devices reach the server at, for invitations (node.node_url): the installer
     # puts it into the container's environment
     public_url: str | None = Field(default=None, validation_alias="MNEMA_URL")
-    job_workers: int = Field(default=1, ge=1, validation_alias="MNEMA_JOB_WORKERS")
+    # None: a third of the cores (core.settings.default_workers)
+    job_workers: int | None = Field(default=None, ge=1, validation_alias="MNEMA_JOB_WORKERS")
     job_queue_size: int = Field(default=16, ge=0, validation_alias="MNEMA_JOB_QUEUE_SIZE")
     live_connections: int = Field(default=2, ge=1, validation_alias="MNEMA_LIVE_CONNECTIONS")
     live_dir: str | None = Field(default=None, validation_alias="MNEMA_LIVE_DIR")

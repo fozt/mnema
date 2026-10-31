@@ -13,9 +13,12 @@ from pydantic import BaseModel
 from mnema import ops
 from mnema.server import create_app
 
+GIB = 1024**3
+
 
 class Params(BaseModel):
     index: int = 0
+    asr: str = "auto"
 
 
 def app_with(root, fn, *, output=ops.OutputKind.JSON):
@@ -28,8 +31,9 @@ def app_with(root, fn, *, output=ops.OutputKind.JSON):
     return app
 
 
-def submit(client, path, index=0, key=None):
-    body = {"op": "fake", "path": str(path), "params": {"index": index}}
+def submit(client, path, index=0, key=None, asr=None):
+    params = {"index": index} if asr is None else {"index": index, "asr": asr}
+    body = {"op": "fake", "path": str(path), "params": params}
     if key is not None:
         body["key"] = key
     return client.post("/api/jobs", json=body)
@@ -49,6 +53,119 @@ def finished(client, job_id):
 def queue_limits(monkeypatch):
     monkeypatch.setenv("MNEMA_JOB_WORKERS", "1")
     monkeypatch.setenv("MNEMA_JOB_QUEUE_SIZE", "2")
+
+
+@pytest.fixture(autouse=True)
+def machine(monkeypatch):
+    """Six cores and the free memory of /proc/meminfo: the OS is the external boundary."""
+    state = {"free": 64 * GIB}
+    original = Path.read_text
+
+    def read(path, *args, **kwargs):
+        name = str(path)
+        if name == "/proc/meminfo":
+            return f"MemAvailable: {state['free'] // 1024} kB\n"
+        if name.startswith(("/proc/self/cgroup", "/sys/fs/cgroup")):
+            return ""
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", read)
+    monkeypatch.setattr(os, "sched_getaffinity", lambda _: set(range(6)), raising=False)
+    monkeypatch.setattr(os, "cpu_count", lambda: 6)
+    monkeypatch.delenv("MNEMA_ASR_THREADS", raising=False)
+    return state
+
+
+def running(client, ids, count):
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        statuses = [client.get(f"/api/jobs/{job_id}").json()["status"] for job_id in ids]
+        if statuses.count("running") >= count:
+            time.sleep(0.05)
+            return [client.get(f"/api/jobs/{job_id}").json()["status"] for job_id in ids]
+        time.sleep(0.005)
+    pytest.fail(f"fewer than {count} jobs running")
+
+
+@pytest.mark.parametrize("workers, parallel", [("1", 1), (None, 2)])
+def test_local_slots_follow_the_workers_line_or_a_third_of_the_cores(
+    tmp_path, monkeypatch, workers, parallel
+):
+    if workers is None:
+        monkeypatch.delenv("MNEMA_JOB_WORKERS")
+    monkeypatch.setenv("MNEMA_JOB_QUEUE_SIZE", "4")
+    release = threading.Event()
+
+    def op(path, params, on):
+        assert release.wait(5)
+        return {}
+
+    client = TestClient(app_with(tmp_path, op))
+    ids = [submit(client, tmp_path / "a", i).json()["id"] for i in range(3)]
+    try:
+        statuses = running(client, ids, parallel)
+        assert statuses.count("running") == parallel
+        assert statuses.count("pending") == 3 - parallel
+    finally:
+        release.set()
+        for job_id in ids:
+            finished(client, job_id)
+
+
+def test_threads_of_a_local_job_split_the_cores_between_running_ones(tmp_path, monkeypatch):
+    from mnema.core.settings import requested_asr_threads
+
+    monkeypatch.setenv("MNEMA_JOB_WORKERS", "2")
+    entered, release = threading.Event(), threading.Event()
+    threads = {}
+
+    def op(path, params, on):
+        threads[params["index"]] = requested_asr_threads()
+        if params["index"] == 0:
+            entered.set()
+            assert release.wait(5)
+        return {}
+
+    client = TestClient(app_with(tmp_path, op))
+    first = submit(client, tmp_path / "a", 0).json()["id"]
+    try:
+        assert entered.wait(3)
+        assert finished(client, submit(client, tmp_path / "a", 1).json()["id"])["status"] == "done"
+    finally:
+        release.set()
+        finished(client, first)
+    assert threads == {0: 5, 1: 2}
+
+
+def test_cloud_job_starts_while_memory_holds_a_local_one_which_starts_when_memory_frees(
+    tmp_path, monkeypatch, machine
+):
+    monkeypatch.setenv("MNEMA_JOB_WORKERS", "2")
+    machine["free"] = GIB
+    release = threading.Event()
+    started = []
+
+    def op(path, params, on):
+        started.append(params["index"])
+        if params["index"] == 0:
+            assert release.wait(5)
+        return {}
+
+    app = app_with(tmp_path, op)
+    app.state.job_queue.recheck_s = 0.01
+    client = TestClient(app)
+    first = submit(client, tmp_path / "a", 0).json()["id"]
+    try:
+        held = submit(client, tmp_path / "a", 1).json()["id"]
+        cloud = submit(client, tmp_path / "a", 2, asr="openai/gpt-4o-transcribe").json()["id"]
+        assert finished(client, cloud)["status"] == "done"
+        assert client.get(f"/api/jobs/{held}").json()["status"] == "pending"
+        machine["free"] = 6 * GIB
+        assert finished(client, held)["status"] == "done"
+    finally:
+        release.set()
+        finished(client, first)
+    assert started == [0, 2, 1]
 
 
 def test_queue_is_fifo_bounded_and_pending_has_no_start_time(tmp_path):
