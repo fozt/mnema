@@ -592,3 +592,41 @@ def test_own_title_names_the_folder_when_the_server_step_fails(
     assert not (named / PROCESSING_MARK).exists()
     [remark] = result.remarks
     assert remark.cause.startswith("Пересказ не составлен: ")
+
+
+def test_mac_recognizes_through_mnema_asr_and_fetches_the_model_first(
+    monkeypatch, tmp_path, sources
+) -> None:
+    """The first recording without the model: mnema-asr downloads it (its share shown as the
+    step), then both tracks are recognized and their words become the transcript."""
+    import importlib
+
+    from mnema.core import backends, mac_helper
+    from mnema.core.probe import MediaInfo
+    from tests.mac_helper_stub import Helper
+
+    transcribe_mod = importlib.import_module("mnema.core.transcribe")
+    monkeypatch.setattr(mac_helper.platform, "machine", lambda: "arm64")
+    helper = Helper(tmp_path / "app")
+    helper.configure(installed={"parakeet": False, "vad": False})
+    monkeypatch.setenv("MNEMA_ASR", str(helper.path))
+    monkeypatch.setattr(
+        transcribe_mod,
+        "probe",
+        lambda p: MediaInfo(path=p, duration=1.0, size=1, audio_codec="pcm", video_codec=None),
+    )
+    monkeypatch.setattr(backends, "extract_audio", lambda s, d, **kw: Path(shutil.copyfile(s, d)))
+    _model(monkeypatch)
+    steps: list[str] = []
+    result, _full = recording_client.recover_on_node(
+        _recording(tmp_path / "mac"),
+        LiveConfig(mix_audio=False),
+        None,
+        on=lambda fraction, message: steps.append(message),
+    )
+    transcript = (result.base / "transcript.txt").read_text(encoding="utf-8")
+    assert "Привет, как" in transcript
+    assert "Скачиваю модель распознавания, только в первый раз…" in steps
+    assert helper.config()["installed"]["parakeet"]
+    run = meta.last(result.base)
+    assert run is not None and {t.engine for t in run.tracks.values()} == {"parakeet"}

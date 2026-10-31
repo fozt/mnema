@@ -2,19 +2,21 @@
 
 Mnema.app sets MNEMA_APP_BUNDLE to its bundle path. Opened right from the disk image, or as a
 quarantined download that macOS runs from a random read-only copy (App Translocation), the panel
-asks to move it to Applications and nothing is set up. Otherwise the mnema command
-(~/.local/bin/mnema) and "Open at login" point at this bundle. A source build
-(~/Applications/Mnema.app) is never touched.
+asks to move it to Applications and nothing is set up. Otherwise app.json tells the mnema command
+(a separate package) where the app and its mnema-asr are, and "Open at login" points at this
+bundle. The app has no mnema command of its own: the link of an earlier version goes. A source
+build (~/Applications/Mnema.app) is never touched.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import os
-import plistlib
 import sys
 from pathlib import Path
 
+from ..core.base import app_file, is_mnema_app
 from ..i18n import _
 
 logger = logging.getLogger(__name__)
@@ -51,57 +53,46 @@ def placed_bundle() -> Path | None:
     return None if bundle is None or translocated(bundle) else bundle
 
 
-def command(bundle: Path) -> Path:
-    return bundle / "Contents" / "Resources" / "bin" / "mnema"
+def helper(bundle: Path) -> Path:
+    """mnema-asr of the bundle: recognition on CoreML."""
+    return bundle / "Contents" / "MacOS" / "mnema-asr"
 
 
 def _data_dir() -> Path:
-    base = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
-    return Path(base) / "mnema"
+    return app_file().parent
 
 
-def _is_mnema_bundle(path: Path) -> bool:
-    from .install import BUNDLE_ID
+def write_app_json(bundle: Path) -> None:
+    """app.json for the mnema command, atomically: the bundle, its mnema-asr and version."""
+    from .. import __version__
 
-    try:
-        with open(path / "Contents" / "Info.plist", "rb") as f:
-            return plistlib.load(f).get("CFBundleIdentifier") == BUNDLE_ID
-    except (OSError, plistlib.InvalidFileException):
-        return False
+    path = app_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    draft = path.with_name(f".{path.name}.{os.getpid()}")
+    data = {"bundle": str(bundle), "asr": str(helper(bundle)), "version": __version__}
+    draft.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    os.replace(draft, path)
 
 
-def _ours(target: Path) -> bool:
-    """A mnema command Mnema installed: inside a Mnema bundle, or in the environments of
-    ./install.sh client and of updates (~/.local/share/mnema)."""
-    if target.is_relative_to(os.path.realpath(_data_dir())):
-        return True
+def _into_mnema_bundle(target: Path) -> bool:
     parts = target.parts
     for i, part in enumerate(parts):
         if part.endswith(".app") and parts[i + 1 : i + 2] == ("Contents",):
-            return _is_mnema_bundle(Path(*parts[: i + 1]))
+            return is_mnema_app(Path(*parts[: i + 1]))
     return False
 
 
-def link_command(bundle: Path) -> bool:
-    """Point ~/.local/bin/mnema at the bundle's command when the place is free, a broken link,
-    or a link to a Mnema install. Someone else's file or link stays. True — the link is ours."""
+def drop_command_link() -> None:
+    """~/.local/bin/mnema of an earlier version goes when it leads into a Mnema bundle or
+    nowhere; the command of uv tool, a venv or someone else's file stays."""
     from ..install_setup import cli_link
 
-    link, wanted = cli_link(), command(bundle)
-    if link.is_symlink():
-        target = Path(os.path.realpath(link))
-        if target == Path(os.path.realpath(wanted)):
-            return True
-        if link.exists() and not _ours(target):
-            return False
-    elif link.exists():
-        return False
-    link.parent.mkdir(parents=True, exist_ok=True)
-    draft = link.with_name(f".{link.name}.{os.getpid()}")
-    draft.unlink(missing_ok=True)
-    draft.symlink_to(wanted)
-    os.replace(draft, link)
-    return True
+    link = cli_link()
+    if not link.is_symlink():
+        return
+    if link.exists() and not _into_mnema_bundle(Path(os.path.realpath(link))):
+        return
+    link.unlink()
 
 
 def _first_start_marker() -> Path:
@@ -138,10 +129,13 @@ def prepare() -> str:
     # the bundle a past update replaced: removing ~2 GB takes a while
     threading.Thread(target=drop_previous_bundle, daemon=True, name="mnema-cleanup").start()
     try:
-        if not link_command(bundle):
-            logger.info("~/.local/bin/mnema is someone else's, left as is")
+        write_app_json(bundle)
     except OSError:
-        logger.warning("mnema command not linked", exc_info=True)
+        logger.warning("app.json not written", exc_info=True)
+    try:
+        drop_command_link()
+    except OSError:
+        logger.warning("the old mnema command link stays", exc_info=True)
     try:
         point_autostart(bundle)
     except (OSError, ValueError):

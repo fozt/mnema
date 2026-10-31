@@ -250,6 +250,16 @@ class BarState(BaseModel):
         return self.phase == Phase.RECORDING or bool(self.jobs)
 
 
+class LocalModel(BaseModel):
+    """This Mac's recognition model (mnema-asr) and its download."""
+
+    size: int = 0  # bytes on disk once downloaded
+    installed: bool = False
+    downloading: bool = False
+    progress: float | None = None  # the download's share; None — preparing the model
+    error: str = ""  # the last download failed: the reason
+
+
 class MenuEnv(BaseModel):
     """What the menu depends on, computed by BarRuntime; no secrets."""
 
@@ -266,6 +276,7 @@ class MenuEnv(BaseModel):
     mac: bool = False  # standalone Mac (base.STANDALONE)
     asr_choices: list[tuple[str, str]] = Field(default_factory=list)  # the engines of the place
     asr_key: str | None = None  # the cloud recognition key where the cloud recognizes, masked
+    asr_model: LocalModel | None = None  # this Mac's recognition model; None — no mnema-asr
     update: str = ""  # the newer version, "0.4.0"; empty — nothing or not checked
     update_error: str = ""  # the last check or update failed: the reason
     update_step: str = ""  # an update is running: its step

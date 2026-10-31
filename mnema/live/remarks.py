@@ -308,9 +308,12 @@ def node_asr_reason(error: Exception) -> str:
     """Why recognition failed: a cloud refusal in the user's words, otherwise only where it
     failed (the engine's text may point to a terminal)."""
     from ..core.backends import NoCloudKey
+    from ..core.mac_helper import HelperError
 
     if isinstance(error, NoCloudKey):
         return str(error)
+    if isinstance(error, HelperError) and error.known:  # no space, no network, an Intel Mac
+        return str(error)[:1].lower() + str(error)[1:]
     if classify(error) is not ErrorKind.OTHER:
         return human_reason(error)
     return _("error on the Mac") if base.processed_here() else _("error on the server")

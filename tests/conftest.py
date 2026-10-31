@@ -108,6 +108,16 @@ def _media_tools_by_name(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_installed_app(monkeypatch, tmp_path):
+    """Mnema.app of this Mac (/Applications) and its mnema-asr are never used: the helper is
+    absent unless a test gives one (tests/mac_helper_stub.py)."""
+    from mnema.core import base
+
+    monkeypatch.setattr(base, "SYSTEM_APPS", tmp_path / "System" / "Applications")
+    monkeypatch.setenv("MNEMA_ASR", str(tmp_path / "no-mnema-asr"))
+
+
+@pytest.fixture(autouse=True)
 def _no_llm_network(monkeypatch):
     """Unit tests stay off the network: the real litellm.completion is blocked.
 

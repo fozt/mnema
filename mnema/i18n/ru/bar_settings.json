@@ -106,5 +106,12 @@
   "OpenAI key for recognition": "Ключ OpenAI для распознавания",
   "DeepL key": "Ключ DeepL",
   "OpenAI key": "Ключ OpenAI",
-  "Change the OpenAI key…": "Сменить ключ OpenAI…"
+  "Change the OpenAI key…": "Сменить ключ OpenAI…",
+  "Recognition model": "Модель распознавания",
+  "Preparing…": "Подготавливаю…",
+  "Downloading… {percent}%": "Скачиваю… {percent} %",
+  "Could not download": "Не удалось скачать",
+  "Download again": "Скачать ещё раз",
+  "Not downloaded": "Не скачана",
+  "Download": "Скачать"
 }

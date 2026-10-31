@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any, ClassVar, Protocol, runtime_checkable
 
 from ..i18n import _
-from . import asr_engine, parakeet, vad
+from . import asr_engine, base, parakeet, vad
 from .asr_engine import group_speech, read_wav
 from .audio import extract_audio
 from .base import (
@@ -841,7 +841,9 @@ class CloudBackend(Engine):
     def available(self) -> bool:
         import importlib.util
 
-        return importlib.util.find_spec("litellm") is not None and vad.available()
+        # speech search of this machine: mnema-asr on the Mac, silero ONNX elsewhere
+        search = asr_engine.local_recognizer().available if base.STANDALONE else vad.available
+        return importlib.util.find_spec("litellm") is not None and search()
 
     def run(
         self,

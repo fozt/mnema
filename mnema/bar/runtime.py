@@ -49,6 +49,7 @@ from .state import (
     BarState,
     Job,
     JobKind,
+    LocalModel,
     MenuEnv,
     Phase,
     Recognition,
@@ -395,6 +396,7 @@ class BarRuntime:
         self.env_rev = 0  # grows when the menu environment changes (models, server, token)
         self._asr_choices: list[tuple[str, str]] = []  # the engines of the recognition place
         self._asr_stale = False  # the server list was not read: reread once it answers
+        self._local_model: LocalModel | None = None  # this Mac's recognition model (mnema-asr)
         self._ping_at = float("-inf")  # when the server was last asked (monotonic)
         self._update = ""  # the newer version (MenuEnv.update)
         self._update_error = ""  # the last check or update failed: not a "latest version" answer
@@ -541,6 +543,7 @@ class BarRuntime:
 
                 if place == Recognition.CLOUD:
                     return cloud_models()
+                self._read_local_model()
                 return [(c["id"], c["title"]) for c in node_settings.local_asr_choices()]
             from ..client import MnemaClient
 
@@ -563,6 +566,71 @@ class BarRuntime:
         thread.start()
         return thread
 
+    def _read_local_model(self) -> None:
+        """What mnema-asr says of its model (no network); kept as is while it downloads."""
+        from ..core import mac_helper
+
+        found = None
+        if mac_helper.MacHelper().available():
+            try:
+                listed = mac_helper.models()
+            except MediaError:
+                logger.info("mnema-asr did not list its models", exc_info=True)
+            else:
+                found = next((m for m in listed if m.id == mac_helper.RECOGNIZER), None)
+        with self._lock:
+            current = self._local_model
+            if current is not None and current.downloading:
+                return
+            error = current.error if current is not None and found and not found.installed else ""
+            self._local_model = (
+                None
+                if found is None
+                else LocalModel(size=found.size, installed=found.installed, error=error)
+            )
+
+    def _download_local_model(self) -> None:
+        """Recognition on this Mac is chosen, or "Download": the model in the background, its
+        share in the settings; there already — only a check. A failure — the reason in the row."""
+        from ..core import mac_helper
+
+        if not _base.STANDALONE or not mac_helper.MacHelper().available():
+            return
+        with self._lock:
+            current = self._local_model
+            if current is not None and current.downloading:
+                return
+            self._local_model = LocalModel(
+                size=current.size if current is not None else 0, downloading=True
+            )
+
+        def step(share: float | None, message: str) -> None:
+            with self._lock:
+                model = self._local_model
+                if model is None or model.progress == share:
+                    return
+                self._local_model = model.model_copy(update={"progress": share})
+            self._env_changed()
+
+        def work() -> None:
+            error = ""
+            try:
+                mac_helper.download(mac_helper.RECOGNIZER, on=step)
+            except MediaError as e:
+                logger.warning("the recognition model was not downloaded: %s", e)
+                error = str(e)
+            with self._lock:
+                model = self._local_model
+                if model is not None:
+                    self._local_model = model.model_copy(
+                        update={"downloading": False, "progress": None, "error": error}
+                    )
+            self._read_local_model()
+            self._env_changed()
+
+        self._env_changed()
+        threading.Thread(target=work, daemon=True, name="mnema-bar-asr-model").start()
+
     def menu_env(self) -> MenuEnv:
         """Connection, the models and the recognition list; keys only masked."""
         from .. import node_settings
@@ -583,6 +651,7 @@ class BarRuntime:
             mac=_base.STANDALONE,
             asr_choices=self._asr_choices,
             asr_key=self.server_asr_key if server else self._here_asr_key() if here else None,
+            asr_model=self._local_model if _base.STANDALONE else None,
             update=self._update,
             update_error=self._update_error,
             update_step=self._update_step,
@@ -1005,6 +1074,8 @@ class BarRuntime:
         elif key.startswith("recognition:") and idle:
             if not self._set_recognition(key.removeprefix("recognition:")):
                 return
+        elif key == "asr_model_download" and idle:
+            self._download_local_model()
         elif key == "update_check":
             self._check_updates()
         elif key == "update":
@@ -1556,6 +1627,8 @@ class BarRuntime:
             return False
         self.prefs = BarPrefs.model_validate({**self.prefs.model_dump(), "recognition": value})
         self._load_asr_choices()
+        if value == Recognition.MAC:  # the model comes when this Mac is to recognize
+            self._download_local_model()
         self._check_server_async()  # name, model and reachability of the server for "Model"
         self._env_changed()
         return True
@@ -1874,6 +1947,9 @@ class BarRuntime:
                     self._sync_jobs()
                 self._scan_unfinished()
                 self._library_changed()
+                model = self._local_model
+                if model is not None and not model.installed and not model.downloading:
+                    self._load_asr_choices()  # the first recording may have downloaded it
             try:
                 self._after(task, completed)
             except Exception:  # noqa: BLE001
