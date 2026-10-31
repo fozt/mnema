@@ -944,38 +944,61 @@ def summarize_folder(
     base: Path,
     *,
     lang: str | None,
+    summary: bool = True,
+    retitle: bool | None = None,
+    translate: str | None = None,
     on: Progress = noop,
     on_base: Callable[[Path], None] | None = None,
 ) -> LiveResult:
     """ "Summarize": title and summary of the folder's transcript.txt by this process's model,
-    without the _SUMMARY_MIN_CHARS threshold. On success writes summary.txt and renames a
-    default name, keeping a part mark (on_base gets the new folder). Remarks: the previous ones
-    minus title and summary, plus the new ones; the history gets Run(kind="summary"). No
+    without the _SUMMARY_MIN_CHARS threshold; summary=False makes only the title, translate also
+    writes translation.md in that language. Renames a default name, any name with retitle=True
+    and none with False, keeping a part mark (on_base gets the new folder). Remarks: the previous
+    ones minus title and summary, plus the new ones; the history gets Run(kind="summary"). No
     transcript.txt raises MediaError; without a model ops.admit refuses the job before this;
     cancelling before the files are written changes nothing."""
     from .persist import write_summary
+    from .translate import detect_lang
 
     text = (_read(base / "transcript.txt") or "").strip()
     if not text:
         raise MediaError(_("No transcript. Process the recording first"))
-    run = _meta.begin(LiveConfig(summary_lang=lang))
+    run = _meta.begin(LiveConfig(summary_lang=lang, summary=summary))
     run.kind = "summary"
     warnings: list[Remark] = []
-    summary = summarize_text(text, run, warnings, on, lang=lang)  # cancelling raises here
-    if not summary.title and summary.engine == "none" and summary.note is not None:
-        if remark := _remarks.light(Step.TITLE, summary.note):
-            warnings.append(remark)
+    found = claude.Summary()
+    if summary:
+        found = summarize_text(text, run, warnings, on, lang=lang)  # cancelling raises here
+        if not found.title and found.engine == "none" and found.note is not None:
+            if remark := _remarks.light(Step.TITLE, found.note):
+                warnings.append(remark)
+    translation = None
+    if translate and detect_lang(text) != translate:
+        on(None, _step(STEP_MESSAGES["translate"]))
+        t0 = time.monotonic()
+        translation, _title, failed = _final_translate(text, to_lang=translate, titled=False, on=on)
+        run.steps["translate"] = _took(t0)
+        if failed:
+            warnings.append(_remarks.translation_failed())
     new = base
-    if summary.title and is_default_name(base):  # "2026-10-21_08-35 (0.10–1.35)" too
-        try:
-            new = rename_session(base, summary.title)
-        except OSError:
-            logger.warning("could not rename %s", base, exc_info=True)
+    renamed = is_default_name(base) if retitle is None else retitle  # "… (0.10–1.35)" too
+    if renamed and (found.title or not summary):  # a refused summary asks for no title again
+        if not summary:
+            on(None, _step(TITLE_MESSAGE))
+        t0 = time.monotonic()
+        title_lang = lang if summary else None  # without the summary the title follows the call
+        new, _paths = _retitle(
+            base, [], text, title=found.title, warnings=warnings, lang=title_lang
+        )
+        run.steps["title"] = _took(t0)
         if new != base and on_base is not None:
             on_base(new)
     result = LiveResult(transcript_txt=new / "transcript.txt", base=new)
-    if summary.points:
-        result.summary_md = write_summary(new, summary.about, summary.points)
+    if found.points:
+        result.summary_md = write_summary(new, found.about, found.points)
+    if translation:
+        result.translation_md = new / "translation.md"
+        result.translation_md.write_text(translation.strip() + "\n", encoding="utf-8")
     before = _meta.last(new)
     kept = [r for r in before.notes if r.step not in (Step.TITLE, Step.SUMMARY)] if before else []
     run.notes = [*kept, *warnings]

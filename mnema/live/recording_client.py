@@ -33,7 +33,14 @@ from ..ops import recording_result
 from ..sync.scan import FILES_LOCK
 from . import meta, remarks
 from .models import LiveResult
-from .naming import chosen_title, free_name, part_label, started_iso, titled_path
+from .naming import (
+    chosen_title,
+    free_name,
+    is_default_name,
+    part_label,
+    started_iso,
+    titled_path,
+)
 from .persist import _atomic_bytes
 from .setup import PROCESSING_MARK
 
@@ -635,9 +642,9 @@ def recover_on_node(
     tracks: which tracks to transcribe (the "Process recording" window); the others are not
     uploaded and stay out of the shared mp3; None means all. title: the user's own title of
     this run (None for none) written to the work file of the processed folder or part; ...
-    keeps what the work file already has. summary_at: the server that titles and summarizes
-    what this Mac recognized (... — node.summary_server, the connected one; None — this Mac's
-    model)."""
+    keeps what the work file already has. summary_at: the server that titles, summarizes and
+    translates what this Mac recognized (... — node.summary_server, the connected one; None —
+    this Mac's model); then this Mac asks no model itself."""
     from ..node import summary_server
     from .setup import _mix_recording, finish_recovery, prepare_recovery
 
@@ -646,7 +653,6 @@ def recover_on_node(
         summary_at = None
     elif summary_at is ...:
         summary_at = summary_server()
-    asked = config.summary and summary_at is not None  # the server titles and summarizes
     status = client.health()
     if status is None:
         from .setup import finish_command
@@ -702,9 +708,9 @@ def recover_on_node(
         "retitle": retitle,
         "user_title": own_title(work),
     }
-    if asked:  # recognition only: the title comes with the server's summary
+    if summary_at is not None:  # recognition only: the model steps are the server's
         values |= {"summary": False, "retitle": False}
-    if config.translate:
+    elif config.translate:
         values["translate"] = config.translate
     try:
         result = process(work, client, "recording", values, paths, on=on, on_base=on_base)
@@ -713,6 +719,8 @@ def recover_on_node(
             drop_part()
             setattr(exc, "mnema_base", base)  # noqa: B010 - the part is gone
         raise
+    if result.base is not None and result.base.name != work.name:
+        retitle = False  # the user's own title named the folder
     prepared.base = result.base or work
     prepared.info = list(dict.fromkeys([*prepared.info, *result.info]))
     mixed: list[remarks.Remark] = []
@@ -737,17 +745,25 @@ def recover_on_node(
         on_lang(result.languages)
     if result.transcript_txt is not None and on_transcript is not None:
         on_transcript(result.transcript_txt)
-    if asked and result.transcript_txt is not None:
-        assert summary_at is not None
-        result = _summary_from(summary_at, result, lang=config.summary_lang, on=on, on_base=on_base)
+    if summary_at is not None and result.transcript_txt is not None and result.base is not None:
+        titled = is_default_name(result.base) if retitle is None else retitle
+        if _has_text(result.transcript_txt) and (config.summary or titled or config.translate):
+            asked = {"summary": config.summary, "retitle": retitle, "translate": config.translate}
+            result = _summary_from(
+                summary_at, result, lang=config.summary_lang, on=on, on_base=on_base, **asked
+            )
     full = result.transcript_txt.read_text(encoding="utf-8") if result.transcript_txt else ""
     return result, full
 
 
-def _summary_from(server, result: LiveResult, *, lang, on, on_base) -> LiveResult:
-    """Recognized on this Mac: the title and the summary by the user's model on the server, the
-    way "Summarize" asks for them. The server unavailable or refusing leaves the transcript
-    without a summary, with the reason in the history and "Summarize" on the card."""
+def _summary_from(
+    server, result: LiveResult, *, lang, summary, retitle, translate, on, on_base
+) -> LiveResult:
+    """Recognized on this Mac: the title, the summary (when summary) and the translation (when
+    translate) by the user's model on the server, the way "Summarize" asks for them. The server
+    unavailable or refusing leaves the transcript without them, with the reason in the history
+    and "Summarize" on the card; the user's own title still names the folder. A stop during
+    this step leaves the recognition processed: the exception carries it as mnema_recognized."""
     base = result.base
     assert base is not None
     status = MnemaClient(server.url, token=server.token).health()
@@ -759,36 +775,62 @@ def _summary_from(server, result: LiveResult, *, lang, on, on_base) -> LiveResul
         reason = _(NEW_INVITE)
     else:
         try:
-            summary = summarize_on_node(
-                base, server, lang=lang, on=lambda _f, message: on(None, message), on_base=on_base
+            done = summarize_on_node(
+                base,
+                server,
+                lang=lang,
+                summary=summary,
+                retitle=retitle,
+                translate=translate,
+                on=lambda _f, message: on(None, message),
+                on_base=on_base,
             )
         except Exception as exc:  # noqa: BLE001 - the transcript is saved, only the summary is not
-            drop_request(getattr(exc, "mnema_base", base))
+            base = getattr(exc, "mnema_base", base)
+            drop_request(base)
             if isinstance(exc, MediaError):
                 reason = str(exc)
             else:
                 logger.warning("summary of %s failed on the server", base, exc_info=True)
                 reason = _(_UNAVAILABLE, server=meta.host(server.url) or server.url)
         except BaseException as exc:
-            drop_request(getattr(exc, "mnema_base", base))
+            moved = getattr(exc, "mnema_base", base)
+            drop_request(moved)
+            setattr(exc, "mnema_recognized", _moved_to(result, moved))  # noqa: B010
             raise
         else:
-            moved = summary.base or base
-            return result.model_copy(
+            moved = done.base or base
+            return _moved_to(result, moved).model_copy(
                 update={
-                    "base": moved,
-                    "transcript_txt": summary.transcript_txt,
-                    "summary_md": summary.summary_md,
-                    "remarks": summary.remarks,
-                    "recordings": [moved / p.name for p in result.recordings],
+                    "transcript_txt": done.transcript_txt,
+                    "summary_md": done.summary_md,
+                    "translation_md": done.translation_md,
+                    "remarks": done.remarks,
                 }
             )
     logger.info("summary of %s not written on the server: %s", base, reason)
-    note = remarks.summary_failed(reason)
+    try:
+        base = _complete(base, on_base)  # the own title names the folder as after a result
+    except MediaError:  # a foreign or broken marker is not ours to fix
+        pass
+    note = remarks.summary_failed(reason) if summary else remarks.title_failed(reason)
     with FILES_LOCK:
         _summary_note(base, note)
     kept = [r for r in result.remarks if r.step not in (remarks.Step.SUMMARY, remarks.Step.TITLE)]
-    return result.model_copy(update={"remarks": remarks.merged([*kept, note])})
+    return _moved_to(result, base).model_copy(update={"remarks": remarks.merged([*kept, note])})
+
+
+def _moved_to(result: LiveResult, base: Path) -> LiveResult:
+    """The recognition result in the folder's current place."""
+    if base == result.base:
+        return result
+    return result.model_copy(
+        update={
+            "base": base,
+            "transcript_txt": base / "transcript.txt" if result.transcript_txt else None,
+            "recordings": [base / p.name for p in result.recordings],
+        }
+    )
 
 
 def _summary_note(base: Path, note: remarks.Remark) -> None:
@@ -808,12 +850,27 @@ def _summary_note(base: Path, note: remarks.Remark) -> None:
     meta._write(base, data)
 
 
-def summarize_on_node(base, connection, *, lang=None, on=noop, on_base=None):
-    """Redoing the summary and title sends the finished transcript, without ASR."""
+def summarize_on_node(
+    base,
+    connection,
+    *,
+    lang=None,
+    summary=True,
+    retitle=None,
+    translate=None,
+    on=noop,
+    on_base=None,
+):
+    """Redoing the summary and title sends the finished transcript, without ASR. summary=False
+    asks only for the title; retitle as in summarize_folder; translate also asks for
+    translation.md."""
     past = meta.last(base)
     values = {
         **_params(base, summary_lang=lang),
         "past": past.model_dump(mode="json") if past else None,
+        "summary": summary,
+        "retitle": retitle,
+        "translate": translate,
     }
     return process(
         base,

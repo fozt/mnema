@@ -490,3 +490,105 @@ def test_finish_with_local_summarizes_on_this_mac_too(monkeypatch, tmp_path, sou
     [done] = (tmp_path / "notes").iterdir()
     assert (done / "summary.txt").is_file() is local
     assert len(calls) == (1 if local else 0)
+
+
+def _models_by_place(monkeypatch, title: str = "Подготовка выпуска") -> list[tuple[bool, str]]:
+    """One model answers on this Mac and on the server alike (litellm); each call notes where it
+    ran (True — on this Mac, LocalNode) and what it was asked: a title, a summary, a translation."""
+    import litellm
+
+    calls: list[tuple[bool, str]] = []
+    summary = {"title": title, "about": "Готовим выпуск.", "summary": ["[0:00] Проверить ошибки"]}
+
+    def completion(**kw):
+        system = kw["messages"][0]["content"]
+        if "JSON" in system:
+            asked, content = "summary", json.dumps(summary, ensure_ascii=False)
+        elif system.startswith("Придумай"):
+            asked, content = "title", title
+        else:
+            asked, content = "translation", "We prepared the release."
+        calls.append((base.processed_here(), asked))
+        delta = types.SimpleNamespace(content=content)
+        choice = types.SimpleNamespace(delta=delta, finish_reason="stop")
+        return iter([types.SimpleNamespace(choices=[choice])])
+
+    monkeypatch.setattr(litellm, "completion", completion)
+    monkeypatch.setattr(claude.time, "sleep", lambda s: None)
+    return calls
+
+
+def _connected(monkeypatch, tmp_path) -> None:
+    """This Mac recognizes here and has a server connected for the user's model."""
+    _asr(monkeypatch)
+    _server(monkeypatch, tmp_path)
+    monkeypatch.setenv("MNEMA_RUNNER", "http://node:8123")
+
+
+@pytest.mark.parametrize("summary", [True, False], ids=["summary", "title-only"])
+def test_connected_mac_titles_and_summarizes_only_with_the_server_model(
+    monkeypatch, tmp_path, sources, summary
+) -> None:
+    """A Mac with a server recognizes here and never asks a model itself: the server titles the
+    recording with the user's model, and summarizes it when summaries are on; no "No model
+    configured" remark about this Mac."""
+    _connected(monkeypatch, tmp_path)
+    calls = _models_by_place(monkeypatch)
+    folder = _recording(tmp_path / "notes")
+    config = LiveConfig(mix_audio=False, summary=summary)
+    result, full = recording_client.recover_on_node(folder, config, None)
+    assert full and result.base.name == "2026-10-22_Подготовка выпуска"
+    assert calls and not [asked for here, asked in calls if here]
+    assert (result.base / "summary.txt").is_file() is summary
+    assert result.remarks == [] and not (result.base / PROCESSING_MARK).exists()
+    runs = json.loads((result.base / meta.META_FILE).read_text(encoding="utf-8"))["runs"]
+    assert [(r["kind"], r["status"]) for r in runs] == [("process", "ok"), ("summary", "ok")]
+    assert all(r["remarks"] == [] for r in runs)
+
+
+def test_connected_mac_names_by_content_as_asked(monkeypatch, tmp_path, sources) -> None:
+    """ "Process recording…" with an empty title names a titled recording by content: the server's
+    title replaces the old one, as when the server processes the whole recording."""
+    _connected(monkeypatch, tmp_path)
+    _models_by_place(monkeypatch)
+    folder = _recording(tmp_path / "notes", "2026-10-22_Релиз")
+    result, _full = recording_client.recover_on_node(
+        folder, LiveConfig(mix_audio=False), None, retitle=True
+    )
+    assert result.base.name == "2026-10-22_Подготовка выпуска"
+    assert [p.name for p in (tmp_path / "notes").iterdir()] == [result.base.name]
+
+
+def test_connected_mac_translates_with_the_server_model(monkeypatch, tmp_path, sources) -> None:
+    _connected(monkeypatch, tmp_path)
+    calls = _models_by_place(monkeypatch)
+    folder = _recording(tmp_path / "notes")
+    config = LiveConfig(mix_audio=False, translate="en")
+    result, _full = recording_client.recover_on_node(folder, config, None)
+    assert result.translation_md == result.base / "translation.md"
+    assert "We prepared the release." in result.translation_md.read_text(encoding="utf-8")
+    assert (False, "translation") in calls and not [asked for here, asked in calls if here]
+
+
+def test_own_title_names_the_folder_when_the_server_step_fails(
+    monkeypatch, tmp_path, sources
+) -> None:
+    """A title set while the server was asked for the summary names the folder even though the
+    server refused (no model there): the transcript stays, the work file goes."""
+    _connected(monkeypatch, tmp_path)
+    monkeypatch.delenv("MNEMA_MODEL")
+    folder = _recording(tmp_path / "notes")
+
+    def on(fraction, message):
+        if message == "Отправляю на сервер…":
+            recording_client.set_own_title(folder, "Планёрка")
+
+    result, full = recording_client.recover_on_node(
+        folder, LiveConfig(mix_audio=False), None, on=on
+    )
+    named = tmp_path / "notes" / "2026-10-22_Планёрка"
+    assert full and result.base == named and result.transcript_txt == named / "transcript.txt"
+    assert [p.name for p in (tmp_path / "notes").iterdir()] == [named.name]
+    assert not (named / PROCESSING_MARK).exists()
+    [remark] = result.remarks
+    assert remark.cause.startswith("Пересказ не составлен: ")

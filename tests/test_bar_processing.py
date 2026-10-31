@@ -496,6 +496,38 @@ def test_mac_recognizes_here_and_the_server_writes_the_summary(monkeypatch, home
     assert rt.state.last_summary == folder / "summary.txt"
 
 
+def test_stop_during_the_server_summary_keeps_the_recording_processed(monkeypatch, home) -> None:
+    """ "Stop processing" while the server writes the summary of what this Mac recognized: the
+    transcript stays processed (no stopped run in the history, its audio can be cleaned up), the
+    work file goes, and the notice says the summary was not written."""
+    captured: dict = {}
+    _patch_record(monkeypatch, home, captured)
+    _spied_server(monkeypatch, home)
+    _summaries(monkeypatch)
+    app = _App()
+    rt = BarRuntime(platform=app, prefs_file=home / "bar.json")
+    asked, jobs = client_mod.MnemaClient.submit, []
+
+    def submit(self, op, **kw):
+        jobs.append(asked(self, op, **kw))
+        rt.handle(f"record:{rt.state.jobs[0].id}:stop")  # pressed once the server has the job
+        return jobs[-1]
+
+    monkeypatch.setattr(client_mod.MnemaClient, "submit", submit)
+    rt.handle("start")
+    assert captured["started"].wait(timeout=10)
+    rt.handle("stop")
+    rt.join(timeout=30)
+    [job] = jobs
+    client_mod.MnemaClient(SERVER).wait_job(job)  # the server's job ends within the test
+    folder = next((home / "notes").iterdir())
+    runs = json.loads((folder / meta.META_FILE).read_text(encoding="utf-8"))["runs"]
+    assert [(r["kind"], r["status"]) for r in runs] == [("process", "ok")]
+    assert not (folder / PROCESSING_MARK).exists()
+    assert rt.state.error == "" and rt.state.last_result == folder / "transcript.txt"
+    assert app.notes[-1][0] == "Пересказ не составлен"
+
+
 def test_mac_on_server_summary_without_server_model_names_the_server(monkeypatch, home) -> None:
     """Summarizing with "On the server" and no model on the server: the server's refusal talks
     about the server, not the Mac settings; the recording as it was."""

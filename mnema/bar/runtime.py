@@ -2033,8 +2033,22 @@ class BarRuntime:
                     return None if result.defer_command else self.state.last_result
                 except FinalizeCancelled as e:
                     folder = getattr(e, "mnema_base", None) or job.folder  # may be renamed
+                    recognized = getattr(e, "mnema_recognized", None)
                     if not self._restarting(task):
-                        self._audio_only(task, folder)
+                        if recognized is None:
+                            self._audio_only(task, folder)
+                            return None
+                        # only the server's summary step stopped: the transcript stays processed
+                        from ..live.setup import PROCESSING_MARK
+
+                        with FILES_LOCK:
+                            (folder / PROCESSING_MARK).unlink(missing_ok=True)
+                        self.state.last_result = recognized.transcript_txt or folder
+                        self.state.last_warnings = list(recognized.remarks)
+                        self.state.last_summary = None
+                        self._platform.notify(
+                            _("Summary not written"), result_name(folder), self.state.last_result
+                        )
                         return None
                     if whole:
                         base = job.folder = folder
