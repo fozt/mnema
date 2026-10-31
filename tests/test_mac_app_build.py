@@ -1,11 +1,14 @@
 """The self-contained Mnema.app runs its own Python from wherever the bundle is copied."""
 
 import os
+import plistlib
 import subprocess
+import tarfile
 from pathlib import Path
 
 import pytest
 
+from mnema.bar import codesign
 from scripts import build_mac_app as build
 
 # a fake interpreter: says where it is, what it was asked and which bundle it belongs to
@@ -174,3 +177,99 @@ def test_bundle_carries_the_swift_licenses_and_the_model_attribution(tmp_path):
     models = (dest / "MODELS.txt").read_text()
     for credit in ("CC-BY-4.0", "NVIDIA", "moondream", "FluidInference/parakeet-ultra-coreml"):
         assert credit in models
+
+
+SITE = "Contents/Resources/python/lib/python3.12/site-packages"
+CODE = [
+    "Contents/Info.plist",
+    "Contents/MacOS/Mnema",
+    "Contents/Resources/Mnema.icns",
+    "Contents/Resources/bin/mnema-mcp",
+    "Contents/Resources/en.lproj/InfoPlist.strings",
+    "Contents/Resources/licenses/THIRD-PARTY.txt",
+    f"{SITE}/mnema-0.5.0.dist-info/RECORD",
+    f"{SITE}/mnema/__init__.py",
+    f"{SITE}/mnema/__pycache__/__init__.cpython-312.pyc",
+]
+RUNTIME = [
+    "Contents/MacOS/mnema-asr",
+    "Contents/Resources/bin/ffmpeg",
+    "Contents/Resources/python/bin/python3.12",
+    f"{SITE}/httpx/__init__.py",
+    f"{SITE}/mnemonic/__init__.py",  # not mnema
+    f"{SITE}/mnema.pth",
+]
+
+
+def _app(root: Path) -> Path:
+    app = root / "Mnema.app"
+    for rel in CODE + RUNTIME:
+        (app / rel).parent.mkdir(parents=True, exist_ok=True)
+        (app / rel).write_text(rel)
+    (app / "Contents/MacOS/Mnema").chmod(0o755)
+    (app / "Contents/Resources/python/bin/python3").symlink_to("python3.12")
+    return app
+
+
+def test_runtime_key_follows_the_runtime_not_the_code_or_the_signatures(tmp_path):
+    app = _app(tmp_path)
+    key = codesign.runtime_key(app)
+    for rel in CODE:
+        (app / rel).write_text("new code")
+    (app / "Contents/_CodeSignature").mkdir()
+    (app / "Contents/_CodeSignature/CodeResources").write_text("seal")
+    (app / f"{SITE}/mnema-0.6.0.dist-info").mkdir()
+    (app / f"{SITE}/mnema-0.6.0.dist-info/METADATA").write_text("x")
+    assert codesign.runtime_key(app) == key
+
+    changes = [
+        lambda: (app / f"{SITE}/httpx/__init__.py").write_text("other"),
+        lambda: (app / "Contents/MacOS/mnema-asr").chmod(0o755),
+        lambda: (
+            (app / "Contents/Resources/python/bin/python3").unlink()
+            or (app / "Contents/Resources/python/bin/python3").symlink_to("python3.13")
+        ),
+        lambda: (app / f"{SITE}/httpx/__init__.py").rename(app / f"{SITE}/httpx/core.py"),
+        lambda: (app / "Contents/Resources/bin/ffprobe").write_text(""),
+    ]
+    seen = {key}
+    for change in changes:
+        change()
+        seen.add(codesign.runtime_key(app))
+    assert len(seen) == len(changes) + 1
+
+
+def test_code_archive_is_the_code_of_the_bundle_and_rebuilds_byte_for_byte(tmp_path):
+    app = _app(tmp_path)
+
+    archive = build.code_archive(app, "0.5.0")
+
+    assert archive.name == "Mnema-0.5.0-mac-code.tar.gz" and archive.parent == tmp_path
+    with tarfile.open(archive) as package:
+        members = package.getmembers()
+    assert [m.name for m in members] == sorted(CODE) and all(m.isfile() for m in members)
+    assert {m.name for m in members if m.mode & 0o111} == {"Contents/MacOS/Mnema"}
+    first = archive.read_bytes()
+    os.utime(app / "Contents/Info.plist", (0, 0))
+    assert build.code_archive(app, "0.5.0").read_bytes() == first
+
+
+def _plist(app: Path, **keys: str) -> Path:
+    (app / "Contents").mkdir(parents=True)
+    info = {"CFBundleShortVersionString": "0.5.0", **keys}
+    (app / "Contents/Info.plist").write_bytes(plistlib.dumps(info))
+    return app
+
+
+def test_release_check_fails_when_the_runtime_changed_from_the_same_inputs(tmp_path, capsys):
+    new = _plist(tmp_path / "new/Mnema.app", MnemaRuntime="b" * 64, MnemaRuntimeInputs="i")
+    archive = tmp_path / "code.tar.gz"
+    same_inputs = _plist(tmp_path / "a/Mnema.app", MnemaRuntime="a" * 64, MnemaRuntimeInputs="i")
+    with pytest.raises(SystemExit, match="runtime"):
+        build.check_code_update(same_inputs, new, archive, "0.5.0")
+
+    other_inputs = _plist(tmp_path / "b/Mnema.app", MnemaRuntime="a" * 64, MnemaRuntimeInputs="j")
+    build.check_code_update(other_inputs, new, archive, "0.5.0")
+    without_key = _plist(tmp_path / "c/Mnema.app")  # 0.4: always the whole app
+    build.check_code_update(without_key, new, archive, "0.5.0")
+    assert "whole" in capsys.readouterr().out
