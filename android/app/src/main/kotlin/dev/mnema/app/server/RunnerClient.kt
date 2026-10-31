@@ -19,6 +19,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import okhttp3.Call
 import okhttp3.Callback
+import okhttp3.ConnectionPool
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
@@ -332,8 +333,12 @@ class RunnerClient(
         }
 
     companion object {
+        /** An idle connection leaves the pool before the server closes it: the server keeps one 75 s. */
+        fun connectionPool() = ConnectionPool(5, 30, TimeUnit.SECONDS)
+
         /** No redirects, so the token never leaves the address from the connection string. */
         fun defaultHttp(): OkHttpClient = OkHttpClient.Builder()
+            .connectionPool(connectionPool())
             .connectTimeout(10, TimeUnit.SECONDS)
             .readTimeout(60, TimeUnit.SECONDS)
             .writeTimeout(60, TimeUnit.SECONDS)

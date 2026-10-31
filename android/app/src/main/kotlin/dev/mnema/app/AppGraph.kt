@@ -74,6 +74,7 @@ class AppGraph(val context: Context) {
 
     // no redirects: the token goes nowhere beyond the given address
     private val http = OkHttpClient.Builder()
+        .connectionPool(RunnerClient.connectionPool())
         .connectTimeout(10, TimeUnit.SECONDS)
         .followRedirects(false)
         .followSslRedirects(false)
