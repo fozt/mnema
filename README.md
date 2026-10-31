@@ -84,7 +84,7 @@ start it turns on *Open at login*. The `mnema` command is not part of the app an
 separately (see [Command line](#command-line)). Updates come from GitHub Releases: *⋯ →
 Settings… → General → Check for updates* downloads the new app and replaces this one in place, so
 Mnema has to stay in a folder you can write to, such as *Applications*. When only Mnema's own code
-changed, the update is about 2 MB instead of the whole app. To remove Mnema, turn off *Open at
+changed, the update is about 4 MB instead of the whole app. To remove Mnema, turn off *Open at
 login* (*Settings → General*), quit it and move it to the Trash; settings stay in
 `~/.config/mnema`, recordings in `~/mnema`, the speech model in `~/Library/Application
 Support/Mnema`. The licenses of everything inside the app are in

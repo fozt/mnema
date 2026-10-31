@@ -557,6 +557,15 @@ def assemble(out: Path, ffmpeg: Path | None, version: str, sources: bool = False
     return app
 
 
+def _hdiutil(command: list) -> None:
+    for attempt in range(3):  # CI runners sometimes answer "Resource busy"
+        if subprocess.run(command, check=False).returncode == 0:
+            return
+        if attempt == 2:
+            raise SystemExit(f"{command[0]} {command[1]} failed")
+        time.sleep(10)
+
+
 def package(app: Path, version: str) -> tuple[Path, Path]:
     out = app.parent
     archive = out / f"Mnema-{version}-mac.zip"
@@ -567,14 +576,15 @@ def package(app: Path, version: str) -> tuple[Path, Path]:
     with tempfile.TemporaryDirectory(dir=out, prefix=".dmg-") as staging:
         run(["ditto", app, Path(staging) / "Mnema.app"])
         (Path(staging) / "Applications").symlink_to("/Applications")
+        # Created straight as ULMO, the image keeps ~50 MB of dead space: create it plain, then
+        # compress (lzma: half the size of lzfse).
+        plain = Path(staging).with_suffix(".plain.dmg")
         create = ["hdiutil", "create", "-volname", "Mnema", "-srcfolder", staging, "-ov"]
-        create += ["-format", "ULMO", "-quiet", image]  # lzma: half the size of lzfse
-        for attempt in range(3):  # CI runners sometimes answer "Resource busy"
-            if subprocess.run(create, check=False).returncode == 0:
-                break
-            if attempt == 2:
-                raise SystemExit("hdiutil create failed")
-            time.sleep(10)
+        _hdiutil(create + ["-format", "UDRO", "-quiet", plain])
+        try:
+            _hdiutil(["hdiutil", "convert", plain, "-format", "ULMO", "-quiet", "-o", image])
+        finally:
+            plain.unlink(missing_ok=True)
     return archive, image
 
 
