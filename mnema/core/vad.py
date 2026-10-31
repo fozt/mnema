@@ -34,7 +34,7 @@ def _session() -> Any:
     global _SESSION
     with _LOCK:
         if _SESSION is None:
-            import onnxruntime as ort  # ty: ignore[unresolved-import]
+            import onnxruntime as ort
 
             options = ort.SessionOptions()
             options.intra_op_num_threads = 1

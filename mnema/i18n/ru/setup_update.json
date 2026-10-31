@@ -40,5 +40,7 @@
   "Mnema {version}: no new versions": "Mnema {version}: новых версий нет",
   "Installing Mnema {version}…": "Устанавливаю Mnema {version}…",
   "No connection to the update server": "Нет связи с сервером обновлений",
-  "The update server answered with an error": "Сервер обновлений ответил ошибкой"
+  "The update server answered with an error": "Сервер обновлений ответил ошибкой",
+  "Mnema {version} is out: {url}": "Вышла Mnema {version}: {url}",
+  "Mnema {version} is out. Update the command: uv tool install --force \"mnema[cli] @ {wheel}\"": "Вышла Mnema {version}. Обновите команду: uv tool install --force \"mnema[cli] @ {wheel}\""
 }

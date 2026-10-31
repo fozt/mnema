@@ -7,12 +7,11 @@ Standard library only: install.sh runs this file on a bare Python.
 
 import sys
 
-# The Mac app (the DMG and ./install.sh client on a Mac): the panel's engine, mnema-mcp and the
-# engines it ships; GigaAM stays on the server. No web stack: only `mnema serve`, a development
-# command, needs it.
-MAC = ("menubar", "mcp", "parakeet", "whisper")
-LINUX_CLIENT = ("menubar", "mcp")  # recordings are processed by the server
-SERVER = ("full", "live")
+# The Mac app (the DMG): the panel's engine only. It recognizes through mnema-asr, the Swift
+# helper in the bundle; the command and mnema-mcp are a separate package (the "cli" extra).
+MAC = ("menubar",)
+LINUX_CLIENT = ("menubar", "cli")  # recordings are processed by the server
+SERVER = ("full",)
 
 ROLES = {"mac": MAC, "linux": LINUX_CLIENT, "server": SERVER}
 

@@ -1,7 +1,7 @@
 """mnema-bar entry point.
 
-`mnema-bar` — the icon in the GNOME top bar (on macOS the app is Mnema.app); `mnema-bar install`
-installs it as an app (Mnema.app or an app menu shortcut) with autostart, no terminal needed
+`mnema-bar` — the icon in the GNOME top bar (on macOS the app is Mnema.app from the DMG);
+`mnema-bar install` installs it as an app menu shortcut with autostart, no terminal needed
 afterwards; `mnema-bar uninstall` removes it; `--headless` — the engine inside Mnema.app
 (headless.py).
 """
@@ -120,12 +120,9 @@ def main() -> None:
     if args:
         raise SystemExit(_("Usage: mnema-bar [install | uninstall | notify-test]"))
     if platform.system() == "Darwin":  # on a Mac Mnema is only Mnema.app
-        raise SystemExit(
-            _(
-                "Install the Command Line Tools: xcode-select --install, then {command} install",
-                command=Path(sys.executable).parent / "mnema-bar",
-            )
-        )
+        from .install import from_dmg
+
+        raise SystemExit(from_dmg())
     if platform.system() != "Linux":
         raise SystemExit(_("mnema-bar runs on macOS and Linux (GNOME)."))
     _load_env()

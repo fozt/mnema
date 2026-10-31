@@ -24,16 +24,22 @@ _BLOCKED = {
     "openai",
 }
 
-_BLOCKER_PRELUDE = (
-    "import sys\n"
-    f"blocked = {_BLOCKED!r}\n"
-    "class Blocker:\n"
-    "    def find_spec(self, name, path=None, target=None):\n"
-    "        if name.split('.')[0] in blocked:\n"
-    "            raise ImportError('blocked by the thin client test: ' + name)\n"
-    "        return None\n"
-    "sys.meta_path.insert(0, Blocker())\n"
-)
+
+def _blocker(blocked: set[str]) -> str:
+    """A prelude that makes importing any of ``blocked`` fail."""
+    return (
+        "import sys\n"
+        f"blocked = {blocked!r}\n"
+        "class Blocker:\n"
+        "    def find_spec(self, name, path=None, target=None):\n"
+        "        if name.split('.')[0] in blocked:\n"
+        "            raise ImportError('blocked by the thin client test: ' + name)\n"
+        "        return None\n"
+        "sys.meta_path.insert(0, Blocker())\n"
+    )
+
+
+_BLOCKER_PRELUDE = _blocker(_BLOCKED)
 
 
 def _run(script: str) -> subprocess.CompletedProcess[str]:
@@ -76,3 +82,19 @@ def test_serve_without_web_stack_stops_with_a_message(tmp_path) -> None:
     assert "Traceback" not in proc.stderr
     assert "extra full" in proc.stdout
     assert not (tmp_path / ".mnema").exists()
+
+
+def test_the_mac_apps_engine_imports_without_the_command_and_engines() -> None:
+    """Mnema.app ships only the core and the menubar extra: its engine (the panel's protocol,
+    recording, system audio, the recognition worker) loads none of the command's packages and
+    no local engine."""
+    absent = {"rich", "yt_dlp", "deno", "mcp", "websockets", "onnxruntime", "torch", "mlx"}
+    script = (
+        _blocker(absent)
+        + "import mnema.bar.headless, mnema.bar.runtime, mnema.live.system_audio\n"
+        + "import mnema.core.worker, mnema.update\n"
+        + "print('OK')\n"
+    )
+    proc = _run(script)
+    assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
+    assert proc.stdout.startswith("OK")

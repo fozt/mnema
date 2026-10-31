@@ -1,6 +1,6 @@
 // swift-tools-version:6.0
 // Mnema for macOS: menu bar item, panel, windows. The logic lives in Python (mnema/bar), the
-// wire format in mnema/bar/protocol.py. Built by `mnema-bar install` (Command Line Tools, no Xcode).
+// wire format in mnema/bar/protocol.py. Built by scripts/build_mac_app.py (Command Line Tools).
 // mnema-asr: speech recognition on CoreML through FluidAudio, JSON lines over stdin and stdout
 // (MnemaASRProtocol, tests/fixtures/asr-helper-v1.json); built with `--product mnema-asr`.
 import PackageDescription

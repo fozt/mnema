@@ -3,11 +3,13 @@
     uv run python -m scripts.build_mac_app --out DIR [--ffmpeg PREFIX] [--version X.Y.Z] [--smoke]
         [--sources]
 
-Layout: Contents/MacOS/Mnema (the Swift panel), Contents/Resources/python (uv-managed
-python-build-standalone 3.12 with the app's packages installed into it), Contents/Resources/bin
-(mnema and mnema-mcp wrappers, ffmpeg and ffprobe from PREFIX/bin), Contents/Resources/licenses.
-Every path is relative to the bundle, so the app runs from wherever it is copied. Without
---ffmpeg the app uses ffmpeg from PATH (a warning says so). --sources also writes
+Layout: Contents/MacOS/Mnema (the Swift panel) and mnema-asr (recognition on CoreML),
+Contents/Resources/python (uv-managed python-build-standalone, pinned, with the app's packages
+installed into it), Contents/Resources/bin (ffmpeg and ffprobe from PREFIX/bin; mnema-mcp only
+tells old MCP configs how to get the mnema command, a package of its own),
+Contents/Resources/licenses. Every path is relative to the bundle, so the app runs from wherever
+it is copied. Packages the app must not carry fail the build (FORBIDDEN). Without --ffmpeg the
+app uses ffmpeg from PATH (a warning says so). --sources also writes
 third-party-sources-X.Y.Z.tar.gz (scripts/third_party_sources.py) next to the zip and the DMG.
 """
 
@@ -33,10 +35,18 @@ from mnema.extras import MAC as EXTRAS  # noqa: E402 - the one list of what the 
 from scripts import third_party_sources  # noqa: E402
 
 SWIFT_PACKAGE = ROOT / "mnema" / "bar" / "macos"
+SWIFT_PRODUCTS = ("Mnema", "mnema-asr")  # both into Contents/MacOS
 BUNDLE_ID = "com.mnema.bar"
 PY = "python3.12"
-# mutagen (GPL) is in yt-dlp[default] only to embed thumbnails and tags, which mnema never asks for
-NOT_SHIPPED = ("mutagen",)
+PYTHON_VERSION = "3.12.16"  # python-build-standalone: the same interpreter in every build
+# The heavy Python the app does without: recognition is mnema-asr, the command (rich, yt-dlp,
+# deno, mcp) is a package of its own. mutagen (GPL) only came with yt-dlp. Distribution names,
+# canonical (PEP 503).
+FORBIDDEN = (
+    "torch", "torchaudio", "mlx", "mlx-whisper", "parakeet-mlx", "whisperx", "gigaam", "numba",
+    "scipy", "scikit-learn", "librosa", "transformers", "silero-vad", "onnxruntime",
+    "whisperlivekit", "yt-dlp", "deno", "rich", "mcp", "mutagen",
+)  # fmt: skip
 # stdlib parts the app never imports
 _STDLIB_DROP = ("idlelib", "tkinter", "test", "turtledemo", "turtle.py")
 # Installed but never imported at run time: pip and setuptools are build tools (torch, cffi and
@@ -46,8 +56,10 @@ _SITE_DROP = (
     "PyObjCTest",
 )  # fmt: skip
 _DIST_DROP = ("pip", "setuptools", "wheel")
-# Packages whose "tests" folders are only their test suites (not torch: it imports its own)
-_TESTS_DROP = ("numpy", "scipy", "sympy", "sklearn", "networkx", "mpmath")
+# Packages whose "tests" folders are only their test suites
+_TESTS_DROP = ("numpy",)
+# Parts never imported: litellm's proxy admin UI, the debug symbols of pyobjc
+_SLICES = ("litellm/proxy/_experimental", "objc/*.dSYM")
 _LIB_DROP = re.compile(r"^(libtcl|libtk|tcl|tk|itcl|thread)")
 _BIN_DROP = re.compile(r"^(idle|pydoc|2to3)")
 MACHO_MAGIC = {
@@ -61,18 +73,30 @@ _SHEBANG = (
     '#!/bin/sh\n\'\'\'exec\' "$(dirname -- "$(realpath -- "$0")")"/{py} "$0" "$@"\n\' \'\'\'\n'
 )
 
-WRAPPER = """#!/bin/sh
-# {name} from Mnema.app: the bundled Python, wherever the app is (links are followed)
-self=$(realpath -- "$0") || exit 1
-res=$(dirname -- "$(dirname -- "$self")")
-export MNEMA_APP_BUNDLE="$(dirname -- "$(dirname -- "$res")")"
-export PYTHONNOUSERSITE=1 PYTHONDONTWRITEBYTECODE=1
-export SSL_CERT_FILE="$res/python/lib/{py}/site-packages/certifi/cacert.pem"
-export PATH="$res/bin:$res/python/bin:$PATH"
-exec "$res/python/bin/{py}" -I -B -c \
-  'import sys; sys.argv[0] = "{name}"; from {module} import main; sys.exit(main())' "$@"
+# Old MCP configs start the app's mnema-mcp: it says where the command is now
+MCP_STUB = (
+    "#!/bin/sh\n"
+    "echo 'mnema-mcp is part of the mnema command now. Install it: "
+    'uv tool install "mnema[cli] @ {wheel}"\' >&2\n'
+    "exit 1\n"
+)
+WHEEL = (
+    "https://github.com/fozt/mnema/releases/download/v{version}/mnema-{version}-py3-none-any.whl"
+)
+# The weights mnema-asr downloads on first use: CC-BY-4.0 asks for attribution
+MODELS = """\
+Models Mnema downloads on first use (not part of this app)
+
+Parakeet Ultra on CoreML: https://huggingface.co/FluidInference/parakeet-ultra-coreml
+  CoreML conversion by FluidInference of moondream/parakeet-ultra
+  (https://huggingface.co/moondream/parakeet-ultra), a fine-tune of NVIDIA
+  parakeet-tdt-0.6b-v3 (https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3).
+  License: CC-BY-4.0, https://creativecommons.org/licenses/by/4.0/
+
+silero VAD on CoreML: https://huggingface.co/FluidInference/silero-vad-coreml
+  CoreML conversion by FluidInference of silero-vad (https://github.com/snakers4/silero-vad).
+  License: MIT
 """
-WRAPPERS = {"mnema": "mnema.cli", "mnema-mcp": "mnema.mcp.server"}
 
 
 def say(text: str) -> None:
@@ -89,14 +113,19 @@ def pyproject_version() -> str:
 
 
 def managed_python() -> Path:
-    """The prefix of the uv-managed CPython 3.12 (python-build-standalone): relocatable, with a
-    shared libpython for the embedded engine."""
-    find = ["uv", "python", "find", "--managed-python", "--no-project", "3.12"]
+    """The prefix of the uv-managed CPython PYTHON_VERSION (python-build-standalone):
+    relocatable, with a shared libpython for the embedded engine."""
+    find = ["uv", "python", "find", "--managed-python", "--no-project", PYTHON_VERSION]
     out = subprocess.run(find, capture_output=True, text=True, cwd=tempfile.gettempdir())
     if out.returncode != 0:
-        run(["uv", "python", "install", "3.12"])
+        run(["uv", "python", "install", PYTHON_VERSION])
         out = subprocess.run(find, capture_output=True, text=True, check=True)
-    prefix = Path(out.stdout.strip()).resolve().parent.parent
+    python = Path(out.stdout.strip())
+    said = run([python, "-I", "-c", "import platform; print(platform.python_version())"],
+               capture_output=True, text=True).stdout.strip()  # fmt: skip
+    if said != PYTHON_VERSION:
+        raise SystemExit(f"{python} is Python {said}, the app needs {PYTHON_VERSION}")
+    prefix = python.resolve().parent.parent
     if not (prefix / "lib" / f"lib{PY}.dylib").exists():
         raise SystemExit(f"{prefix}: no lib{PY}.dylib, not a python-build-standalone install")
     return prefix
@@ -128,28 +157,35 @@ def install_packages(python: Path, work: Path) -> None:
     export = ["uv", "export", "--frozen", "--no-dev", "--no-emit-project", "--no-hashes"]
     for extra in EXTRAS:
         export += ["--extra", extra]
-    for name in NOT_SHIPPED:
-        export += ["--no-emit-package", name]
     run([*export, "-o", requirements], cwd=ROOT, capture_output=True)
     # copies, not links into the uv cache: signing rewrites files in place
     install = ["uv", "pip", "install", "--python", python, "--link-mode", "copy", "--no-config"]
     env = {**os.environ, "UV_PYTHON_DOWNLOADS": "never"}
     env.pop("VIRTUAL_ENV", None)
-    run([*install, "-r", requirements], env=env)
+    run([*install, "--no-build", "-r", requirements], env=env)  # wheels only, as locked
     run([*install, "--no-deps", "--reinstall-package", "mnema", source_tree(work)], env=env)
 
 
+def _dist_name(dist_info: Path) -> str:
+    """The canonical distribution name of a NAME-VERSION.dist-info folder (PEP 503)."""
+    return re.sub(r"[-_.]+", "-", dist_info.name.rsplit("-", 1)[0]).lower()
+
+
 def trim(python_home: Path) -> int:
-    """Remove what the app never imports (see _SITE_DROP, _TESTS_DROP); returns bytes freed.
-    Fails if a package that must not ship came in."""
+    """Remove what the app never imports (_SITE_DROP, _TESTS_DROP, _SLICES, the console scripts
+    of mnema); returns bytes freed. Fails if a package that must not ship came in."""
     site = python_home / "lib" / PY / "site-packages"
-    if found := [n for n in NOT_SHIPPED if any(site.glob(f"{n}-*.dist-info"))]:
+    found = [p.name.removesuffix(".dist-info") for p in sorted(site.glob("*.dist-info"))]
+    if found := [name for name in found if _dist_name(Path(name)) in FORBIDDEN]:
         raise SystemExit(f"must not ship: {', '.join(found)}")
     doomed = [site / name for name in _SITE_DROP]
     doomed += [p for name in _DIST_DROP for p in site.glob(f"{name}-*.dist-info")]
-    doomed += [p for p in (python_home / "bin").iterdir() if re.match(r"^(pip|wheel)", p.name)]
+    doomed += [
+        p for p in (python_home / "bin").iterdir() if re.match(r"^(pip|wheel|mnema)", p.name)
+    ]
     for package in _TESTS_DROP:
         doomed += [p for p in (site / package).rglob("tests") if p.is_dir()]
+    doomed += [p for pattern in _SLICES for p in site.glob(pattern)]
     freed = 0
     for path in doomed:
         if path.is_symlink() or path.is_file():
@@ -159,6 +195,30 @@ def trim(python_home: Path) -> int:
             freed += sum(f.lstat().st_size for f in path.rglob("*") if not f.is_dir())
             shutil.rmtree(path)
     return freed
+
+
+def write_mcp_stub(bin_dir: Path, version: str) -> Path:
+    stub = bin_dir / "mnema-mcp"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    stub.write_text(MCP_STUB.format(wheel=WHEEL.format(version=version)), encoding="utf-8")
+    stub.chmod(0o755)
+    return stub
+
+
+def swift_licenses(checkouts: Path, dest: Path) -> None:
+    """The licenses of the Swift packages built into the app (FluidAudio and those it lists in
+    ThirdPartyLicenses/) into dest/swift/<package>/, and the attribution of the downloaded models
+    into dest/MODELS.txt."""
+    for package in sorted(p for p in checkouts.iterdir() if p.is_dir()):
+        target = dest / "swift" / package.name
+        for file in package.iterdir():
+            if file.is_file() and _LICENSE_FILE.match(file.name):
+                target.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(file, target / file.name)
+        if (package / "ThirdPartyLicenses").is_dir():
+            shutil.copytree(package / "ThirdPartyLicenses", target / "ThirdPartyLicenses")
+    dest.mkdir(parents=True, exist_ok=True)
+    (dest / "MODELS.txt").write_text(MODELS, encoding="utf-8")
 
 
 _COPYLEFT = re.compile(r"\bL?GPL(?:v\d|\b)|GNU (Lesser |Library )?General Public", re.I)
@@ -263,10 +323,13 @@ def absolute_links(tree: Path) -> list[Path]:
     ]
 
 
-def build_panel(cache: Path) -> Path:
-    cmd = ["swift", "build", "-c", "release", "--package-path", SWIFT_PACKAGE]
-    run([*cmd, "--scratch-path", cache])
-    return cache / "release" / "Mnema"
+def build_swift(cache: Path) -> dict[str, Path]:
+    """The panel and mnema-asr, release builds; FluidAudio's resource bundles (text to speech)
+    stay out of the app."""
+    cmd = ["swift", "build", "-c", "release", "--package-path", SWIFT_PACKAGE, "--scratch-path"]
+    for product in SWIFT_PRODUCTS:
+        run([*cmd, cache, "--product", product])
+    return {product: cache / "release" / product for product in SWIFT_PRODUCTS}
 
 
 def compile_bytecode(python: Path) -> None:
@@ -351,8 +414,7 @@ def sign(app: Path) -> None:
 
 
 def write_metadata(app: Path, python: Path, version: str) -> None:
-    """Info.plist, permission texts and the icon: the same as the source build makes, without
-    the engine keys (the app finds its Python in the bundle)."""
+    """Info.plist and the permission texts (mnema.bar.install.write_bundle)."""
     code = (
         "import sys; from pathlib import Path; from mnema.bar import install; "
         "install.write_bundle(Path(sys.argv[1]), version=sys.argv[2])"
@@ -367,9 +429,9 @@ def assemble(out: Path, ffmpeg: Path | None, version: str, sources: bool = False
     work.mkdir(parents=True, exist_ok=True)
     res = app / "Contents" / "Resources"
     (app / "Contents" / "MacOS").mkdir(parents=True)
-    say("building the Swift panel")
-    panel = build_panel(work / "swift")
-    shutil.copy2(panel, app / "Contents" / "MacOS" / "Mnema")
+    say("building the Swift panel and mnema-asr")
+    for product, built in build_swift(work / "swift").items():
+        shutil.copy2(built, app / "Contents" / "MacOS" / product)
     say("copying Python")
     python = copy_python(managed_python(), res / "python")
     say("installing packages")
@@ -377,15 +439,12 @@ def assemble(out: Path, ffmpeg: Path | None, version: str, sources: bool = False
     say(f"trimmed {trim(res / 'python') / 2**20:.0f} MB the app never imports")
     relocate_scripts(res / "python" / "bin")
     bin_dir = res / "bin"
-    bin_dir.mkdir()
-    for name, module in WRAPPERS.items():
-        wrapper = bin_dir / name
-        wrapper.write_text(WRAPPER.format(name=name, module=module, py=PY), encoding="utf-8")
-        wrapper.chmod(0o755)
+    write_mcp_stub(bin_dir, version)
     licenses = res / "licenses"
     licenses.mkdir()
     shutil.copy2(ROOT / "LICENSE", licenses / "Mnema-LICENSE")
     shutil.copy2(res / "python" / "lib" / PY / "LICENSE.txt", licenses / "Python-LICENSE.txt")
+    swift_licenses(work / "swift" / "checkouts", licenses)
     site = res / "python" / "lib" / PY / "site-packages"
     copyleft = package_licenses(site, licenses, version)
     if sources and ffmpeg is not None:
@@ -399,6 +458,7 @@ def assemble(out: Path, ffmpeg: Path | None, version: str, sources: bool = False
     else:
         say("WARNING: no --ffmpeg, the app will use ffmpeg and ffprobe from PATH")
     write_metadata(app, python, version)
+    shutil.copy2(SWIFT_PACKAGE / "Mnema.icns", res / "Mnema.icns")
     compile_bytecode(python)
     if links := absolute_links(app):
         raise SystemExit(f"links leave the bundle: {', '.join(map(str, links[:5]))}")
@@ -419,7 +479,7 @@ def package(app: Path, version: str) -> tuple[Path, Path]:
         run(["ditto", app, Path(staging) / "Mnema.app"])
         (Path(staging) / "Applications").symlink_to("/Applications")
         create = ["hdiutil", "create", "-volname", "Mnema", "-srcfolder", staging, "-ov"]
-        create += ["-format", "ULMO", "-quiet", image]  # lzma: a fifth smaller than UDZO
+        create += ["-format", "ULFO", "-quiet", image]  # lzfse: mounts faster than lzma
         for attempt in range(3):  # CI runners sometimes answer "Resource busy"
             if subprocess.run(create, check=False).returncode == 0:
                 break

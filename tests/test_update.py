@@ -69,6 +69,7 @@ def release(monkeypatch, tmp_path):
                     "version": state["version"],
                     "archive": "https://releases.test/archive",
                     "sha256": state.get("sha256") or hashlib.sha256(state["archive"]).hexdigest(),
+                    **state.get("manifest", {}),
                 },
             )
         return httpx.Response(200, content=state["archive"])
@@ -166,19 +167,10 @@ def test_apply_prepares_new_locked_environment_and_never_changes_checkout(
     assert not (checkout / ".venv").exists()
 
 
-@pytest.mark.parametrize(
-    ("standalone", "installed", "expected"),
-    [
-        (True, {"AppKit"}, {"menubar", "mcp", "parakeet", "whisper"}),
-        (False, {"pystray", "whisperx", "whisperlivekit", "mcp"}, {"menubar", "mcp"}),
-    ],
-)
-def test_app_release_installs_what_its_system_processes_with(
-    release, monkeypatch, standalone, installed, expected
-):
-    """The app updates as ./install.sh client installs it: a Mac processes itself and gets the
-    engines, a Linux client sends recordings to the server and drops them. User settings stay."""
-    monkeypatch.setattr(base, "STANDALONE", standalone)
+def test_app_release_installs_what_its_system_processes_with(release, monkeypatch):
+    """The Linux app updates as ./install.sh client installs it: the tray and the command, no
+    engines (the server processes). User settings stay."""
+    installed = {"pystray", "whisperx", "whisperlivekit", "mcp"}
     monkeypatch.setattr(
         update.importlib.util, "find_spec", lambda name: object() if name in installed else None
     )
@@ -186,9 +178,8 @@ def test_app_release_installs_what_its_system_processes_with(
     monkeypatch.setenv("MNEMA_RUNNER", "https://runner.test")
     update.apply()
     command, kwargs = release["commands"][0]
-    assert {command[index + 1] for index, item in enumerate(command) if item == "--extra"} == (
-        expected
-    )
+    extras = {command[index + 1] for index, item in enumerate(command) if item == "--extra"}
+    assert extras == {"menubar", "cli"}
     assert kwargs["env"]["MNEMA_ASR_THREADS"] == "6"
     assert kwargs["env"]["MNEMA_RUNNER"] == "https://runner.test"
 
@@ -284,49 +275,60 @@ def test_update_refuses_without_the_app_and_downloads_nothing(release, monkeypat
     assert release["calls"] == [] and release["commands"] == []
 
 
-def test_mac_update_without_command_line_tools_stops_before_download(
-    release, tmp_path, monkeypatch, caplog
-):
-    """swift from the Command Line Tools builds Mnema.app: without them the update stops before
-    downloading, the notice has no terminal commands (the command is in the log), the previous
-    version stays."""
+@pytest.mark.parametrize("terminal", [False, True])
+def test_mac_without_the_app_bundle_is_sent_to_the_dmg(release, tmp_path, monkeypatch, terminal):
+    """On a Mac there is no app built from the sources: an update outside Mnema.app downloads
+    nothing and names the DMG."""
     monkeypatch.setattr(update.sys, "platform", "darwin")
-    previous = tmp_path / "data/mnema/releases/0.1.0"
-    previous.mkdir(parents=True)
-    (previous / ".mnema-installed.json").write_text("{}")
-    release["failure"] = "xcode-select"
-    with pytest.raises(MediaError) as refused:
-        update.apply()
-    assert (
-        str(refused.value) == "Для обновления нужны Command Line Tools. Подробности в журнале Mnema"
+    monkeypatch.setattr(
+        update.importlib.util, "find_spec", lambda name: object() if name == "AppKit" else None
     )
-    assert "xcode-select --install" in caplog.text
-    assert release["calls"] == ["/latest"]
-    assert [command[0] for command, _ in release["commands"]] == ["xcode-select"]
-    assert [p.name for p in previous.parent.iterdir() if p.is_dir()] == ["0.1.0"]
+    with pytest.raises(MediaError) as refused:
+        update.apply(terminal=terminal)
+    assert str(refused.value) == f"Mnema для Mac ставится из DMG: {update.RELEASES_PAGE}"
+    assert release["calls"] == [] and release["commands"] == []
+    assert not [p for p in (tmp_path / "data/mnema/releases").iterdir() if p.is_dir()]
 
 
-def test_terminal_update_without_command_line_tools_names_the_command(release, monkeypatch, capsys):
-    """A terminal update without the Command Line Tools names the command in the refusal."""
+@pytest.fixture
+def uv_tool(monkeypatch, tmp_path):
+    """The mnema command of `uv tool install`: uv's receipt in its environment; on a Mac it has
+    AppKit too (the cli extra brings pyobjc)."""
+    tool = tmp_path / "uv-tools/mnema"
+    tool.mkdir(parents=True)
+    (tool / "uv-receipt.toml").write_text("[tool]\n")
+    monkeypatch.setattr(update.sys, "prefix", str(tool))
     monkeypatch.setattr(update.sys, "platform", "darwin")
-    release["failure"] = "xcode-select"
+    monkeypatch.setattr(
+        update.importlib.util, "find_spec", lambda name: object() if name == "AppKit" else None
+    )
+
+
+def test_command_of_uv_tool_is_told_how_to_update_itself(release, uv_tool, capsys):
+    wheel = f"https://releases.test/v{NEWER}/mnema-{NEWER}-py3-none-any.whl"
+    release["manifest"] = {"cli": {"wheel": wheel, "sha256": "a" * 64}}
     with pytest.raises(SystemExit) as failed:
         update.main()
     assert failed.value.code == 1
-    assert capsys.readouterr().err == "Установите Command Line Tools: xcode-select --install\n"
-    assert release["calls"] == ["/latest"]
+    assert capsys.readouterr().err == (
+        f'Вышла Mnema {NEWER}. Обновите команду: uv tool install --force "mnema[cli] @ {wheel}"\n'
+    )
+    assert release["calls"] == ["/latest"] and release["commands"] == []
 
 
-def test_mac_update_tells_why_the_new_app_did_not_build(release, tmp_path, monkeypatch):
-    """The new release's panel didn't build: the user gets the app installer's reason, and the
-    unfinished release is removed."""
-    monkeypatch.setattr(update.sys, "platform", "darwin")
-    reason = "Mnema.app не собралась, подробности в bar.log"
-    release["failure"], release["stderr"] = "install_release", reason + "\n"
-    with pytest.raises(MediaError) as failed:
-        update.apply()
-    assert str(failed.value) == reason
-    assert not [p for p in (tmp_path / "data/mnema/releases").iterdir() if p.is_dir()]
+def test_command_of_uv_tool_gets_the_release_page_without_a_wheel(release, uv_tool):
+    release["manifest"] = {"archive": "https://github.com/fozt/mnema/releases/download/v9.0.0/a"}
+    with pytest.raises(MediaError) as refused:
+        update.apply(terminal=True)
+    page = "https://github.com/fozt/mnema/releases/tag/v9.0.0"
+    assert str(refused.value) == f"Вышла Mnema {NEWER}: {page}"
+    assert release["commands"] == []
+
+
+def test_command_of_uv_tool_without_a_new_release_has_nothing_to_do(release, uv_tool):
+    release["version"] = __version__
+    assert not update.apply(terminal=True).changed
+    assert release["commands"] == []
 
 
 def test_interrupted_attempts_are_removed_but_installed_versions_kept(release, tmp_path):

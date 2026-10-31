@@ -26,7 +26,7 @@ HELP
       client) cat <<'HELP'
 Использование: ./install.sh client [ПРИГЛАШЕНИЕ]
 
-Ставит приложение Mnema. ПРИГЛАШЕНИЕ — ссылка, которую напечатал сервер, в кавычках:
+Ставит приложение Mnema на Linux. ПРИГЛАШЕНИЕ — ссылка, которую напечатал сервер, в кавычках:
   ./install.sh client 'http://server:12345#invite=…'
 Его можно вставить и позже, в настройках приложения: «Сервер».
 HELP
@@ -34,7 +34,7 @@ HELP
       *) cat <<'HELP'
 Использование:
   ./install.sh server    сервер Mnema на Linux, в Docker
-  ./install.sh client    приложение Mnema на Linux (на Mac проще поставить DMG)
+  ./install.sh client    приложение Mnema на Linux (на Mac — DMG)
 
 Подробнее: ./install.sh server --help, ./install.sh client --help
 и https://github.com/fozt/mnema#install
@@ -58,7 +58,7 @@ HELP
       client) cat <<'HELP'
 Usage: ./install.sh client [INVITATION]
 
-Installs the Mnema app. INVITATION is the link the server printed, in quotes:
+Installs the Mnema app on Linux. INVITATION is the link the server printed, in quotes:
   ./install.sh client 'http://server:12345#invite=…'
 It can also be pasted later in the app settings: "Server".
 HELP
@@ -66,7 +66,7 @@ HELP
       *) cat <<'HELP'
 Usage:
   ./install.sh server    the Mnema server on Linux, in Docker
-  ./install.sh client    the Mnema app on Linux (on a Mac the DMG is simpler)
+  ./install.sh client    the Mnema app on Linux (on a Mac, the DMG)
 
 More: ./install.sh server --help, ./install.sh client --help
 and https://github.com/fozt/mnema#install
@@ -239,10 +239,10 @@ if [ "$MODE" = server ]; then
   exit 0
 fi
 
-# swift from the Command Line Tools builds Mnema.app: without them nothing starts
-if [ "$OS" = Darwin ] && ! xcode-select -p >/dev/null 2>&1; then
-  say "Install the Command Line Tools: xcode-select --install" \
-    "Установите Command Line Tools: xcode-select --install"
+# Mnema.app is built only as the DMG of a release (scripts/build_mac_app.py)
+if [ "$OS" = Darwin ]; then
+  say "Mnema for Mac installs from the DMG: https://github.com/fozt/mnema/releases/latest" \
+    "Mnema для Mac ставится из DMG: https://github.com/fozt/mnema/releases/latest"
   exit 1
 fi
 export PATH="$HOME/.local/bin:$PATH:/usr/local/sbin:/usr/sbin:/sbin"
@@ -263,8 +263,6 @@ if [ "$OS" = "Linux" ] && command -v apt-get >/dev/null; then
     as_root apt-get update -qq
     as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y "${missing[@]}"
   fi
-elif [ "$OS" = "Darwin" ] && ! command -v ffmpeg >/dev/null && command -v brew >/dev/null; then
-  brew install ffmpeg
 fi
 if ! command -v ffmpeg >/dev/null; then
   say "ffmpeg is required. Install it and run this again." \
@@ -288,17 +286,16 @@ fi
 # Set for this one command, so an exported UV_PROJECT_ENVIRONMENT never redirects it and the
 # app's processes never inherit it.
 VENV="${XDG_DATA_HOME:-$HOME/.local/share}/mnema/app/.venv"
-if [ "$OS" = Darwin ]; then role=mac; else role=linux; fi
 # The extras of each role are listed once, in mnema/extras.py (the update reads them too)
-role_extras="$(uv run --no-project --python 3.12 -- python -I "$PWD/mnema/extras.py" "$role")"
+role_extras="$(uv run --no-project --python 3.12 -- python -I "$PWD/mnema/extras.py" linux)"
 extras=()
 for extra in $role_extras; do extras+=(--extra "$extra"); done
 UV_PROJECT_ENVIRONMENT="$VENV" uv sync --locked --python 3.12 --no-dev "${extras[@]}"
 
 "$VENV/bin/python" -m mnema.install_setup client --venv "$VENV" --connection "$CONNECTION"
 
-# The menu bar / tray app, when there is a desktop.
-if [ "$OS" = Darwin ] || [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
+# The tray app, when there is a desktop.
+if [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
   "$VENV/bin/mnema-bar" install || {
     say "The app didn't install. Try again: $VENV/bin/mnema-bar install" \
       "Приложение не установилось. Повторите: $VENV/bin/mnema-bar install"

@@ -7,6 +7,7 @@ The server is a Docker image and is updated with a new one on its host (./mnema.
 
 The self-contained Mac app (Mnema.app from the DMG) is replaced as a whole bundle from the
 manifest's `mac` block instead: the new bundle is checked next to the old one and swapped in.
+On a Mac there is no other app; the mnema command installed with uv tool is told how to update.
 """
 
 from __future__ import annotations
@@ -34,7 +35,6 @@ from pydantic import BaseModel, Field, field_validator
 
 from . import __version__
 from . import extras as roles
-from .core import base
 from .core.base import MediaError
 from .i18n import _
 
@@ -83,11 +83,24 @@ class MacRelease(BaseModel):
         return _https(value)
 
 
+class CliRelease(BaseModel):
+    """The wheel of the mnema command: `uv tool install "mnema[cli] @ <wheel>"`."""
+
+    wheel: str
+    sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+    @field_validator("wheel")
+    @classmethod
+    def secure_wheel(cls, value: str) -> str:
+        return _https(value)
+
+
 class Release(BaseModel):
     version: str
     archive: str
     sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
     mac: MacRelease | None = None
+    cli: CliRelease | None = None
 
     @field_validator("version")
     @classmethod
@@ -282,6 +295,34 @@ def _unpack(archive: Path, destination: Path, version: str) -> None:
         raise MediaError(_("The update package has no locked Mnema version"))
 
 
+def uv_tool() -> bool:
+    """The mnema command installed with uv tool: uv leaves its receipt in the environment."""
+    return (Path(sys.prefix) / "uv-receipt.toml").is_file()
+
+
+def _tool_update(found: Available) -> Result:
+    """uv replaces the command's environment itself: say how, or that there is nothing new."""
+    release = found.release
+    if not found.any or release is None:
+        return Result(version=found.current)
+    if release.cli is None:
+        raise MediaError(
+            _(
+                "Mnema {version} is out: {url}",
+                version=release.version,
+                url=_release_page(release.archive),
+            )
+        )
+    raise MediaError(
+        _(
+            'Mnema {version} is out. Update the command: uv tool install --force "mnema[cli] @ '
+            '{wheel}"',
+            version=release.version,
+            wheel=release.cli.wheel,
+        )
+    )
+
+
 def _app_installed() -> bool:
     """An update installs the app; a bare CLI has none."""
     return any(importlib.util.find_spec(m) for m in ("pystray", "AppKit"))
@@ -305,9 +346,8 @@ def _drop_unfinished(root: Path) -> None:
 
 
 def _extras() -> list[str]:
-    # The app as ./install.sh client installs it: a Mac processes itself, a Linux client sends
-    # recordings to the server
-    return list(roles.MAC if base.STANDALONE else roles.LINUX_CLIENT)
+    # The app as ./install.sh client installs it on Linux: a Mac has only the DMG
+    return list(roles.LINUX_CLIENT)
 
 
 def _prune_releases(root: Path, active: Path) -> None:
@@ -499,6 +539,8 @@ def apply(on: Progress = lambda _f, _m: None, *, terminal: bool = False) -> Resu
         except BlockingIOError as exc:
             raise MediaError(_("A Mnema update is already running")) from exc
         current = __version__
+        if uv_tool():  # before the app checks: the command on a Mac has AppKit too
+            return _tool_update(check(current=current))
         bundle = app_bundle()
         if bundle is not None:
             found = check(current=current)
@@ -512,6 +554,10 @@ def apply(on: Progress = lambda _f, _m: None, *, terminal: bool = False) -> Resu
                 raise MediaError(
                     _("Couldn't update Mnema. The previous version is in place")
                 ) from exc
+        if sys.platform == "darwin":
+            from .bar.install import from_dmg
+
+            raise MediaError(from_dmg())
         if not _app_installed():
             raise MediaError(
                 _(
@@ -524,14 +570,6 @@ def apply(on: Progress = lambda _f, _m: None, *, terminal: bool = False) -> Resu
         if not found.any or found.release is None:
             return Result(version=current)
         release = found.release
-        if sys.platform == "darwin":
-            from .bar.install import NO_BUILD_TOOLS, UPDATE_NO_BUILD_TOOLS, has_build_tools
-
-            if not has_build_tools():  # swift builds Mnema.app: say so before downloading
-                if terminal:
-                    raise MediaError(NO_BUILD_TOOLS)
-                logger.warning("update: %s", NO_BUILD_TOOLS)
-                raise MediaError(UPDATE_NO_BUILD_TOOLS)
         uv = shutil.which("uv", path=_env()["PATH"])
         if uv is None:
             logger.warning("update: uv not found")
