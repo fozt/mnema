@@ -32,6 +32,21 @@ def resolve_runner(explicit: str | Connection | None, *, local: bool = False) ->
     return remote.url if remote else None
 
 
+def op_runner(
+    op: str, explicit: str | Connection | None, *, local: bool = False
+) -> Connection | None:
+    """Where op runs, None for this computer: where processing runs (node.selected_processing),
+    and an operation that needs the model (requires_model) on a Mac that recognizes here goes to
+    the connected server with the user's model (node.summary_server); local=True is here."""
+    from .node import selected_processing, summary_server
+
+    if local:
+        return None
+    spec = ops.get(op)
+    remote = selected_processing(explicit)
+    return remote or (summary_server() if spec is not None and spec.requires_model else None)
+
+
 def dispatch(
     op: str,
     src: Path | str | list[str],

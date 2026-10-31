@@ -13,6 +13,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 from rich.markup import escape
 
 from .. import core as mc
+from ..connection import Connection
 from ..core.base import phased
 from ..dispatch import resolve_runner
 from ..i18n import _
@@ -302,7 +303,7 @@ def _url_stem(url: str) -> str:
 
 
 def _dispatch_sources(
-    args, *, want_video: bool, runner: str | None, local: bool = False
+    args, *, want_video: bool, runner: str | Connection | None, local: bool = False
 ) -> list[Path | str]:
     """Inputs for dispatch: links stay strings, files and folders are expanded.
 

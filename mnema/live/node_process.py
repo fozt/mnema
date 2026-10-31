@@ -110,7 +110,7 @@ def _result(
     transcript = base / ResultFile.TRANSCRIPT
     text = transcript.read_text(encoding="utf-8") if not failed and transcript.is_file() else None
     summary = base / ResultFile.SUMMARY
-    if not failed and summary_only and not summary.is_file():
+    if not failed and summary_only and params.summary and not summary.is_file():
         # The model may refuse without an exception: the pipeline keeps the reason in notes.
         # Return nothing to replace, so the client's old summary stays intact.
         failed = True
@@ -153,14 +153,16 @@ def _result(
         files[ResultFile.SUMMARY] = (
             summary.read_text(encoding="utf-8") if summary.is_file() else None
         )
+    translation = base / ResultFile.TRANSLATION
+    if not failed and params.translate and translation.is_file():
+        files[ResultFile.TRANSLATION] = translation.read_text(encoding="utf-8")
     if not summary_only:
-        translation = base / ResultFile.TRANSLATION
-        if not failed and params.translate and translation.is_file():
-            files[ResultFile.TRANSLATION] = translation.read_text(encoding="utf-8")
         if isinstance(params, RecordingParams):
             run.part = params.part.model_dump() if params.part else None
             run.notes = _silent(run.notes, params)
-        if text and not failed and not LLMSettings().cloud:
+        # a run that asks the model for nothing (the Mac asks the server for it) needs none
+        modelled = params.summary or params.retitle is not False or params.translate
+        if text and not failed and modelled and not LLMSettings().cloud:
             run.notes.append(remarks.node_no_model())
         if params.recording_error and not any(r.step == remarks.Step.RECORD for r in run.notes):
             run.notes.insert(0, remarks.recording_failed(params.recording_error))
@@ -284,7 +286,13 @@ def summarize_recording(path: Path, values: dict, on: Progress) -> dict:
                 )
             else:
                 result = summarize_folder(
-                    base, lang=params.summary_lang, on=_progress(on), on_base=moved
+                    base,
+                    lang=params.summary_lang,
+                    summary=params.summary,
+                    retitle=params.retitle,
+                    translate=params.translate,
+                    on=_progress(on),
+                    on_base=moved,
                 )
             return _result(result.base or base, params, node, config)
         except FinalizeCancelled as exc:

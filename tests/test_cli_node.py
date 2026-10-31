@@ -139,7 +139,7 @@ def test_app_cli_and_mcp_process_in_one_place(
             runners.append(None if local else runner) or {}
         ),
     )
-    tools.translate_recording("/x/a.mp3")
+    tools.transcribe_recording("/x/a.mp3")
     found = {None if c is None else (c.url, c.token) for c in (app, *runners)}
     assert found == {expected}
     assert _cli_runner(monkeypatch, tmp_path) == expected
@@ -161,3 +161,37 @@ def test_cli_flags_go_over_the_rule(tmp_path, monkeypatch, standalone):
     assert chosen == ("http://other:8000", "vps-token")
     (tmp_path / "a.txt").unlink()
     assert _cli_runner(monkeypatch, tmp_path, local=True) is None
+
+
+@pytest.mark.parametrize("local", [False, True])
+def test_translation_on_a_connected_mac_uses_the_server_model(tmp_path, monkeypatch, local):
+    """A Mac recognizes here by default, but translation needs the user's model: the CLI and MCP
+    send it to the connected server; --local keeps it on this Mac."""
+    from mnema.cli import commands
+    from mnema.cli.parser import build_parser
+    from mnema.mcp import tools
+
+    monkeypatch.setattr(base, "STANDALONE", True)
+    monkeypatch.setenv("MNEMA_RUNNER", SERVER[0])
+    monkeypatch.setenv("MNEMA_TOKEN", SERVER[1])
+    seen = []
+
+    def dispatch(op, src, params, *, runner, local, **kw):
+        seen.append(None if local else (runner.url, runner.token))
+        return {"markdown": "# перевод"}
+
+    monkeypatch.setattr(cli_pkg, "dispatch", dispatch)
+    monkeypatch.setattr(tools, "dispatch", dispatch)
+    monkeypatch.setattr(cli_pkg, "run_streaming", lambda label, fn, **kw: fn(on=lambda *a: None))
+    monkeypatch.setattr(
+        cli_pkg, "run_with_progress", lambda label, fn, **kw: fn(on=lambda *a: None)
+    )
+    src = tmp_path / "a.mp3"
+    src.write_bytes(b"audio")
+    flags = ["--local"] if local else []
+    args = build_parser().parse_args(["translate", str(src), "-o", str(tmp_path / "a.md"), *flags])
+    commands.cmd_translate(args)
+    assert (tmp_path / "a.md").read_text(encoding="utf-8").startswith("# перевод")
+    if not local:
+        tools.translate_recording(str(src))
+    assert seen == ([None] if local else [SERVER, SERVER])

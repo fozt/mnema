@@ -18,8 +18,9 @@ import mnema.cli as _cli  # late-bound: tests patch dispatch, run_with_progress 
 
 from .. import core as mc
 from .. import ops
+from ..connection import Connection
 from ..core.base import phased
-from ..dispatch import fetch_result_file, resolve_runner
+from ..dispatch import fetch_result_file, op_runner, resolve_runner
 from ..i18n import _, _n
 from ..live import meta
 from .sources import (
@@ -76,7 +77,7 @@ def _op_once(
     src: Path | str | list,
     params: dict,
     *,
-    runner: str | None,
+    runner: str | Connection | None,
     local: bool,
     on,
     cookies: str | None = None,
@@ -143,7 +144,7 @@ def _run_op(
     src: Path | str | list,
     params: dict,
     *,
-    runner: str | None,
+    runner: str | Connection | None,
     local: bool = False,
     cookies: str | None = None,
 ) -> dict:
@@ -1131,8 +1132,8 @@ def _translate_params(args) -> ops.TranslateParams:
 
 @_at_node
 def cmd_translate(args) -> None:
-    runner = args.runner
-    local = args.local
+    runner = op_runner("translate", args.runner, local=args.explicit_local)
+    local = runner is None
     no_save = getattr(args, "no_save", False)
     if no_save and args.output:
         die(_(_NO_SAVE_AND_OUTPUT))

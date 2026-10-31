@@ -13,7 +13,7 @@ import re
 from pathlib import Path
 
 from ..connection import Connection
-from ..dispatch import dispatch
+from ..dispatch import dispatch, op_runner
 from ..i18n import _
 
 
@@ -56,7 +56,7 @@ def transcribe_recording(source: str, *, lang: str | None = None) -> dict:
 
 def translate_recording(source: str, *, to_lang: str = "ru") -> dict:
     """Transcribe and translate a recording with the server's model. Returns the markdown."""
-    node = _node()
+    node = op_runner("translate", _node())
     result = dispatch("translate", source, {"to_lang": to_lang}, runner=node, local=node is None)
     return {"markdown": result.get("markdown", "")}
 

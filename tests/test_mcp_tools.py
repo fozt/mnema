@@ -73,17 +73,22 @@ def test_translate_dispatches(node_root, monkeypatch):
     assert out["markdown"] == "# перевод"
 
 
+def _transcribe() -> None:
+    tools.transcribe_recording("/x/a.mp3", lang="ru")
+
+
+def _translate() -> None:
+    tools.translate_recording("/x/a.mp3", to_lang="en")
+
+
 @pytest.mark.parametrize(
-    "tool",
-    [
-        lambda: tools.transcribe_recording("/x/a.mp3", lang="ru"),
-        lambda: tools.translate_recording("/x/a.mp3", to_lang="en"),
-    ],
+    ("tool", "standalone", "server"),
+    [(_transcribe, True, NODE), (_transcribe, False, ""), (_translate, False, "")],
 )
-@pytest.mark.parametrize(("standalone", "server"), [(True, NODE), (False, "")])
 def test_without_server_or_on_mac_works_here(local_root, monkeypatch, tool, standalone, server):
-    """A Mac without "On the server" selected processes by itself even with a connected server;
-    Linux without a server processes here, like the CLI."""
+    """A Mac without "On the server" selected recognizes by itself even with a connected server
+    (translation needs the user's model there: test_cli_node); Linux without a server processes
+    here, like the CLI."""
     monkeypatch.setattr(base, "STANDALONE", standalone)
     monkeypatch.setenv("MNEMA_RUNNER", server)
     calls = []
