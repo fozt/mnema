@@ -71,7 +71,7 @@ def test_invite_is_exchanged_for_a_device_token(monkeypatch, env_file) -> None:
     _serve(monkeypatch, node)
     flow = ServerFlow()
     assert flow.submit({"connection": INVITE}, force=False) is None
-    assert node.claims == [{"invite": CODE, "name": socket.gethostname()}]
+    assert node.claims == [{"invite": CODE, "name": socket.gethostname(), "library": True}]
     assert node.checked == [f"Bearer {DEVICE_TOKEN}"]
     env = dotenv_values(env_file)
     assert (env["MNEMA_RUNNER"], env["MNEMA_TOKEN"]) == ("http://node:8123", DEVICE_TOKEN)

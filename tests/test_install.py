@@ -799,7 +799,9 @@ def test_client_joins_a_node_by_invite(monkeypatch, tmp_path):
         "http://203.0.113.7:43117#invite=one-time-code",
         transport=httpx.MockTransport(node),
     )
-    assert node.claims == [{"invite": "one-time-code", "name": socket.gethostname()}]
+    assert node.claims == [
+        {"invite": "one-time-code", "name": socket.gethostname(), "library": True}
+    ]
     env = tmp_path / ".config/mnema/.env"
     saved = dotenv_values(env)
     assert (saved["MNEMA_RUNNER"], saved["MNEMA_TOKEN"]) == (

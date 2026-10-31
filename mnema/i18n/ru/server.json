@@ -73,5 +73,9 @@
   "Unknown recognition method": "Неизвестный способ распознавания",
   "Upload not found": "Загрузка не найдена",
   "Uploading to the server…": "Отправляю на сервер…",
-  "serve on {host} without MNEMA_TOKEN is unsafe: set MNEMA_TOKEN or listen on 127.0.0.1": "serve на {host} без MNEMA_TOKEN небезопасно: задайте MNEMA_TOKEN или слушайте 127.0.0.1"
+  "serve on {host} without MNEMA_TOKEN is unsafe: set MNEMA_TOKEN or listen on 127.0.0.1": "serve на {host} без MNEMA_TOKEN небезопасно: задайте MNEMA_TOKEN или слушайте 127.0.0.1",
+  "User name: Latin letters, digits, - and _, up to 32, for example anna": "Имя пользователя: латинские буквы, цифры, - и _, до 32 знаков, например anna",
+  "No user {name}. Add one: {command}": "Нет пользователя {name}. Добавьте: {command}",
+  "Invitation for one device of {user}, valid until {until}:\n{invite}": "Приглашение для одного устройства пользователя {user}, действует до {until}:\n{invite}",
+  "Update the app to connect with this invitation": "Обновите приложение, чтобы подключиться по этому приглашению"
 }

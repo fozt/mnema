@@ -239,17 +239,18 @@ def ensure_server_token() -> str:
 
 def start_container() -> None:
     """The server image's start: the node token and the library root on the first start, then
-    `mnema serve` on DEFAULT_PORT. Until a device joins, every start logs an invitation, or how
-    to make one when no address is known (node.node_url)."""
+    `mnema serve` on DEFAULT_PORT. Until a device of the owner joins, every start logs an
+    invitation, or how to make one when no address is known (node.node_url)."""
     from .devices import DeviceStore, devices_db
     from .node import node_url, server_command
+    from .users import OWNER
 
     os.umask(0o077)  # every file of the server is private
     ensure_server_token()
     root = server_root()
     # serve never creates a lost library root: it would look empty, as if everything was deleted
     (root / "library").mkdir(parents=True, exist_ok=True)
-    if not any(not d.revoked for d in DeviceStore(devices_db(root)).devices()):
+    if not any(not d.revoked for d in DeviceStore(devices_db(root)).devices(OWNER)):
         if address := node_url(DEFAULT_PORT):
             print(issue_invite(root, address, now=time.time()), flush=True)
         else:

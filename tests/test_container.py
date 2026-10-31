@@ -96,6 +96,23 @@ def test_restart_keeps_the_token_and_stops_inviting_once_a_device_joined(
     assert len(started) == 3
 
 
+def test_the_first_start_invites_the_owner_until_the_owner_has_a_device(
+    container, monkeypatch, capsys
+):
+    """A friend's device is not the owner's: the start still invites the owner."""
+    data, _started = container
+    monkeypatch.setenv("MNEMA_URL", "http://203.0.113.5:38837")
+    owner = parse_connection(invite_in(start(monkeypatch, capsys)) or "").invite or ""
+    store = DeviceStore(data / ".mnema/devices.db")
+    store.add_user("anna", now=time.time())
+    code, _ = store.create_invite(user="anna", now=time.time())
+    assert store.claim(code, "Pixel", now=time.time(), library=True)
+
+    assert invite_in(start(monkeypatch, capsys))
+    assert store.claim(owner, "Mac", now=time.time())
+    assert invite_in(start(monkeypatch, capsys)) is None
+
+
 def test_the_address_given_to_mnema_invite_wins_and_is_remembered(container, monkeypatch, capsys):
     """Inside a container the network address is the container's own: no invitation leads
     there. MNEMA_URL is the address; one given with mnema invite --url leads every later

@@ -284,7 +284,9 @@ class MnemaClient:
             verify=self._verify,
             timeout=self._timeout,
         ) as client:
-            resp = await client.post("/api/devices/claim", json={"invite": code, "name": name})
+            resp = await client.post(
+                "/api/devices/claim", json={"invite": code, "name": name, "library": True}
+            )
         if resp.status_code == 403:
             try:
                 detail = resp.json()["detail"]

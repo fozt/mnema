@@ -1273,6 +1273,9 @@ def cmd_serve(args) -> None:
         _cli.console.print(f"[yellow]{warning}[/]")
 
     root = Path(args.dir).expanduser() if args.dir else Path.cwd()
+    from ..users import set_strict
+
+    set_strict(True)  # a model used outside a user's request would spend the owner's key
     app = create_app(root)
     shown_host = "127.0.0.1" if args.host == "0.0.0.0" else args.host
     url = f"http://{shown_host}:{port}"
@@ -1312,17 +1315,13 @@ def _node_root(args) -> Path:
     return root
 
 
-def cmd_invite(args) -> None:
-    """An invite for one device, on the server machine itself without HTTP. The address is --url
-    (remembered for this server), otherwise node.node_url; another folder (--dir, a development
-    server) needs --url and remembers nothing."""
-    import time
-
-    from ..devices import issue_invite
+def _invite_url(args, root: Path) -> str:
+    """The address in an invitation: --url (remembered for this server), otherwise
+    node.node_url; another folder (--dir, a development server) needs --url and remembers
+    nothing."""
     from ..install_setup import DEFAULT_PORT, save_url, server_root
     from ..node import node_url
 
-    root = _node_root(args)
     own = root.resolve() == server_root().resolve()
     url = args.url
     try:
@@ -1330,14 +1329,127 @@ def cmd_invite(args) -> None:
             url = save_url(url)
         elif own:
             url = node_url(DEFAULT_PORT)
-        if not url:
-            die(_("Give --url: the address the clients reach the server at"))
-            return
-        text = issue_invite(root, url, hours=args.hours, now=time.time())
+    except ValueError as e:
+        die(str(e))
+    if not url:
+        die(_("Give --url: the address the clients reach the server at"))
+    return url or ""
+
+
+def _user_name(raw: str) -> str:
+    from ..core.base import MediaError
+    from ..users import valid_name
+
+    try:
+        return valid_name(raw)
+    except MediaError as e:
+        die(str(e))
+        return ""
+
+
+def _need_server_token() -> None:
+    from ..install_setup import server_token
+
+    if not server_token():  # without it every device is the owner's
+        die(_("The server has no token: users need one"))
+
+
+def cmd_invite(args) -> None:
+    """An invite for one device of the owner or of --user, on the server machine itself
+    without HTTP."""
+    import os
+    import time
+
+    from ..devices import issue_invite
+    from ..users import OWNER
+
+    os.umask(0o077)  # docker exec does not inherit the server's umask
+    root = _node_root(args)
+    user = OWNER
+    if args.user is not None and args.user.lower() != OWNER:
+        _need_server_token()
+        user = _user_name(args.user)
+    url = _invite_url(args, root)
+    try:
+        text = issue_invite(root, url, user=user, hours=args.hours, now=time.time())
     except ValueError as e:
         die(str(e))
         return
     print(text)
+
+
+def cmd_users(args) -> None:
+    """Users of the server: each has own devices and own library. remove revokes the devices
+    and invitations, the recordings stay; add of a removed name brings them back."""
+    import os
+    from collections import Counter
+
+    from ..devices import DeviceStore, devices_db
+    from ..users import OWNER, no_user
+
+    os.umask(0o077)  # docker exec does not inherit the server's umask
+    root = _node_root(args)
+    store = DeviceStore(devices_db(root))
+    if args.action == "add":
+        _add_user(args, root, store)
+        return
+    if args.action == "remove":
+        if args.name.lower() == OWNER:
+            die(_("The server owner cannot be removed"))
+        name = _user_name(args.name)
+        if not store.remove_user(name):
+            die(no_user(name))
+        print(_("User {name} removed, the recordings stay", name=name))
+        return
+    devices = Counter(d.user for d in store.devices() if not d.revoked)
+    table = Table(box=box.SIMPLE)
+    for column in (_("Name"), _("Devices")):
+        table.add_column(column)
+    for user in store.users():
+        table.add_row(Text(user.name), str(devices[user.name]))
+    _cli.console.print(table)
+
+
+def _add_user(args, root: Path, store) -> None:
+    import time
+
+    from ..devices import check_invite, issue_invite
+    from ..library.disk import LibraryError
+    from ..library.files import LibraryFiles
+    from ..node import server_command
+    from ..users import user_library
+
+    _need_server_token()
+    name = _user_name(args.name)
+    url = _invite_url(args, root)
+    try:
+        check_invite(url, args.hours)
+    except ValueError as e:
+        die(str(e))
+    try:
+        _user, returned = store.add_user(name, now=time.time())
+    except ValueError:
+        command = server_command(f"invite --user {name}")
+        die(_("User {name} already exists. Invitation: {command}", name=name, command=command))
+        return
+    library = user_library(root, name)
+    library.mkdir(mode=0o700, parents=True, exist_ok=True)
+    library.chmod(0o700)
+    if returned:
+        try:
+            count = len(LibraryFiles(library).manifest().records)
+        except LibraryError:
+            print(_("User {name} is back", name=name))
+        else:
+            print(
+                _n(
+                    "User {name} is back with {n} recording",
+                    "User {name} is back with {n} recordings",
+                    count,
+                    name=name,
+                )
+            )
+    print(issue_invite(root, url, user=name, hours=args.hours, now=time.time()))
 
 
 def cmd_devices(args) -> None:
@@ -1369,10 +1481,10 @@ def cmd_devices(args) -> None:
         )
         return
     table = Table(box=box.SIMPLE)
-    for column in (_("Name"), "id", _("Added"), _("Last seen")):
+    for column in (_("Name"), "id", _("User"), _("Added"), _("Last seen")):
         table.add_column(column)
     for d in active:
-        table.add_row(Text(d.name), d.id, when(d.created), when(d.last_seen))
+        table.add_row(Text(d.name), d.id, d.user, when(d.created), when(d.last_seen))
     _cli.console.print(table)
 
 
