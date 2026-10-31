@@ -284,3 +284,192 @@ def test_model_window_steps_are_what_the_app_fixtures_show(monkeypatch) -> None:
     assert flow.ask() == shown["out-ask-form-model-provider"].ask  # type: ignore[attr-defined]
     key_step = flow.submit({"provider": "gemini"}, force=False)
     assert key_step == shown["out-ask-form-model-key"].ask  # type: ignore[attr-defined]
+
+
+SERVER = "http://srv:8123"
+OPENAI = "sk-proj-" + "o" * 30 + "Good"
+DEEPL = "d" * 32 + ":fx"
+
+
+class _UserServer:
+    """The connected server's /api/model* for the device's user (MockTransport on
+    providers.TRANSPORT); it checks keys and models itself and keeps them in its state."""
+
+    def __init__(self, monkeypatch) -> None:
+        self.state: dict[str, Any] = {
+            "model": None,
+            "key": None,
+            "asr_key": None,
+            "deepl_key": None,
+        }
+        self.requests: list[tuple[str, str, dict | None]] = []
+        self.refuse: dict[str, tuple[int, dict]] = {}  # path → the next answer instead
+        monkeypatch.setattr(providers, "TRANSPORT", httpx.MockTransport(self._handle))
+        monkeypatch.setattr(
+            "mnema.client.MnemaClient.health", lambda *a, **kw: {"ok": True, "llm": True}
+        )
+        monkeypatch.setenv("MNEMA_RUNNER", SERVER)
+        monkeypatch.setenv("MNEMA_TOKEN", "device-token")
+
+    def _handle(self, request: httpx.Request) -> httpx.Response:
+        import json
+
+        assert request.headers["authorization"] == "Bearer device-token"
+        body = json.loads(request.content) if request.content else None
+        path = request.url.path
+        self.requests.append((request.method, path, body))
+        if path in self.refuse:
+            code, answer = self.refuse.pop(path)
+            return httpx.Response(code, json=answer)
+        if path == "/api/model/key":
+            if body["key"] not in (GOOD, None):
+                return httpx.Response(400, json={"detail": "Ключ модели не подошёл"})
+            models = [{"id": m, "title": m, "free": False} for m in model_stubs.GEMINI_MODELS]
+            return httpx.Response(
+                200, json={"models": models, "recommended": "gemini-flash-latest"}
+            )
+        if path == "/api/model" and request.method == "PUT":
+            self.state.update(model=body["model"], key="…" + (body["key"] or GOOD)[-4:])
+        elif path in ("/api/model/asr-key", "/api/model/deepl-key"):
+            self.state[path.rsplit("/", 1)[1].replace("-", "_")] = "…" + body["key"][-4:]
+        return httpx.Response(200, json=self.state)
+
+
+def _settings_rows(rt: BarRuntime) -> dict[str, Any]:
+    model = settings_model(rt.prefs, rt.menu_env())
+    return {f.title: f for t in model.tabs for s in t.sections for f in s.fields}
+
+
+def _settled() -> None:
+    for t in threading.enumerate():
+        if t.name in ("mnema-bar-ping", "mnema-bar-asr-choices", "mnema-bar-form"):
+            t.join(timeout=10)
+
+
+@pytest.fixture
+def connected(monkeypatch, tmp_path) -> tuple[BarRuntime, _Forms, _UserServer]:
+    """A Mac connected to a server, without a model of its own."""
+    monkeypatch.setattr(base, "STANDALONE", True)
+    monkeypatch.delenv("MNEMA_MODEL")
+    monkeypatch.delenv("MNEMA_API_KEY")
+    server = _UserServer(monkeypatch)
+    platform = _Forms()
+    rt = BarRuntime(platform=platform, prefs_file=tmp_path / "bar.json")
+    _settled()
+    return rt, platform, server
+
+
+def test_model_window_with_a_server_sets_the_users_model_there(connected, monkeypatch) -> None:
+    """With a connected server the same steps go to the server: it lists the models by the key,
+    checks the model (a key refusal goes back to Key) and keeps it; this Mac's .env gets no
+    model, the Model row shows the server's one."""
+    rt, platform, server = connected
+    monkeypatch.setattr(providers, "check_key", lambda *a: pytest.fail("the server checks"))
+    rt.handle("model_setup")
+    first = platform.next()
+    assert first is not None and first.message == "Модель не настроена"
+    key_step = platform.submit(provider="gemini")
+    assert key_step is not None and key_step.fields[0].placeholder == ""
+    refused = platform.submit(key=BAD)
+    assert refused is not None and (refused.error, refused.clear) == (
+        "Ключ модели не подошёл", ["key"],
+    )  # fmt: skip
+    model_step = platform.submit(key=GOOD)
+    assert model_step is not None
+    assert [key for key, *_, checked in _choices(model_step) if checked] == ["gemini-flash-latest"]
+    server.refuse["/api/model"] = (400, {"detail": "Ключ модели не подошёл", "retry": "key"})
+    back = platform.submit(model="gemini-flash-latest")
+    assert back is not None and [f.id for f in back.fields] == ["key"] and back.clear == ["key"]
+    platform.submit(key=GOOD)
+    assert platform.submit(model="gemini-flash-latest") is None
+    _settled()
+    puts = [
+        body for method, path, body in server.requests if (method, path) == ("PUT", "/api/model")
+    ]
+    assert puts[-1] == {"model": FLASH, "key": GOOD}
+    assert "MNEMA_MODEL" not in dotenv_values(user_env_file())
+    assert _settings_rows(rt)["Модель"].value == FLASH
+
+    rt.handle("model_setup")  # again: the saved key stays when nothing is typed
+    assert platform.next().message == f"Сейчас: {FLASH}"
+    key_step = platform.submit(provider="gemini")
+    assert key_step is not None and key_step.fields[0].placeholder == "Оставить …Good"
+    platform.submit(key="")
+    assert ("POST", "/api/model/key", {"provider": "gemini", "key": None}) in server.requests
+    assert platform.submit(model="gemini-pro-latest") is None
+    _settled()
+    puts = [
+        body for method, path, body in server.requests if (method, path) == ("PUT", "/api/model")
+    ]
+    assert puts[-1] == {"model": "gemini/gemini-pro-latest", "key": None}
+
+
+def test_cloud_without_a_key_asks_for_the_openai_key_on_the_server(connected, monkeypatch):
+    """In the cloud the user has no recognition key on the server: "Set the OpenAI key…" opens a
+    window with one secret field; the server checks and keeps the key, the button goes away and
+    this Mac's .env has no key."""
+    rt, platform, server = connected
+    rt.handle("recognition:cloud")
+    _settled()
+    assert _settings_rows(rt)["Задать ключ OpenAI…"].key == "asr_key_setup"
+    rt.handle("asr_key_setup")
+    window = platform.next()
+    assert window is not None and window.title == "Ключ OpenAI для распознавания"
+    assert [(f.id, f.kind) for f in window.fields] == [("key", FormFieldKind.SECRET)]
+    assert window.message == "Где взять ключ OpenAI: platform.openai.com/api-keys"
+    empty = platform.submit(key="")
+    assert empty is not None and empty.error == "Нужен ключ"
+    server.refuse["/api/model/asr-key"] = (400, {"detail": "Ключ OpenAI не подошёл"})
+    refused = platform.submit(key="sk-proj-bad")
+    assert refused is not None and (refused.error, refused.clear) == (
+        "Ключ OpenAI не подошёл", ["key"],
+    )  # fmt: skip
+    assert platform.submit(key=OPENAI) is None
+    _settled()
+    assert server.requests.count(("PUT", "/api/model/asr-key", {"key": OPENAI})) == 1
+    assert "Задать ключ OpenAI…" not in _settings_rows(rt)
+    assert "MNEMA_ASR_API_KEY" not in dotenv_values(user_env_file())
+
+
+def test_cloud_on_a_mac_without_a_server_keeps_the_key_here(monkeypatch, tmp_path) -> None:
+    """Without a server the Mac recognizes in the cloud itself: the key is checked with OpenAI
+    and saved in this Mac's .env."""
+    monkeypatch.setattr(base, "STANDALONE", True)
+    monkeypatch.delenv("MNEMA_ASR_API_KEY", raising=False)
+    asked: list[str] = []
+
+    def openai(request: httpx.Request) -> httpx.Response:
+        asked.append(request.headers["authorization"])
+        return httpx.Response(200, json={"data": [{"id": "gpt-4o-transcribe", "created": 1}]})
+
+    monkeypatch.setattr(providers, "TRANSPORT", httpx.MockTransport(openai))
+    platform = _Forms()
+    rt = BarRuntime(platform=platform, prefs_file=tmp_path / "bar.json")
+    rt.handle("recognition:cloud")
+    _settled()
+    assert "Задать ключ OpenAI…" in _settings_rows(rt)
+    rt.handle("asr_key_setup")
+    platform.next()
+    assert platform.submit(key=OPENAI) is None
+    _settled()
+    assert asked == [f"Bearer {OPENAI}"]
+    assert dotenv_values(user_env_file())["MNEMA_ASR_API_KEY"] == OPENAI
+    assert "Задать ключ OpenAI…" not in _settings_rows(rt)
+
+
+def test_deepl_key_is_set_on_the_server_tab(connected) -> None:
+    """Live translation goes by the model until the user's DeepL key is on the server; the key
+    window is on the Server tab and only with a server."""
+    rt, platform, server = connected
+    assert _settings_rows(rt)["Живой перевод"].value == "Моделью"
+    rt.handle("deepl_setup")
+    window = platform.next()
+    assert window is not None and window.title == "Ключ DeepL"
+    assert platform.submit(key=DEEPL) is None
+    _settled()
+    assert ("PUT", "/api/model/deepl-key", {"key": DEEPL}) in server.requests
+    assert _settings_rows(rt)["Живой перевод"].value == "DeepL"
+    alone = settings_model(rt.prefs, rt.menu_env().model_copy(update={"server": None}))
+    assert "Живой перевод" not in [
+        f.title for t in alone.tabs for s in t.sections for f in s.fields
+    ]

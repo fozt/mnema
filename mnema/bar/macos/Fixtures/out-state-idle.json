@@ -703,7 +703,7 @@
               "fields": [
                 {
                   "kind": "choice",
-                  "title": "Где обрабатывать",
+                  "title": "Распознавание",
                   "key": null,
                   "checked": false,
                   "enabled": true,
@@ -714,15 +714,22 @@
                   "role": "normal",
                   "choices": [
                     {
-                      "key": "where:mac",
+                      "key": "recognition:mac",
                       "title": "На этом Mac",
                       "detail": "",
                       "checked": true,
                       "enabled": true
                     },
                     {
-                      "key": "where:server",
+                      "key": "recognition:server",
                       "title": "На сервере",
+                      "detail": "",
+                      "checked": false,
+                      "enabled": true
+                    },
+                    {
+                      "key": "recognition:cloud",
+                      "title": "В облаке",
                       "detail": "",
                       "checked": false,
                       "enabled": true
@@ -733,7 +740,7 @@
                 },
                 {
                   "kind": "choice",
-                  "title": "Распознавание",
+                  "title": "Движок",
                   "key": null,
                   "checked": false,
                   "enabled": true,
@@ -925,6 +932,41 @@
                   "placeholder": "",
                   "error": "",
                   "role": "destructive",
+                  "choices": [],
+                  "tone": "none",
+                  "progress": null
+                }
+              ]
+            },
+            {
+              "title": "",
+              "fields": [
+                {
+                  "kind": "status",
+                  "title": "Живой перевод",
+                  "key": null,
+                  "checked": false,
+                  "enabled": true,
+                  "value": "Моделью",
+                  "detail": "",
+                  "placeholder": "",
+                  "error": "",
+                  "role": "normal",
+                  "choices": [],
+                  "tone": "none",
+                  "progress": null
+                },
+                {
+                  "kind": "button",
+                  "title": "Задать ключ DeepL…",
+                  "key": "deepl_setup",
+                  "checked": false,
+                  "enabled": true,
+                  "value": "",
+                  "detail": "",
+                  "placeholder": "",
+                  "error": "",
+                  "role": "normal",
                   "choices": [],
                   "tone": "none",
                   "progress": null

@@ -83,32 +83,28 @@ SERVER = ("http://vps:8000", "vps-token")
 
 
 @pytest.mark.parametrize(
-    ("standalone", "where", "server", "expected"),
+    ("standalone", "saved", "server", "expected"),
     [
-        (
-            True,
-            None,
-            "http://vps:8000",
-            None,
-        ),  # a Mac processes itself by default; the server is for sync
-        (True, "mac", "http://vps:8000", None),  # "On this Mac"
-        (True, "server", "http://vps:8000", SERVER),  # "On the server", like Linux
-        (True, "server", "", None),  # "On the server" with no server connected: this Mac
-        (True, "x", "http://vps:8000", None),  # an unknown value: this Mac
+        (True, None, "http://vps:8000", None),  # a Mac recognizes itself by default
+        (True, {"recognition": "mac"}, "http://vps:8000", None),  # "On this Mac"
+        (True, {"recognition": "server"}, "http://vps:8000", SERVER),  # "On the server"
+        (True, {"recognition": "cloud"}, "http://vps:8000", SERVER),  # the server's cloud
+        (True, {"recognition": "server"}, "", None),  # no server connected: this Mac
+        (True, {"recognition": "cloud"}, "", None),  # the Mac's own cloud engine
+        (True, {"where": "server"}, "http://vps:8000", SERVER),  # an earlier version's file
+        (True, {"recognition": "x"}, "http://vps:8000", None),  # an unknown value: this Mac
         (False, None, "http://vps:8000", SERVER),  # Linux processes on the server
-        (False, "mac", "http://vps:8000", SERVER),  # Linux has no choice
-        (
-            False,
-            None,
-            "",
-            None,
-        ),  # Linux without a server: here (recording says the server is not connected)
+        (False, {"recognition": "mac"}, "http://vps:8000", SERVER),  # Linux has no Mac
+        (False, None, "", None),  # Linux without a server: here (recording says not connected)
     ],
     ids=[
         "mac",
         "mac-here",
         "mac-on-server",
+        "mac-cloud-on-server",
         "mac-on-server-without-server",
+        "mac-cloud-without-server",
+        "mac-older-where",
         "mac-unknown-value",
         "linux",
         "linux-ignores-choice",
@@ -116,7 +112,7 @@ SERVER = ("http://vps:8000", "vps-token")
     ],
 )
 def test_app_cli_and_mcp_process_in_one_place(
-    tmp_path, monkeypatch, standalone, where, server, expected
+    tmp_path, monkeypatch, standalone, saved, server, expected
 ):
     """The app, the CLI and MCP process in one place: the app's choice in bar.json holds for the
     CLI and MCP too."""
@@ -131,9 +127,9 @@ def test_app_cli_and_mcp_process_in_one_place(
     monkeypatch.setenv("MNEMA_TOKEN", "vps-token" if server else "")
     monkeypatch.setattr(MnemaClient, "health", lambda self, timeout=2.0: {"ok": True})
     monkeypatch.setattr(MnemaClient, "asr_choices", lambda self: [])
-    if where is not None:
+    if saved is not None:
         bar_prefs_file().parent.mkdir(parents=True, exist_ok=True)
-        bar_prefs_file().write_text(json.dumps({"where": where, "mic": True}), encoding="utf-8")
+        bar_prefs_file().write_text(json.dumps({**saved, "mic": True}), encoding="utf-8")
     app = BarRuntime(prefs_file=bar_prefs_file()).processing_connection()
     runners = []
     monkeypatch.setattr(
@@ -158,7 +154,7 @@ def test_cli_flags_go_over_the_rule(tmp_path, monkeypatch, standalone):
 
     monkeypatch.setattr(base, "STANDALONE", standalone)
     bar_prefs_file().parent.mkdir(parents=True, exist_ok=True)
-    bar_prefs_file().write_text(json.dumps({"where": "server"}), encoding="utf-8")
+    bar_prefs_file().write_text(json.dumps({"recognition": "server"}), encoding="utf-8")
     monkeypatch.setenv("MNEMA_RUNNER", "http://vps:8000")
     monkeypatch.setenv("MNEMA_TOKEN", "vps-token")
     chosen = _cli_runner(monkeypatch, tmp_path, runner="http://other:8000")

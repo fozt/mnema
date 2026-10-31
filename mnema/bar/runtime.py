@@ -36,11 +36,11 @@ from ..node_settings import SERVER_NAME
 from ..sync.engine import SyncStatus
 from ..sync.scan import FILES_LOCK
 from ..sync.state import checkpoint_path
-from .forms import FormEvent, ModelFlow, ServerFlow
+from .forms import FormEvent, KeyFlow, ModelFlow, ServerFlow
 from .protocol import FormAsk, FormOp
 from .range_pick import LANGS, RangeAnswer, RangeRequest, SourceChoice
 from .recordings import find_recording, record_sections
-from .settings_model import HOTKEY_BUSY, HOTKEY_INVALID, server_label
+from .settings_model import HOTKEY_BUSY, HOTKEY_INVALID, recognition_at, server_label
 from .state import (
     STEP_AT,
     SUMMARIZING,
@@ -50,11 +50,13 @@ from .state import (
     JobKind,
     MenuEnv,
     Phase,
+    Recognition,
     SourceMeter,
-    Where,
     asr_at,
     asr_options,
     can_relang,
+    cloud_models,
+    is_cloud,
     load_prefs,
     result_name,
     save_prefs,
@@ -386,10 +388,12 @@ class BarRuntime:
         self.server_name: str | None = None  # the server node name from capabilities
         self.server_llm = False  # the server node writes titles and summaries itself
         self.server_version: str | None = None  # the server's Mnema version from capabilities
-        self.server_model: str | None = None  # its model without the key (Mac: "Process on")
+        self.server_model: str | None = None  # the user's model on it, without the key (Mac)
+        self.server_asr_key = False  # the user's cloud recognition key is on it (Mac)
+        self.server_deepl = False  # the user's DeepL key is on it (Mac)
         self.hotkey_error = ""  # the shortcut did not fit or could not be registered
         self.env_rev = 0  # grows when the menu environment changes (models, server, token)
-        self._asr_choices: list[tuple[str, str]] = []  # recognition of this Mac or the server
+        self._asr_choices: list[tuple[str, str]] = []  # the engines of the recognition place
         self._asr_stale = False  # the server list was not read: reread once it answers
         self._ping_at = float("-inf")  # when the server was last asked (monotonic)
         self._update = ""  # the newer version (MenuEnv.update)
@@ -504,36 +508,55 @@ class BarRuntime:
 
     def processing_connection(self) -> Connection | None:
         """Where to process (node.selected_processing with this app's choice): a server, or
-        None for this computer (a Mac processes itself unless a server is chosen; other systems
-        cannot process without a server)."""
+        None for this computer (a Mac recognizes itself unless the server or the cloud with a
+        connected server is chosen; other systems cannot process without a server)."""
         from ..node import selected_processing
 
-        return selected_processing(where=self.prefs.where)
+        return selected_processing(recognition=self.prefs.recognition)
+
+    def summary_connection(self) -> Connection | None:
+        """Who writes titles and summaries: the processing server, else the connected server
+        of a Mac (the user's model there), else this Mac."""
+        from ..node import summary_server
+
+        return self.processing_connection() or summary_server()
+
+    def _place(self) -> Recognition:
+        """The place that recognizes now (settings_model.recognition_at)."""
+        return recognition_at(self.prefs, MenuEnv(mac=_base.STANDALONE, server=self.server))
 
     def _load_asr_choices(self) -> threading.Thread | None:
-        """The recognition list in the background: a Mac lists its own engines, offline; other
-        systems ask the server, empty on error (providers are never asked)."""
-        connection = self.processing_connection()
+        """The engines of the recognition place in the background: this Mac lists its own,
+        offline; the server and the cloud with a server come from the server's list (cloud models
+        are the "openai/" ones), empty on error; the cloud without a server is this Mac's cloud
+        engine. Providers are never asked."""
+        place, connection = self._place(), self.processing_connection()
         self._asr_choices = []
         if connection is None and not _base.STANDALONE:
             return None
 
-        def choices() -> list[dict[str, str]]:
+        def choices() -> list[tuple[str, str]]:
             if connection is None:
                 from .. import node_settings
 
-                return node_settings.local_asr_choices()
+                if place == Recognition.CLOUD:
+                    return cloud_models()
+                return [(c["id"], c["title"]) for c in node_settings.local_asr_choices()]
             from ..client import MnemaClient
 
-            return MnemaClient(connection.url, token=connection.token).asr_choices()
+            found = MnemaClient(connection.url, token=connection.token).asr_choices()
+            listed = [(c["id"], c["title"]) for c in found]
+            if place == Recognition.CLOUD:
+                return [(k, t) for k, t in listed if k.startswith("openai/")]
+            return [(k, t) for k, t in listed if not is_cloud(k)]
 
         def load() -> None:
             try:
-                found = [(c["id"], c["title"]) for c in choices()]
+                found = choices()
             except Exception:  # noqa: BLE001 - the saved choice stays visible without a list
                 logger.info("could not read the recognition list")
                 found = None
-            if self.processing_connection() == connection:
+            if (self._place(), self.processing_connection()) == (place, connection):
                 self._asr_stale = found is None and connection is not None
                 self._asr_choices = found or []
                 self._env_changed()
@@ -543,21 +566,26 @@ class BarRuntime:
         return thread
 
     def menu_env(self) -> MenuEnv:
-        """Connection, this Mac's model and the recognition list, without model keys."""
+        """Connection, the models and the recognition list, without keys."""
         from .. import node_settings
+        from ..llm.config import LLMSettings
 
+        server = self.server
+        here = _base.STANDALONE and server is None
         return MenuEnv(
-            server=self.server,
+            server=server,
             server_ok=self.server_ok,
             server_auth=self.server_auth,
             server_name=self.server_name,
             server_llm=self.server_llm,
             server_model=self.server_model,
+            server_deepl=self.server_deepl,
             server_records=self._server_records(),
             server_version=self.server_version,
-            model=node_settings.model() if _base.STANDALONE else None,
+            model=node_settings.model() if here else None,
             mac=_base.STANDALONE,
             asr_choices=self._asr_choices,
+            asr_key=self.server_asr_key if server else here and bool(LLMSettings().asr_api_key),
             update=self._update,
             update_error=self._update_error,
             update_step=self._update_step,
@@ -614,6 +642,7 @@ class BarRuntime:
             self.server_ok, self.server_auth = False, True
             self.server_name, self.server_llm, self.server_model = None, False, None
             self.server_version = None
+            self.server_asr_key = self.server_deepl = False
             return
 
         def ping() -> None:
@@ -623,6 +652,7 @@ class BarRuntime:
             caps = MnemaClient(url, token=Settings().token or None).health()
             auth = caps is None or caps.get("auth") is not False
             ok = caps is not None and auth
+            keys = self.server_asr_key, self.server_deepl
             if caps is None:  # no answer: what is known about it stays
                 name, llm, model = self.server_name, self.server_llm, self.server_model
                 version = self.server_version
@@ -632,14 +662,17 @@ class BarRuntime:
                 name = caps.get("name")
                 name = (name.strip()[:40] or None) if isinstance(name, str) else None
                 llm = caps.get("llm") is True
-                # only a Mac that chose "On the server" shows the server model: else not asked
-                chosen = _base.STANDALONE and self.prefs.where == Where.SERVER
-                model = self._server_model_of(url) if llm and chosen else None
+                model = None
+                if _base.STANDALONE and auth:  # the Mac shows and sets the user's model there
+                    known = self._server_model_of(url)
+                    if known is not None:
+                        model, llm = known["model"], known["model"] is not None
+                        keys = known["asr_key"], known["deepl"]
             if ok and self._asr_stale:
                 self._load_asr_choices()
             if not status:
                 ok, auth = self.server_ok, self.server_auth
-            now = (ok, auth, name, llm, model, version)
+            now = (ok, auth, name, llm, model, version, *keys)
             if now != (
                 self.server_ok,
                 self.server_auth,
@@ -647,6 +680,8 @@ class BarRuntime:
                 self.server_llm,
                 self.server_model,
                 self.server_version,
+                self.server_asr_key,
+                self.server_deepl,
             ):
                 (
                     self.server_ok,
@@ -655,23 +690,34 @@ class BarRuntime:
                     self.server_llm,
                     self.server_model,
                     self.server_version,
+                    self.server_asr_key,
+                    self.server_deepl,
                 ) = now
                 self._env_changed()
 
         threading.Thread(target=ping, daemon=True, name="mnema-bar-ping").start()
 
     @staticmethod
-    def _server_model_of(url: str) -> str | None:
-        """The server model for the Mac "Model" row (GET /api/node/settings); unknown — None."""
-        from ..client import MnemaClient
+    def _server_model_of(url: str) -> dict[str, Any] | None:
+        """The user's model on the server and whether its keys are there (GET /api/model);
+        unknown — None."""
         from ..config import Settings
+        from ..connection import Connection
+        from .server_model import ServerModel
 
         try:
-            found = MnemaClient(url, token=Settings().token or None).node_settings().get("model")
+            found = ServerModel(Connection(url=url, token=Settings().token or None)).model()
         except Exception:  # noqa: BLE001 - the "Model" row stays without a name
-            logger.info("server model unknown")
+            logger.info("the model on the server is unknown")
             return None
-        return (found.strip()[:80] or None) if isinstance(found, str) else None
+        if not isinstance(found, dict):
+            return None
+        model = found.get("model")
+        return {
+            "model": (model.strip()[:80] or None) if isinstance(model, str) else None,
+            "asr_key": isinstance(found.get("asr_key"), str),
+            "deepl": isinstance(found.get("deepl_key"), str),
+        }
 
     @property
     def can_exit(self) -> bool:
@@ -868,8 +914,13 @@ class BarRuntime:
             self.state.error = self.state.notice = ""
         elif key == "server_setup" and idle:
             self._form(ServerFlow())
-        elif key == "model_setup" and idle and _base.STANDALONE:  # this Mac's model
-            self._form(ModelFlow())
+        elif key == "model_setup" and idle and _base.STANDALONE:  # on the server or this Mac
+            server = self.summary_connection()
+            self._form(ModelFlow(server, current=self.server_model) if server else ModelFlow())
+        elif key == "asr_key_setup" and idle and _base.STANDALONE:
+            self._form(KeyFlow("asr", self.summary_connection()))
+        elif key == "deepl_setup" and idle and _base.STANDALONE and self.server is not None:
+            self._form(KeyFlow("deepl", self.summary_connection()))
         elif key == "choose_server":  # the "<server> is unavailable" card: connect another one
             self._platform.open_settings("server")
         elif key == "server_off" and idle:
@@ -946,8 +997,8 @@ class BarRuntime:
                 )
         elif key.startswith("asr:") and idle:
             self.prefs.asr = key.removeprefix("asr:")
-        elif key.startswith("where:") and idle and _base.STANDALONE:
-            if not self._set_where(key.removeprefix("where:")):
+        elif key.startswith("recognition:") and idle:
+            if not self._set_recognition(key.removeprefix("recognition:")):
                 return
         elif key == "update_check":
             self._check_updates()
@@ -1467,32 +1518,35 @@ class BarRuntime:
         opened.set()
 
     def _form_saved(self, flow: Flow) -> None:
-        """The window saved. A model — the settings "Model" row is reread; a connection — check
-        the server, wake the sync, reread the recognition list if processing runs on the server
-        (Linux; a Mac with "On the server")."""
+        """The window saved. A model or a key — the settings rows are reread, from the server
+        when it keeps them, and a recognition key changes the cloud list; a connection — check
+        the server, wake the sync, reread the recognition list."""
         self.state.error = ""
         if not isinstance(flow, ServerFlow):
             self._env_changed()
+            if self.server is not None:
+                self._check_server_async(status=False)
+            if isinstance(flow, KeyFlow):
+                self._load_asr_choices()
             return
         if flow.result is not None:
             self.server_ok, self.server_auth = flow.result
             self.server_name, self.server_llm, self.server_model = None, False, None
             self.server_version = None
+            self.server_asr_key = self.server_deepl = False
         self._env_changed()
         self._check_server_async(status=False)
-        if not _base.STANDALONE or self.prefs.where == Where.SERVER:
-            self._load_asr_choices()
+        self._load_asr_choices()
         self._library_changed()
 
-    def _set_where(self, value: str) -> bool:
-        """Mac: "Process on". "On the server" needs a connected server; cloud recognition on
-        this Mac becomes automatic; the recognition list is the chosen place's. False — the
-        choice stays."""
-        if value not in {Where.MAC, Where.SERVER} or (
-            value == Where.SERVER and self.server is None
-        ):
+    def _set_recognition(self, value: str) -> bool:
+        """ "Recognition": On this Mac (Mac only), On the server (needs a connected server) or In
+        the cloud; the engine and its list become the place's. False — the choice stays."""
+        if value not in set(Recognition) or (value == Recognition.MAC and not _base.STANDALONE):
             return False
-        self.prefs = BarPrefs.model_validate({**self.prefs.model_dump(), "where": value})
+        if value == Recognition.SERVER and self.server is None and _base.STANDALONE:
+            return False
+        self.prefs = BarPrefs.model_validate({**self.prefs.model_dump(), "recognition": value})
         self._load_asr_choices()
         self._check_server_async()  # name, model and reachability of the server for "Model"
         self._env_changed()
@@ -1540,13 +1594,16 @@ class BarRuntime:
             self._on_change()
             return
         self.state.error = ""
-        if self.prefs.where == Where.SERVER:  # without a server the Mac processes itself
-            self.prefs = BarPrefs.model_validate({**self.prefs.model_dump(), "where": Where.MAC})
+        if _base.STANDALONE and self.prefs.recognition == Recognition.SERVER:
+            # without a server the Mac recognizes itself
+            update = {"recognition": Recognition.MAC}
+            self.prefs = BarPrefs.model_validate({**self.prefs.model_dump(), **update})
             self._save_prefs()
         self._load_asr_choices()  # the recognition list came from the server
         self.server_ok, self.server_auth = False, True
         self.server_name, self.server_llm, self.server_model = None, False, None
         self.server_version = None
+        self.server_asr_key = self.server_deepl = False
         self.state.sync_missing, self.state.sync_errors = [], []
         self.state.sync_other_library, self.state.sync_foreign = None, ""
         self._library_changed()
@@ -1559,7 +1616,7 @@ class BarRuntime:
 
     def _processing_label(self) -> str:
         """The server by name, as in the settings; without a name — by address."""
-        remote = self.processing_connection()
+        remote = self.summary_connection()
         return server_label(remote.url if remote else None, self.server_name)
 
     def _server_down(self, folder: Path, retry: Callable[..., None], message: str) -> None:
@@ -1871,7 +1928,7 @@ class BarRuntime:
         try:
             from ..client import MnemaClient
 
-            connection = self.processing_connection()
+            connection = self.summary_connection()
             if connection is None and not _base.STANDALONE:
                 self.state.error = _("Server not connected")
                 return
@@ -1950,7 +2007,7 @@ class BarRuntime:
                             asr=prepared.config.asr,
                         )  # fmt: skip
                     else:
-                        asr = asr_at(task.asr or self.prefs.asr, on_server=connection is not None)
+                        asr = asr_at(task.asr or self.prefs.asr, self._place())
                         config = self._config().model_copy(update={"lang": job.lang, "asr": asr})
                         result, _full = recover_on_node(
                             base,
@@ -2002,7 +2059,7 @@ class BarRuntime:
     def _processing_settings(self, connection: Any) -> dict[str, Any]:
         """Recognition and summary as chosen now, where processing runs."""
         return {
-            "asr": asr_at(self.prefs.asr, on_server=connection is not None),
+            "asr": asr_at(self.prefs.asr, self._place()),
             "summary": self.prefs.summary,
             "summary_lang": self.prefs.summary_lang,
             "runner": connection.url if connection is not None else None,
@@ -2198,7 +2255,7 @@ class BarRuntime:
         return LiveConfig(
             mic=True,
             system=self.prefs.system or _system_available(),
-            asr=asr_at(self.prefs.asr, on_server=remote is not None),
+            asr=asr_at(self.prefs.asr, self._place()),
             summary=self.prefs.summary,
             summary_lang=self.prefs.summary_lang,
             stream=False,  # recording only: the text comes from an offline pass after stop

@@ -16,7 +16,14 @@ from .protocol import (
     SettingsTab,
     Tone,
 )
-from .state import BarPrefs, MenuEnv, Where, asr_options, discreet_title, update_line
+from .state import (
+    BarPrefs,
+    MenuEnv,
+    Recognition,
+    asr_options,
+    discreet_title,
+    update_line,
+)
 
 # the runtime keeps one of these as hotkey_error; settings_model translates it when shown
 HOTKEY_BUSY = "Shortcut is in use"
@@ -65,55 +72,75 @@ def here(mac: bool, *, start: bool = False) -> str:
     return _("On this computer") if start else _("on this computer")
 
 
-def on_server(prefs: BarPrefs, env: MenuEnv) -> bool:
-    """The Mac processes on the server when "On the server" is chosen and a server is connected
-    (the rule of node.selected_processing); Linux always does."""
-    if not env.mac:
-        return True
-    return prefs.where == Where.SERVER and env.server is not None
+def recognition_at(prefs: BarPrefs, env: MenuEnv) -> Recognition:
+    """The place that recognizes: on a Mac, "On the server" without a server is this Mac (the
+    rule of node.selected_processing)."""
+    if env.mac and prefs.recognition == Recognition.SERVER and env.server is None:
+        return Recognition.MAC
+    return prefs.recognition
 
 
-def _where_choice(prefs: BarPrefs, env: MenuEnv) -> SettingsField:
-    """Mac: process on this Mac or on the connected server; without a server the second option
-    is unavailable."""
-    there = on_server(prefs, env)
-    return _choice(
-        _("Where to process"),
-        [
-            Choice(key=f"where:{Where.MAC}", title=_("On this Mac"), checked=not there),
-            Choice(
-                key=f"where:{Where.SERVER}",
-                title=_("On the server"),  # a Mac has one server: its name is not needed here
-                checked=there,
-                enabled=env.server is not None,
-                detail="" if env.server is not None else _("Server not connected"),
-            ),
-        ],
-    )
+def _recognition_choice(prefs: BarPrefs, env: MenuEnv) -> SettingsField:
+    """On this Mac (Mac only), on the server (unavailable without one) or in the cloud."""
+    place = recognition_at(prefs, env)
+    choices = [
+        Choice(
+            key=f"recognition:{Recognition.SERVER}",
+            title=_("On the server"),  # a Mac has one server: its name is not needed here
+            checked=place == Recognition.SERVER,
+            enabled=env.server is not None or not env.mac,
+            detail="" if env.server is not None or not env.mac else _("Server not connected"),
+        ),
+        Choice(
+            key=f"recognition:{Recognition.CLOUD}",
+            title=_("In the cloud"),
+            checked=place == Recognition.CLOUD,
+        ),
+    ]
+    if env.mac:
+        here = Choice(
+            key=f"recognition:{Recognition.MAC}",
+            title=_("On this Mac"),
+            checked=place == Recognition.MAC,
+        )
+        choices.insert(0, here)
+    return _choice(_("Recognition"), choices)
 
 
-def _model_rows(prefs: BarPrefs, env: MenuEnv) -> list[SettingsField]:
-    """Mac: the model of the place that processes; the row above "Write summaries" tells why it is
-    unavailable. "Choose model…" exists only for this Mac's own model."""
+def _model_rows(env: MenuEnv) -> list[SettingsField]:
+    """Mac: the model of the place where it lives, the user's on the connected server or this
+    Mac's own; "Choose model…" sets it there. The row above "Write summaries" tells why it is
+    unavailable."""
     f = SettingsField
-    if on_server(prefs, env):
-        # "Not set up" only when the server answered without a model; a server that summarizes
-        # but did not name its model, or has not answered yet, gets an empty value
-        if env.server_llm:
-            value, tone = env.server_model or "", Tone.OK
-        elif env.server_ok:
-            value, tone = _("Not set up on the server"), Tone.WARN
+    if env.server is not None:
+        # "Not set up" only when the server answered without a model; a server that has not
+        # answered yet gets an empty value
+        if env.server_model:
+            value, tone = env.server_model, Tone.OK
+        elif env.server_ok and not env.server_llm:
+            value, tone = _("Not set up"), Tone.WARN
         else:
             value, tone = "", Tone.NONE
-        return [f(kind=FieldKind.STATUS, title=_("Model"), value=value, tone=tone)]
+    else:
+        value, tone = env.model or _("Not set up"), Tone.OK if env.model else Tone.WARN
+    return [
+        f(kind=FieldKind.STATUS, title=_("Model"), value=value, tone=tone),
+        f(kind=FieldKind.BUTTON, title=_("Choose model…"), key="model_setup"),
+    ]
+
+
+def _translation_rows(env: MenuEnv) -> list[SettingsField]:
+    """Mac with a server: live translation by the user's DeepL key or by the model."""
+    f = SettingsField
+    if not env.mac or env.server is None or not env.server_auth:
+        return []
     return [
         f(
             kind=FieldKind.STATUS,
-            title=_("Model"),
-            value=env.model or _("Not set up"),
-            tone=Tone.OK if env.model else Tone.WARN,
+            title=_("Live translation"),
+            value="DeepL" if env.server_deepl else _("By the model"),
         ),
-        f(kind=FieldKind.BUTTON, title=_("Choose model…"), key="model_setup"),
+        f(kind=FieldKind.BUTTON, title=_("Set the DeepL key…"), key="deepl_setup"),
     ]
 
 
@@ -206,17 +233,17 @@ def settings_model(
     does not change them."""
     f, c = SettingsField, Choice
     summary_lang = prefs.summary_lang
-    # the model of the place that processes summarizes; a Mac whose server has not answered yet
-    # keeps the summary on and lets the processing ask
-    if on_server(prefs, env):
-        summary_ready = env.server_llm or (env.mac and not env.server_ok)
-    else:
+    # the user's model on the server summarizes when one is connected; a server that has not
+    # answered yet keeps the summary on and lets the processing ask
+    if env.mac and env.server is None:
         summary_ready = env.model is not None
+    else:
+        summary_ready = env.server_llm or (env.mac and not env.server_ok)
     options = asr_options(env, prefs.asr)
-    processing = [_where_choice(prefs, env)] if env.mac else []
-    processing += [
+    processing = [
+        _recognition_choice(prefs, env),
         _choice(
-            _("Recognition"),
+            _("Engine"),
             [
                 c(key=f"asr:{value}", title=title, checked=value == prefs.asr)
                 for value, title in options
@@ -224,8 +251,12 @@ def settings_model(
             value=dict(options).get(prefs.asr, prefs.asr),
         ),
     ]
+    if env.mac and recognition_at(prefs, env) == Recognition.CLOUD and not env.asr_key:
+        processing.append(
+            f(kind=FieldKind.BUTTON, title=_("Set the OpenAI key…"), key="asr_key_setup")
+        )
     if env.mac:
-        processing += _model_rows(prefs, env)
+        processing += _model_rows(env)
     processing += [
         f(
             kind=FieldKind.TOGGLE,
@@ -265,9 +296,11 @@ def settings_model(
         ],
     )
     server = _server_rows(env)
+    translation = _translation_rows(env)
     if not idle:  # next recording's settings and the connection are locked while busy
         locked = [x for s in record.sections for x in s.fields if x.kind != FieldKind.STATUS]
-        for field in [*locked, *(x for x in server if x.kind == FieldKind.BUTTON)]:
+        buttons = [x for x in (*server, *translation) if x.kind == FieldKind.BUTTON]
+        for field in [*locked, *buttons]:
             field.enabled = False
             for item in field.choices:
                 item.enabled = False
@@ -310,7 +343,10 @@ def settings_model(
                 id="server",
                 title=_("Server"),
                 symbol="server.rack",
-                sections=[SettingsSection(title=_("Connection"), fields=server)],
+                sections=[
+                    SettingsSection(title=_("Connection"), fields=server),
+                    *([SettingsSection(fields=translation)] if translation else []),
+                ],
             ),
             SettingsTab(
                 id="general",

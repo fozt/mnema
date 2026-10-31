@@ -55,7 +55,6 @@
   "Add ⌃, ⌥ or ⌘": "Добавьте ⌃, ⌥ или ⌘",
   "On this computer": "На этом компьютере",
   "on this computer": "на этом компьютере",
-  "Where to process": "Где обрабатывать",
   "Server": "Сервер",
   "On this Mac": "На этом Mac",
   "on this Mac": "на этом Mac",
@@ -69,7 +68,6 @@
   "Press a shortcut": "Нажмите сочетание",
   "Check for updates": "Проверить обновления",
   "On the server": "На сервере",
-  "Not set up on the server": "Не настроена на сервере",
   "Not set up": "Не настроена",
   "Not connected": "Не подключён",
   "Connected": "Подключён",
@@ -97,5 +95,14 @@
   "Latest version": "Последняя версия",
   "Version {version} available": "Доступна версия {version}",
   "Could not update": "Не удалось обновить",
-  "Check again": "Проверить снова"
+  "Check again": "Проверить снова",
+  "In the cloud": "В облаке",
+  "Engine": "Движок",
+  "Set the OpenAI key…": "Задать ключ OpenAI…",
+  "Live translation": "Живой перевод",
+  "By the model": "Моделью",
+  "Set the DeepL key…": "Задать ключ DeepL…",
+  "Current: {model}": "Сейчас: {model}",
+  "OpenAI key for recognition": "Ключ OpenAI для распознавания",
+  "DeepL key": "Ключ DeepL"
 }

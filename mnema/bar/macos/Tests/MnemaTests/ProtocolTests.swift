@@ -121,7 +121,7 @@ func fixture(_ name: String) throws -> Data {
     let processing = try #require(tabs["record"]?.sections.first { $0.title == "Обработка" })
     let record = SectionLayout(processing.fields)
     #expect(record.lines.map { $0.fields.map(\.title) } == [
-        ["Где обрабатывать"], ["Распознавание"], ["Модель"], ["Выбрать модель…"],
+        ["Распознавание"], ["Движок"], ["Модель"], ["Выбрать модель…"],
         ["Составлять пересказ"], ["Язык пересказа"],
     ])
     #expect(record.footer.isEmpty)
