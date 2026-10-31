@@ -326,9 +326,7 @@ def test_cloud_choice_saved_for_mac_records_with_own_engines(
     run = meta.last(tmp_path / "notes" / "2026-10-22_Подготовка выпуска")
     assert run is not None and run.status == "ok"
     model = settings_model(rt.prefs, rt.menu_env())
-    field = next(
-        f for t in model.tabs for s in t.sections for f in s.fields if f.title == "Распознавание"
-    )
+    field = next(f for t in model.tabs for s in t.sections for f in s.fields if f.title == "Движок")
     assert field.value == "Автоматически"
     assert [c.title for c in field.choices if c.checked] == ["Автоматически"]
 
@@ -336,7 +334,7 @@ def test_cloud_choice_saved_for_mac_records_with_own_engines(
 @pytest.mark.parametrize(
     ("saved", "asked"),
     [
-        ({"asr": "gigaam", "where": "server"}, None),  # "On server" saved, but no server now
+        ({"asr": "gigaam", "recognition": "server"}, None),  # "On the server", no server now
         ({}, "gigaam"),  # "Retry" here of a recording asked from the server's list
     ],
 )
@@ -445,3 +443,25 @@ def test_linux_without_server_keeps_the_recording(tmp_path) -> None:
         recording_client.recover_on_node(folder, LiveConfig(mix_audio=False), None)
     assert str(refused.value) == "Сервер не подключён. Запись сохранена, обработайте позже"
     assert _files(folder) == before
+
+
+def test_mac_with_a_server_that_refuses_the_summary_keeps_the_transcript(
+    monkeypatch, tmp_path, sources
+) -> None:
+    """A Mac connected to a server recognizes here and asks the server for the summary; the
+    user has no model there and the server refuses: the transcript stays, there is no summary,
+    the remark gives the server's reason instead of "no model on this Mac"."""
+    _asr(monkeypatch)
+    _server(monkeypatch, tmp_path)
+    monkeypatch.setenv("MNEMA_RUNNER", "http://node:8123")
+    monkeypatch.delenv("MNEMA_MODEL")
+    folder = _recording(tmp_path / "notes")
+    result, full = recording_client.recover_on_node(folder, LiveConfig(mix_audio=False), None)
+    assert result.base == folder and full and result.summary_md is None
+    assert (folder / "transcript.txt").is_file() and not (folder / "summary.txt").exists()
+    assert not (folder / PROCESSING_MARK).exists()
+    [remark] = result.remarks
+    assert remark.cause == "Пересказ не составлен: На сервере не настроена модель"
+    run = meta.last(folder)
+    assert run is not None and (run.kind, run.status) == ("process", "ok")
+    assert run.notes == [remark] and run.remarks == [remark.text]

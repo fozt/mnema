@@ -22,11 +22,18 @@ def _serve(monkeypatch, handler) -> None:
     )
 
 
+_SERVER_ASR = [
+    {"id": "auto", "title": "Автоматически"},
+    {"id": "gigaam", "title": "GigaAM"},
+    {"id": "openai/gpt-4o-transcribe", "title": "OpenAI · gpt-4o-transcribe"},
+]
+
+
 @pytest.mark.parametrize("standalone", [False, True])
 def test_asr_options_come_from_the_server_or_this_mac(tmp_path, monkeypatch, standalone):
-    """Linux gets the connected server's list with its token, the saved choice shows even without
-    the list, settings do not change; the Mac offers Automatic and its installed engines, never
-    asks the server (it is only for sync) or providers, and a cloud choice becomes Automatic."""
+    """Recognition on the server: Linux gets the connected server's engines with its token,
+    without the cloud models, and a saved cloud choice becomes Automatic; On this Mac the Mac
+    offers Automatic and its installed engines and never asks the server or providers."""
     monkeypatch.setattr(base, "STANDALONE", standalone)
     monkeypatch.setenv("MNEMA_RUNNER", "http://remote-node:8765")
     monkeypatch.setenv("MNEMA_TOKEN", "remote-token")
@@ -38,15 +45,13 @@ def test_asr_options_come_from_the_server_or_this_mac(tmp_path, monkeypatch, sta
         lambda n, *a, **kw: engines[n] if n in engines else find(n, *a, **kw),
     )
     prefs = tmp_path / "bar.json"
-    save_prefs(BarPrefs(asr="groq/whisper-large-v3"), prefs)
+    prefs.write_text(json.dumps({"asr": "openai/gpt-4o-transcribe"}), encoding="utf-8")
     seen = []
 
     def handler(request):
         if request.url.path == "/api/node/asr":
             seen.append(request)
-            return httpx.Response(
-                200, json={"choices": [{"id": "groq/whisper", "title": "Groq · Whisper"}]}
-            )
+            return httpx.Response(200, json={"choices": _SERVER_ASR})
         return httpx.Response(200, json={"ok": True, "llm": False, "name": "Домашний"})
 
     _serve(monkeypatch, handler)
@@ -56,16 +61,47 @@ def test_asr_options_come_from_the_server_or_this_mac(tmp_path, monkeypatch, sta
     thread.join(3)
     assert not thread.is_alive()
     options = asr_options(rt.menu_env(), rt.prefs.asr)
+    assert rt.prefs.asr == "auto"
     if standalone:
         assert seen == []
         assert options == [("auto", "Автоматически"), ("gigaam", "GigaAM")]
-        assert rt.prefs.asr == "auto"
     else:
         assert seen and all(r.url.host == "remote-node" for r in seen)
         assert all(r.headers["authorization"] == "Bearer remote-token" for r in seen)
-        assert ("groq/whisper", "Groq · Whisper") in options
-        assert "groq/whisper-large-v3" in dict(options)
-        assert rt.prefs.asr == json.loads(prefs.read_text())["asr"] == "groq/whisper-large-v3"
+        assert options == [("auto", "Автоматически"), ("gigaam", "GigaAM")]
+
+
+@pytest.mark.parametrize("server", ["http://remote-node:8765", ""])
+def test_cloud_offers_the_cloud_models(tmp_path, monkeypatch, server):
+    """In the cloud: with a server its cloud models (Linux and Mac), without one this Mac's cloud
+    engine offline; an engine saved before becomes the first cloud model."""
+    monkeypatch.setattr(base, "STANDALONE", True)
+    monkeypatch.setenv("MNEMA_RUNNER", server)
+    seen = []
+
+    def handler(request):
+        seen.append(request.url.path)
+        if request.url.path == "/api/node/asr":
+            return httpx.Response(200, json={"choices": _SERVER_ASR})
+        return httpx.Response(200, json={"ok": True, "llm": True, "name": "Домашний"})
+
+    _serve(monkeypatch, handler)
+    prefs = tmp_path / "bar.json"
+    prefs.write_text(json.dumps({"recognition": "cloud", "asr": "gigaam"}), encoding="utf-8")
+    rt = BarRuntime(prefs_file=prefs)
+    thread = rt._load_asr_choices()
+    assert thread is not None
+    thread.join(3)
+    options = asr_options(rt.menu_env(), rt.prefs.asr)
+    assert rt.prefs.asr == "openai/gpt-4o-transcribe"
+    if server:
+        assert options == [("openai/gpt-4o-transcribe", "OpenAI · gpt-4o-transcribe")]
+    else:
+        assert "/api/node/asr" not in seen
+        assert options == [
+            ("openai/gpt-4o-transcribe", "OpenAI · gpt-4o-transcribe"),
+            ("openai/gpt-4o-mini-transcribe", "OpenAI · gpt-4o-mini-transcribe"),
+        ]
 
 
 def test_linux_without_server_has_no_list(tmp_path, monkeypatch):
@@ -80,7 +116,7 @@ def test_linux_without_server_has_no_list(tmp_path, monkeypatch):
 def test_unavailable_server_keeps_asr_choice_without_provider_fallback(tmp_path, monkeypatch):
     monkeypatch.setenv("MNEMA_RUNNER", "http://unavailable-node")
     prefs = tmp_path / "bar.json"
-    save_prefs(BarPrefs(asr="groq/whisper-large-v3"), prefs)
+    save_prefs(BarPrefs(recognition="cloud", asr="openai/gpt-4o-mini-transcribe"), prefs)
     seen = []
 
     def handler(request):
@@ -94,8 +130,8 @@ def test_unavailable_server_keeps_asr_choice_without_provider_fallback(tmp_path,
         thread.join(3)
         assert not thread.is_alive()
     assert seen and set(seen) == {"unavailable-node"}
-    assert rt.prefs.asr == "groq/whisper-large-v3"
-    assert "groq/whisper-large-v3" in dict(asr_options(rt.menu_env(), rt.prefs.asr))
+    assert rt.prefs.asr == "openai/gpt-4o-mini-transcribe"
+    assert "openai/gpt-4o-mini-transcribe" in dict(asr_options(rt.menu_env(), rt.prefs.asr))
 
 
 def test_late_asr_list_from_previous_server_cannot_replace_current_choices(tmp_path, monkeypatch):
@@ -127,8 +163,8 @@ def test_late_asr_list_from_previous_server_cannot_replace_current_choices(tmp_p
     assert rt.menu_env().asr_choices == [("selected-node", "selected-node")]
 
 
-@pytest.mark.parametrize(("where", "kept"), [("mac", "auto"), ("server", "gigaam")])
-def test_mac_without_gigaam_works_a_saved_gigaam_as_automatic(tmp_path, monkeypatch, where, kept):
+@pytest.mark.parametrize(("place", "kept"), [("mac", "auto"), ("server", "gigaam")])
+def test_mac_without_gigaam_works_a_saved_gigaam_as_automatic(tmp_path, monkeypatch, place, kept):
     """The Mac app ships no GigaAM: a gigaam choice saved in bar.json works as Automatic on this
     Mac, as a cloud one does, and is not offered; processing on the server keeps it."""
     monkeypatch.setattr(base, "STANDALONE", True)
@@ -141,7 +177,7 @@ def test_mac_without_gigaam_works_a_saved_gigaam_as_automatic(tmp_path, monkeypa
         lambda n, *a, **kw: engines[n] if n in engines else find(n, *a, **kw),
     )
     prefs = tmp_path / "bar.json"
-    prefs.write_text(json.dumps({"asr": "gigaam", "where": where}), encoding="utf-8")
+    prefs.write_text(json.dumps({"asr": "gigaam", "recognition": place}), encoding="utf-8")
     server = [{"id": "gigaam", "title": "GigaAM"}, {"id": "whisper", "title": "Whisper"}]
     _serve(
         monkeypatch,
@@ -157,4 +193,4 @@ def test_mac_without_gigaam_works_a_saved_gigaam_as_automatic(tmp_path, monkeypa
     thread.join(3)
     options = dict(asr_options(rt.menu_env(), rt.prefs.asr))
     assert rt.prefs.asr == kept
-    assert ("gigaam" in options) is (where == "server")
+    assert ("gigaam" in options) is (place == "server")

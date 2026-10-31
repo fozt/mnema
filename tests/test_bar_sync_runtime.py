@@ -12,7 +12,7 @@ from mnema.bar import runtime
 from mnema.bar.panel import panel_model
 from mnema.bar.protocol import SettingsModel
 from mnema.bar.recordings import library
-from mnema.bar.state import MenuEnv, Phase
+from mnema.bar.state import BarPrefs, MenuEnv, Phase
 from mnema.connection import Connection, parse_connection
 from mnema.core import base
 from mnema.i18n import set_language
@@ -110,7 +110,8 @@ def test_explicit_gui_lifecycle_does_not_recreate_missing_root_and_sync_is_indep
     assert parse_connection(controller.callbacks["selected"]()) == Connection(
         url="http://chosen-library", token="library-token"
     )
-    monkeypatch.setattr(base, "STANDALONE", True)  # the Mac processes itself, the server syncs
+    monkeypatch.setattr(base, "STANDALONE", True)  # the Mac recognizes itself, the server syncs
+    rt.prefs = BarPrefs()
     assert rt.processing_connection() is None
     assert controller.callbacks["selected"]() == "http://chosen-library#token=library-token"
     monkeypatch.setattr(base, "STANDALONE", False)  # Linux processes on the same server

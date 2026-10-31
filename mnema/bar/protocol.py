@@ -454,16 +454,17 @@ def _settings_sample(*, idle: bool = True, update: SettingsField = _UPDATE_FOUND
                         fields=[
                             f(
                                 kind=FieldKind.CHOICE,
-                                title="Где обрабатывать",
+                                title="Распознавание",
                                 value="на этом Mac",
                                 choices=[
-                                    c(key="where:mac", title="На этом Mac", checked=True),
-                                    c(key="where:server", title="На сервере"),
+                                    c(key="recognition:mac", title="На этом Mac", checked=True),
+                                    c(key="recognition:server", title="На сервере"),
+                                    c(key="recognition:cloud", title="В облаке"),
                                 ],
                             ),
                             f(
                                 kind=FieldKind.CHOICE,
-                                title="Распознавание",
+                                title="Движок",
                                 value="Автоматически",
                                 choices=[
                                     c(key="asr:auto", title="Автоматически", checked=True),
@@ -531,7 +532,17 @@ def _settings_sample(*, idle: bool = True, update: SettingsField = _UPDATE_FOUND
                                 role=Role.DESTRUCTIVE,
                             ),
                         ],
-                    )
+                    ),
+                    SettingsSection(
+                        fields=[
+                            f(kind=FieldKind.STATUS, title="Живой перевод", value="Моделью"),
+                            f(
+                                kind=FieldKind.BUTTON,
+                                title="Задать ключ DeepL…",
+                                key="deepl_setup",
+                            ),
+                        ],
+                    ),
                 ],
             ),
             SettingsTab(
@@ -568,7 +579,7 @@ def _settings_sample(*, idle: bool = True, update: SettingsField = _UPDATE_FOUND
         ]
     )
     if not idle:  # as settings_model(idle=False): Recording except the Model row, and server
-        buttons = ("server_setup", "server_off")
+        buttons = ("server_setup", "server_off", "deepl_setup")
         for tab in model.tabs:
             for field in (x for s in tab.sections for x in s.fields):
                 if (tab.id == "record" and field.kind != FieldKind.STATUS) or field.key in buttons:

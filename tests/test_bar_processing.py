@@ -74,12 +74,11 @@ def _transcribed(home: Path, name: str = "2026-10-22_13-05") -> Path:
 
 
 def test_mac_records_and_processes_here_without_a_server(monkeypatch, home) -> None:
-    """A Mac without a model processes the recording right here, with no requests to the server
-    (it only syncs) and no notice; there is a transcript, a remark says where to pick a model;
-    no terminal commands in notifications or remarks."""
+    """A Mac without a model and without a server processes the recording right here, with no
+    requests and no notice; there is a transcript, a remark says where to pick a model; no
+    terminal commands in notifications or remarks."""
     captured: dict = {}
     _patch_record(monkeypatch, home, captured)
-    monkeypatch.setenv("MNEMA_RUNNER", SERVER)  # the recordings server is connected
     monkeypatch.delenv("MNEMA_MODEL")
     sent: list[str] = []
     monkeypatch.setattr(
@@ -276,8 +275,9 @@ def test_stopped_summary_leaves_the_record_as_it_was(monkeypatch, home, standalo
 
 
 def test_mac_processes_even_when_the_server_is_down(monkeypatch, home) -> None:
-    """A Mac never shows an "unavailable" card: processing does not depend on the recordings
-    server; "Process…" processes here."""
+    """A Mac never shows an "unavailable" card: it recognizes here whatever the server; with the
+    server silent the transcript is saved without a summary, a remark names the server and the
+    card offers "Summarize"."""
     captured: dict = {}
     _patch_record(monkeypatch, home, captured)
     monkeypatch.setenv("MNEMA_RUNNER", SERVER)
@@ -291,6 +291,13 @@ def test_mac_processes_even_when_the_server_is_down(monkeypatch, home) -> None:
     rt.join(timeout=30)
     assert rt.state.unreachable == {} and rt.state.error == ""
     assert rt.state.last_result is not None and rt.state.last_result.name == "transcript.txt"
+    assert not (folder / "summary.txt").exists() and not (folder / PROCESSING_MARK).exists()
+    [remark] = rt.state.last_warnings
+    assert remark.cause == "Пересказ не составлен: 100.64.0.9:8123 недоступен"
+    assert remark.hint == "Нажмите «Составить пересказ» в меню записи"
+    assert meta.last(folder).notes == [remark]
+    [card] = library(home / "notes").cards
+    assert card.state is meta.RecordState.PROCESSED and card.has_text and not card.has_summary
 
 
 def _spied_server(monkeypatch, home: Path) -> list[httpx.Request]:
@@ -329,7 +336,7 @@ def test_mac_on_the_server_processes_there(monkeypatch, home) -> None:
     monkeypatch.delenv("MNEMA_MODEL")  # no model here or on the server
     config_dir().mkdir(parents=True, exist_ok=True)
     (config_dir() / "node.json").write_text(json.dumps({"name": "Дом"}), encoding="utf-8")
-    (home / "bar.json").write_text(json.dumps({"where": "server"}), encoding="utf-8")
+    (home / "bar.json").write_text(json.dumps({"recognition": "server"}), encoding="utf-8")
     app = _App()
     rt = BarRuntime(platform=app, prefs_file=home / "bar.json")
     rt.handle("start")
@@ -361,7 +368,7 @@ def test_mac_on_server_down_waits_for_it_and_does_not_fall_back(monkeypatch, hom
     monkeypatch.setattr(
         setup_mod, "dispatch", lambda *a, **k: pytest.fail("no recognition on this Mac")
     )
-    (home / "bar.json").write_text(json.dumps({"where": "server"}), encoding="utf-8")
+    (home / "bar.json").write_text(json.dumps({"recognition": "server"}), encoding="utf-8")
     app = _App()
     rt = BarRuntime(platform=app, prefs_file=home / "bar.json")
     rt.handle("start")
@@ -382,7 +389,7 @@ def test_unreachable_server_texts_are_english_in_english(monkeypatch, home) -> N
     monkeypatch.setenv("MNEMA_RUNNER", SERVER)
     monkeypatch.setattr(client_mod.MnemaClient, "health", lambda *a, **kw: None)
     monkeypatch.setattr("mnema.bar.runtime._system_available", lambda: False)
-    (home / "bar.json").write_text(json.dumps({"where": "server"}), encoding="utf-8")
+    (home / "bar.json").write_text(json.dumps({"recognition": "server"}), encoding="utf-8")
     app = _App()
     rt = BarRuntime(platform=app, prefs_file=home / "bar.json")
     rt.handle("start")
@@ -407,36 +414,86 @@ def test_linux_without_server_texts_are_english_in_english(monkeypatch, home) ->
     assert rt.state.error == "Server not connected"
 
 
-@pytest.mark.parametrize("where", ["server", "mac"])
-def test_cloud_speech_choice_goes_to_the_server_only(monkeypatch, home, where) -> None:
-    """Cloud recognition is the server's choice: with "On the server" it is kept and sent to
-    the server, with "On this Mac" it becomes "Automatic"."""
-    from mnema.live import setup
-
+@pytest.mark.parametrize("place", ["cloud", "mac"])
+def test_cloud_recognition_with_a_server_goes_to_the_server(monkeypatch, home, place) -> None:
+    """In the cloud with a connected server: the server recognizes with the chosen cloud model;
+    On this Mac a cloud model saved earlier works as Automatic here, and only the summary goes to
+    the server."""
     captured: dict = {}
     _patch_record(monkeypatch, home, captured)
-    seen = _spied_server(monkeypatch, home)
-    heard: list[str] = []
+    jobs: list[dict] = []
 
-    def dispatch(op, src, params, **kw):  # the recognition engine where processing runs
-        heard.append(params.get("backend", "auto"))
-        return {"text": "привет", "segments": [], "language": "ru"}
+    def server(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/uploads" and request.method == "POST":
+            return httpx.Response(200, json={"id": f"u{len(jobs)}"})
+        if request.url.path.startswith("/api/uploads/"):
+            return httpx.Response(200, json={"path": request.url.path})
+        if request.url.path == "/api/jobs":
+            jobs.append(json.loads(request.content))
+            return httpx.Response(200, json={"id": "j1"})
+        return httpx.Response(200, json={"status": "error", "error": "Нет ключа OpenAI"})
 
-    monkeypatch.setattr(setup, "dispatch", dispatch)
-    cloud = "openai/gpt-4o-transcribe"
-    (home / "bar.json").write_text(json.dumps({"where": where, "asr": cloud}), encoding="utf-8")
+    _server(monkeypatch, server)
+    model = "openai/gpt-4o-mini-transcribe"
+    saved = {"recognition": place, "asr": model}
+    (home / "bar.json").write_text(json.dumps(saved), encoding="utf-8")
     rt = BarRuntime(platform=_App(), prefs_file=home / "bar.json")
-    assert rt.prefs.asr == (cloud if where == "server" else "auto")
+    assert rt.prefs.asr == (model if place == "cloud" else "auto")
     rt.handle("start")
     assert captured["started"].wait(timeout=10)
     rt.handle("stop")
     rt.join(timeout=30)
-    jobs = [json.loads(r.content) for r in seen if r.url.path == "/api/jobs"]
-    if where == "server":
-        assert [job["params"]["asr"] for job in jobs] == [cloud] and set(heard) == {cloud}
+    if place == "cloud":
+        assert [(job["op"], job["params"]["asr"]) for job in jobs] == [("recording", model)]
     else:
-        assert jobs == [] and cloud not in heard
+        assert [job["op"] for job in jobs] == ["recording_summary"]
     assert json.loads((home / "bar.json").read_text(encoding="utf-8"))["asr"] == rt.prefs.asr
+
+
+def _summaries(monkeypatch) -> None:
+    """The user's model on the server answers the title and the summary (litellm)."""
+    import types
+
+    import litellm
+
+    answer = {"title": "Созвон о релизе", "about": "Обсудили релиз.", "summary": ["Демо"]}
+
+    def completion(**kw):
+        delta = types.SimpleNamespace(content=json.dumps(answer, ensure_ascii=False))
+        choice = types.SimpleNamespace(delta=delta, finish_reason="stop")
+        return iter([types.SimpleNamespace(choices=[choice])])
+
+    monkeypatch.setattr(litellm, "completion", completion)
+
+
+def test_mac_recognizes_here_and_the_server_writes_the_summary(monkeypatch, home) -> None:
+    """On this Mac with a connected server: the Mac recognizes the audio itself (no recording job
+    on the server), then the server writes the title and the summary with the user's model from
+    the transcript; the result is applied to the folder."""
+    captured: dict = {}
+    _patch_record(monkeypatch, home, captured)
+    seen = _spied_server(monkeypatch, home)
+    _summaries(monkeypatch)
+    app = _App()
+    rt = BarRuntime(platform=app, prefs_file=home / "bar.json")
+    assert rt.prefs.recognition == "mac" and rt.processing_connection() is None
+    rt.handle("start")
+    assert captured["started"].wait(timeout=10)
+    rt.handle("stop")
+    rt.join(timeout=30)
+
+    assert rt.state.error == "" and rt.state.unreachable == {}
+    jobs = [json.loads(r.content) for r in seen if r.url.path == "/api/jobs"]
+    assert [job["op"] for job in jobs] == ["recording_summary"]
+    folder = next((home / "notes").iterdir())
+    assert folder.name.endswith("_Созвон о релизе")
+    assert "Обсудили релиз." in (folder / "summary.txt").read_text(encoding="utf-8")
+    runs = json.loads((folder / meta.META_FILE).read_text(encoding="utf-8"))["runs"]
+    assert [(r["kind"], r["status"], r["settings"].get("server")) for r in runs] == [
+        ("process", "ok", None),
+        ("summary", "ok", "100.64.0.9:8123"),
+    ]
+    assert rt.state.last_summary == folder / "summary.txt"
 
 
 def test_mac_on_server_summary_without_server_model_names_the_server(monkeypatch, home) -> None:
@@ -446,7 +503,7 @@ def test_mac_on_server_summary_without_server_model_names_the_server(monkeypatch
     _spied_server(monkeypatch, home)
     monkeypatch.setattr(client_mod.MnemaClient, "health", lambda *a, **kw: {"ok": True})
     monkeypatch.delenv("MNEMA_MODEL")
-    (home / "bar.json").write_text(json.dumps({"where": "server"}), encoding="utf-8")
+    (home / "bar.json").write_text(json.dumps({"recognition": "server"}), encoding="utf-8")
     folder = _transcribed(home)
     rt = BarRuntime(platform=_App(), prefs_file=home / "bar.json")
     rt.handle(f"summarize:{folder}")

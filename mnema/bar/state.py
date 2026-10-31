@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .. import i18n
 from ..core import base
+from ..core.backends import CLOUD_MODELS, backend_choices, is_cloud
 from ..i18n import _, fmt_bar_panel
 from ..live.models import FINALIZE_STEPS, STEP_MESSAGES, TITLE_MESSAGE
 from ..live.naming import display_title, recording_start
@@ -57,24 +58,40 @@ class JobKind(StrEnum):
     SUMMARIZE = "summarize"
 
 
-class Where(StrEnum):
-    """Where the Mac processes recordings: itself or on the connected server (MNEMA_RUNNER).
-    Linux always processes on the server."""
+class Recognition(StrEnum):
+    """Where speech is recognized: this Mac, the connected server (MNEMA_RUNNER) or the cloud
+    (by the server when connected, else by this Mac). Linux has only the server and the cloud."""
 
-    MAC = "mac"
-    SERVER = "server"  # node.SERVER: the CLI and MCP read the same value
+    MAC = "mac"  # node.MAC: the CLI and MCP read the same values
+    SERVER = "server"
+    CLOUD = "cloud"
 
 
-def asr_at(choice: str, *, on_server: bool) -> str:
-    """Speech recognition where processing runs: only the server has cloud models and engines
-    this Mac lacks (the app ships no GigaAM), so on this Mac such a choice works as automatic."""
-    if not base.STANDALONE or on_server:
+def cloud_models() -> list[tuple[str, str]]:
+    """The cloud engine's models with their titles, for a Mac without a server."""
+    from ..llm.providers import TITLES, provider_of
+
+    out = []
+    for model in CLOUD_MODELS:
+        found = provider_of(model)
+        out.append((model, f"{TITLES[found[0]]} · {found[1]}" if found else model))
+    return out
+
+
+def asr_at(choice: str, place: str) -> str:
+    """The engine within a recognition place: the cloud takes only cloud models (the first one
+    otherwise), a machine never a cloud one; this Mac lacks some engines (the app ships no
+    GigaAM), and such a choice works as automatic here."""
+    if place == Recognition.CLOUD:
+        return choice if is_cloud(choice) else CLOUD_MODELS[0]
+    if is_cloud(choice) or choice not in backend_choices():  # an old cloud choice: "groq/…"
+        return "auto"
+    if not base.STANDALONE or place != Recognition.MAC:
         return choice
     from ..core.backends import engine
 
     found = engine(choice)
-    missing = found is not None and not found().available()
-    return "auto" if "/" in choice or missing else choice
+    return "auto" if found is not None and not found().available() else choice
 
 
 _HOTKEY_KEY = re.compile(r"[A-Z0-9]|F(?:[1-9]|1[0-2])|Space")
@@ -97,11 +114,11 @@ def valid_hotkey(spec: str) -> bool:
 class BarPrefs(BaseModel):
     """Settings for the next recording, kept between launches (~/.config/mnema/bar.json)."""
 
-    where: Where = Where.MAC
+    recognition: Recognition = Recognition.MAC
     mic: bool = True
     system: bool = True
     summary: bool = True  # summary.txt of the whole recording, and the title from it
-    asr: str = "auto"  # auto | parakeet | gigaam | whisper | "provider/model"
+    asr: str = "auto"  # the engine within the place: auto | parakeet | whisper | "provider/model"
     summary_lang: str | None = None  # None — the language of the conversation
     replace_original: bool = True  # processing a part moves the full recording to the Trash
     discreet: bool = False  # while recording, the menu bar looks idle
@@ -115,16 +132,28 @@ class BarPrefs(BaseModel):
         """A hand-edited bar.json gets the same check: an invalid shortcut never reaches the app."""
         return value if value and valid_hotkey(value) else None
 
-    @field_validator("where", mode="before")
+    @model_validator(mode="before")
     @classmethod
-    def _known_where(cls, value: object) -> Where:
-        """Anything but "server" means this Mac."""
-        return Where.SERVER if value == Where.SERVER else Where.MAC
+    def _known_place(cls, data: object) -> object:
+        """An older file's "where": "server" is the server, anything unknown this Mac; Linux has
+        no "On this Mac" and recognizes on the server."""
+        if not isinstance(data, dict):
+            return data
+        data = dict(data)
+        place = data.pop("where", None)
+        place = data.get("recognition", Recognition.SERVER if place == "server" else None)
+        if place not in set(Recognition):
+            place = Recognition.MAC
+        if place == Recognition.MAC and not base.STANDALONE:
+            place = Recognition.SERVER
+        data["recognition"] = place
+        return data
 
     @model_validator(mode="after")
-    def _asr_at_where(self) -> BarPrefs:
-        """What cannot run on this Mac (cloud, an engine it lacks) becomes automatic here."""
-        self.asr = asr_at(self.asr, on_server=self.where == Where.SERVER)
+    def _asr_at_place(self) -> BarPrefs:
+        """The engine belongs to the place: a cloud model only in the cloud, on this Mac only its
+        own engines."""
+        self.asr = asr_at(self.asr, self.recognition)
         return self
 
 
@@ -229,12 +258,14 @@ class MenuEnv(BaseModel):
     server_auth: bool = True  # False — the server answered 401/403
     server_name: str | None = None  # node name from its capabilities
     server_llm: bool = False  # the server makes titles and summaries itself
-    server_model: str | None = None  # server model without the key; None — none or unknown
+    server_model: str | None = None  # the user's model on the server; None — none or unknown
+    server_deepl: bool = False  # the user's DeepL key is on the server: live phrases go to DeepL
     server_records: int | None = None  # recordings in the last sync with this server
     server_version: str | None = None  # Mnema version from its capabilities; None — unknown
     model: str | None = None  # this Mac's model without the key; None — not set (or not a Mac)
     mac: bool = False  # standalone Mac (base.STANDALONE)
-    asr_choices: list[tuple[str, str]] = Field(default_factory=list)
+    asr_choices: list[tuple[str, str]] = Field(default_factory=list)  # the engines of the place
+    asr_key: bool = False  # the cloud recognition key is where the cloud recognizes
     update: str = ""  # the newer version, "0.4.0"; empty — nothing or not checked
     update_error: str = ""  # the last check or update failed: the reason
     update_step: str = ""  # an update is running: its step

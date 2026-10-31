@@ -1,8 +1,8 @@
 """Where to process recordings, and this computer's server address for invitations.
 
-A Mac processes itself or on the connected server, as chosen in settings; other systems use
-the MNEMA_RUNNER server. The address for clients is node_url, one rule for the server image and
-mnema invite.
+A Mac recognizes itself, on the connected server or in the cloud, as chosen in settings, and
+asks the connected server for titles and summaries; other systems use the MNEMA_RUNNER server.
+The address for clients is node_url, one rule for the server image and mnema invite.
 """
 
 from __future__ import annotations
@@ -21,30 +21,37 @@ _TAILSCALE = (ipaddress.ip_network("100.64.0.0/10"), ipaddress.ip_network("fd7a:
 _BRIDGES = ("docker", "br-", "veth", "virbr", "vboxnet", "vmnet")  # container and VM networks
 
 
-SERVER = "server"  # bar.json "where": the Mac processes on the server (bar.state.Where.SERVER)
+MAC, SERVER, CLOUD = "mac", "server", "cloud"  # bar.json "recognition" (bar.state.Recognition)
 
 
-def saved_where() -> str | None:
-    """Where the Mac processes, as the app saved it (bar.json "where"), or None. Read without
-    the app's modules: the CLI and MCP need the rule too."""
+def saved_recognition() -> str | None:
+    """Where recognition runs, as the app saved it in bar.json, or None. An older file's
+    "where": "server" means the server. Read without the app's modules: the CLI and MCP need the
+    rule too."""
     from .config import bar_prefs_file
 
     try:
         data = json.loads(bar_prefs_file().read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
-    where = data.get("where") if isinstance(data, dict) else None
-    return where if isinstance(where, str) else None
+    if not isinstance(data, dict):
+        return None
+    found = data.get("recognition")
+    if found is None and data.get("where") == SERVER:
+        found = SERVER
+    return found if isinstance(found, str) else None
 
 
 def selected_processing(
-    explicit: str | Connection | None = None, *, local: bool = False, where: str | None = None
+    explicit: str | Connection | None = None,
+    *,
+    local: bool = False,
+    recognition: str | None = None,
 ) -> Connection | None:
     """Where to process, one rule for the app, the CLI and MCP; None is this computer.
-    CLI flags win: --local is here, --runner the given server. A Mac uses the MNEMA_RUNNER
-    server when settings say "On the server" (where; None reads bar.json), else itself;
-    MNEMA_RUNNER also serves it for syncing recordings. Others use the MNEMA_RUNNER server, or
-    this computer without it."""
+    CLI flags win: --local is here, --runner the given server. "On the server" and "In the
+    cloud" (recognition; None reads bar.json) go to the connected MNEMA_RUNNER server, "On this
+    Mac" and no server stay here. Only a Mac recognizes itself: other systems use the server."""
     from .config import Settings
     from .core import base
 
@@ -57,7 +64,20 @@ def selected_processing(
         return Connection(url=explicit, token=settings.token or None)
     if not settings.runner:
         return None
-    if base.STANDALONE and (saved_where() if where is None else where) != SERVER:
+    place = saved_recognition() if recognition is None else recognition
+    if base.STANDALONE and place not in (SERVER, CLOUD):
+        return None
+    return Connection(url=settings.runner, token=settings.token or None)
+
+
+def summary_server() -> Connection | None:
+    """Who titles and summarizes what this Mac recognized: the connected server with the user's
+    model (one model per user); without a server, and on other systems, None — this computer."""
+    from .config import Settings
+    from .core import base
+
+    settings = Settings()
+    if not base.STANDALONE or not settings.runner:
         return None
     return Connection(url=settings.runner, token=settings.token or None)
 

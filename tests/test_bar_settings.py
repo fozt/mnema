@@ -33,7 +33,7 @@ from mnema.bar.state import (
     BarPrefs,
     MenuEnv,
     Phase,
-    Where,
+    Recognition,
     asr_options,
     discreet_title,
     load_prefs,
@@ -67,16 +67,18 @@ _ASR = [("auto", "Автоматически"), ("parakeet", "Parakeet"), ("giga
         ("whisper", "Whisper")]  # fmt: skip
 HOME = MenuEnv(
     mac=True, server="http://srv:8123", server_ok=True, server_name="Дом", server_records=128,
-    model="gemini/gemini-flash-latest", asr_choices=_ASR,
+    server_llm=True, server_model="gemini/gemini-flash-latest", asr_choices=_ASR,
 )  # fmt: skip
 
 
 @pytest.mark.parametrize("idle", [True, False], ids=["idle", "busy"])
-def test_mac_settings_are_what_the_app_fixtures_show(idle) -> None:
+def test_mac_settings_are_what_the_app_fixtures_show(monkeypatch, idle) -> None:
     """The Mac's Recording and Server tabs with the server "Дом" and a model match the Fixtures
     Swift draws the settings and checks the layout from."""
     from mnema.bar.protocol import _settings_sample
+    from mnema.core import base
 
+    monkeypatch.setattr(base, "STANDALONE", True)
     built = settings_model(BarPrefs(hotkey="ctrl+opt+R", autostart=True), HOME, idle=idle)
     sample = _settings_sample(idle=idle)
     assert [t.id for t in built.tabs] == ["record", "server", "general"]
@@ -92,12 +94,13 @@ def test_record_tab_and_server_buttons_locked_while_busy() -> None:
     assert [f.key for f in idle if not f.enabled] == []
     busy = _fields(settings_model(prefs, HOME, idle=False))
     assert [f.title for f in busy if not f.enabled] == [
-        "Микрофон", "Системный звук", "Где обрабатывать", "Распознавание", "Выбрать модель…",
+        "Микрофон", "Системный звук", "Распознавание", "Движок", "Выбрать модель…",
         "Составлять пересказ", "Язык пересказа", "Подключить другой…", "Отключить",
+        "Задать ключ DeepL…",
     ]  # fmt: skip
     assert [c.key for f in busy for c in f.choices if c.enabled] == []
     assert [f.title for f in busy if f.enabled] == [
-        "Модель", "Дом", "Записей на сервере",
+        "Модель", "Дом", "Записей на сервере", "Живой перевод",
         "Начать или остановить запись",
         "Скрывать запись в строке меню", "Открывать при входе в систему", "Завершить Mnema",
         f"Mnema {__version__}", "Проверить обновления",
@@ -105,9 +108,9 @@ def test_record_tab_and_server_buttons_locked_while_busy() -> None:
 
 
 def test_model_row_and_choice_only_on_the_mac() -> None:
-    """On the Mac its own model summarizes: the Model row and "Choose model…" above the toggle,
-    with no note on it; Linux summarizes with the server's model, with no row or button and the
-    note "Model not set up"."""
+    """On the Mac the Model row and "Choose model…" are above the toggle, with no note on it: the
+    Mac's own model without a server, the user's on the connected server; Linux summarizes with
+    the server's model, with no row or button and the note "Model not set up"."""
 
     def processing(env: MenuEnv) -> list[tuple]:
         [tab] = [t for t in settings_model(BarPrefs(), env).tabs if t.id == "record"]
@@ -115,17 +118,24 @@ def test_model_row_and_choice_only_on_the_mac() -> None:
         return [(f.title, f.value, f.detail, f.tone, f.key) for f in section.fields]
 
     assert processing(MenuEnv(mac=True))[:5] == [
-        ("Где обрабатывать", "на этом Mac", "", Tone.NONE, None),
-        ("Распознавание", "Автоматически", "", Tone.NONE, None),
+        ("Распознавание", "на этом Mac", "", Tone.NONE, None),
+        ("Движок", "Автоматически", "", Tone.NONE, None),
         ("Модель", "Не настроена", "", Tone.WARN, None),
         ("Выбрать модель…", "", "", Tone.NONE, "model_setup"),
         ("Составлять пересказ", "", "", Tone.NONE, "summary"),
     ]
-    assert processing(HOME)[2] == ("Модель", "gemini/gemini-flash-latest", "", Tone.OK, None)
+    alone = processing(MenuEnv(mac=True, model="deepseek/deepseek-chat"))[2]
+    assert alone == ("Модель", "deepseek/deepseek-chat", "", Tone.OK, None)
+    assert processing(HOME)[2:4] == [
+        ("Модель", "gemini/gemini-flash-latest", "", Tone.OK, None),
+        ("Выбрать модель…", "", "", Tone.NONE, "model_setup"),
+    ]
     linux = processing(MenuEnv(server="http://srv:8123"))
-    assert [row[0] for row in linux] == ["Распознавание", "Составлять пересказ", "Язык пересказа"]
-    assert linux[1][2] == "Модель не настроена"
-    assert processing(MenuEnv(server="http://srv:8123", server_llm=True))[1][2] == ""
+    assert [row[0] for row in linux] == [
+        "Распознавание", "Движок", "Составлять пересказ", "Язык пересказа",
+    ]  # fmt: skip
+    assert linux[2][2] == "Модель не настроена"
+    assert processing(MenuEnv(server="http://srv:8123", server_llm=True))[2][2] == ""
 
 
 def test_server_states() -> None:
@@ -623,18 +633,17 @@ def test_processing_tab_offers_local_and_cloud_speech_models() -> None:
             ("parakeet", "Parakeet"),
             ("gigaam", "GigaAM"),
             ("whisper", "Whisper"),
-            ("groq/whisper-large-v3-turbo", "Groq · whisper-large-v3-turbo"),
         ],
     )
-    field = _field(settings_model(BarPrefs(), env), "Распознавание")
+    field = _field(settings_model(BarPrefs(), env), "Движок")
     assert [(c.key, c.title) for c in field.choices] == [
         ("asr:auto", "Автоматически"), ("asr:parakeet", "Parakeet"), ("asr:gigaam", "GigaAM"),
         ("asr:whisper", "Whisper"),
-        ("asr:groq/whisper-large-v3-turbo", "Groq · whisper-large-v3-turbo"),
     ]  # fmt: skip
     assert field.value == "Автоматически"
-    gone = _field(settings_model(BarPrefs(asr="openai/whisper-1"), MenuEnv()), "Распознавание")
-    assert gone.value == "OpenAI · whisper-1" and gone.choices[-1].checked
+    cloud = BarPrefs(recognition="cloud", asr="openai/gpt-4o-mini-transcribe")
+    gone = _field(settings_model(cloud, MenuEnv()), "Движок")
+    assert gone.value == "OpenAI · gpt-4o-mini-transcribe" and gone.choices[-1].checked
 
 
 def test_speech_model_choice_is_remembered(tmp_path) -> None:
@@ -697,22 +706,29 @@ def test_quit_keeps_settings_written_while_running(rt: BarRuntime, tmp_path) -> 
     assert rt.quit_requested and load_prefs(path).asr == "whisper"
 
 
-def _home_server(monkeypatch) -> None:
-    """The connected server "Дом" with a model and cloud recognition, through MockTransport."""
+_MODEL = {"model": "deepseek/deepseek-chat", "key": "…a1B2", "asr_key": None, "deepl_key": None}
+
+
+def _home_server(monkeypatch, handler: Callable[[httpx.Request], httpx.Response] | None = None):
+    """The connected server "Дом" with the user's model, its engines and cloud recognition,
+    through MockTransport."""
     import mnema.client as client_mod
 
     real = client_mod.MnemaClient
     answers = {
         "/api/capabilities": {"ok": True, "llm": True, "name": "Дом"},
-        "/api/node/settings": {"name": "Дом", "model": "deepseek/deepseek-chat", "engines": True},
+        "/api/model": _MODEL,
         "/api/node/asr": {
             "choices": [
                 {"id": "auto", "title": "Автоматически"},
-                {"id": "groq/whisper-large-v3", "title": "Groq · whisper-large-v3"},
+                {"id": "parakeet", "title": "Parakeet"},
+                {"id": "openai/gpt-4o-transcribe", "title": "OpenAI · gpt-4o-transcribe"},
             ]
         },
     }
-    transport = httpx.MockTransport(lambda r: httpx.Response(200, json=answers[r.url.path]))
+    transport = httpx.MockTransport(
+        handler or (lambda r: httpx.Response(200, json=answers[r.url.path]))
+    )
     monkeypatch.setattr(
         client_mod,
         "MnemaClient",
@@ -731,10 +747,11 @@ def _settled() -> None:
         _join(name)
 
 
-def test_mac_switches_where_to_process(monkeypatch, tmp_path) -> None:
-    """Where to process on the Mac: On the server goes to bar.json, recognition from the server's
-    list with cloud models, the Model row shows the server's model without "Choose model…"; On this
-    Mac turns it all back. The choice does not change while recording."""
+def test_mac_switches_where_recognition_runs(monkeypatch, tmp_path) -> None:
+    """Recognition on the Mac: On this Mac lists its own engines, On the server the server's
+    engines, In the cloud the cloud models with "Set the OpenAI key…" while the user has no key;
+    the choice goes to bar.json and does not change while recording. The Model row is the
+    user's model on the connected server in every place."""
     from mnema.core import base
 
     monkeypatch.setattr(base, "STANDALONE", True)
@@ -744,62 +761,118 @@ def test_mac_switches_where_to_process(monkeypatch, tmp_path) -> None:
     rt = BarRuntime(prefs_file=tmp_path / "bar.json")
     _settled()
     rows = _processing(rt)
-    where = rows["Где обрабатывать"]
-    assert [(c.key, c.title, c.checked, c.enabled) for c in where.choices] == [
-        ("where:mac", "На этом Mac", True, True),
-        ("where:server", "На сервере", False, True),
-    ]
-    assert rows["Модель"].value == "anthropic/claude-sonnet-5"  # this Mac's model
-    assert "Выбрать модель…" in rows
-    assert "asr:groq/whisper-large-v3" not in [c.key for c in rows["Распознавание"].choices]
-
-    rt.state.phase = Phase.RECORDING
-    rt.handle("where:server")
-    assert rt.prefs.where == "mac"
-    rt.state.phase = Phase.IDLE
-    rt.handle("where:server")
-    _settled()
-    assert json.loads((tmp_path / "bar.json").read_text(encoding="utf-8"))["where"] == "server"
-    rows = _processing(rt)
-    assert rows["Где обрабатывать"].value == "на сервере"
-    assert [c.key for c in rows["Распознавание"].choices] == [
-        "asr:auto",
-        "asr:groq/whisper-large-v3",
+    assert [(c.key, c.title, c.checked, c.enabled) for c in rows["Распознавание"].choices] == [
+        ("recognition:mac", "На этом Mac", True, True),
+        ("recognition:server", "На сервере", False, True),
+        ("recognition:cloud", "В облаке", False, True),
     ]
     assert (rows["Модель"].value, rows["Модель"].tone) == ("deepseek/deepseek-chat", Tone.OK)
-    assert "Выбрать модель…" not in rows
-    assert rows["Составлять пересказ"].enabled
+    assert "Выбрать модель…" in rows and "Задать ключ OpenAI…" not in rows
+    assert "asr:parakeet" not in [c.key for c in rows["Движок"].choices]  # the server's engine
+    assert rt.processing_connection() is None and rt.summary_connection() is not None
+
+    rt.state.phase = Phase.RECORDING
+    rt.handle("recognition:server")
+    assert rt.prefs.recognition == "mac"
+    rt.state.phase = Phase.IDLE
+    rt.handle("recognition:server")
+    _settled()
+    saved = json.loads((tmp_path / "bar.json").read_text(encoding="utf-8"))
+    assert saved["recognition"] == "server" and "where" not in saved
+    rows = _processing(rt)
+    assert rows["Распознавание"].value == "на сервере"
+    assert [c.key for c in rows["Движок"].choices] == ["asr:auto", "asr:parakeet"]
+    assert rows["Составлять пересказ"].enabled and "Выбрать модель…" in rows
     assert rt.processing_connection() is not None
 
-    rt.handle("asr:groq/whisper-large-v3")
-    rt.handle("where:mac")
+    rt.handle("asr:parakeet")
+    rt.handle("recognition:cloud")
     _settled()
     rows = _processing(rt)
-    assert rows["Где обрабатывать"].value == "на этом Mac" and "Выбрать модель…" in rows
-    assert rt.prefs.asr == "auto"  # only the server recognizes in the cloud
-    assert "asr:groq/whisper-large-v3" not in [c.key for c in rows["Распознавание"].choices]
+    assert rows["Распознавание"].value == "в облаке"
+    assert [c.key for c in rows["Движок"].choices] == ["asr:openai/gpt-4o-transcribe"]
+    assert rt.prefs.asr == "openai/gpt-4o-transcribe"
+    assert rows["Задать ключ OpenAI…"].key == "asr_key_setup"
+    assert rt.processing_connection() is not None
+
+    rt.handle("recognition:mac")
+    _settled()
+    rows = _processing(rt)
+    assert rows["Распознавание"].value == "на этом Mac" and "Выбрать модель…" in rows
+    assert rt.prefs.asr == "auto"  # a cloud model is not an engine of this Mac
     assert rt.processing_connection() is None
 
 
+def test_old_where_on_the_server_reads_as_recognition_on_the_server(tmp_path) -> None:
+    """bar.json of an earlier version: "where": "server" is recognition on the server; any other
+    value, or none, is this Mac; the next save writes only "recognition"."""
+    from mnema.core import base
+
+    path = tmp_path / "bar.json"
+    for where, place in [("server", "server"), ("mac", "mac"), ("x", "mac"), (None, "mac")]:
+        path.write_text(json.dumps({"where": where} if where else {}), encoding="utf-8")
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(base, "STANDALONE", True)
+            prefs = load_prefs(path)
+        assert prefs.recognition == place
+    save_prefs(load_prefs(path), path)
+    assert "where" not in json.loads(path.read_text(encoding="utf-8"))
+    path.write_text(json.dumps({"where": "mac"}), encoding="utf-8")
+    assert load_prefs(path).recognition == Recognition.SERVER  # Linux has no "On this Mac"
+
+
+@pytest.mark.parametrize("old", ["groq/whisper-large-v3", "openai/whisper-1"])
+def test_old_cloud_recognition_reads_as_automatic_or_the_cloud_model(tmp_path, old) -> None:
+    """A cloud model of an earlier version is no engine any more: on the server it is automatic,
+    in the cloud the first cloud model."""
+    path = tmp_path / "bar.json"
+    for place, asr in [("server", "auto"), ("cloud", "openai/gpt-4o-transcribe")]:
+        path.write_text(json.dumps({"recognition": place, "asr": old}), encoding="utf-8")
+        assert load_prefs(path).asr == asr
+
+
+def test_linux_recognizes_on_the_server_or_in_the_cloud(monkeypatch, tmp_path) -> None:
+    """Linux has two places, both on the server: On this Mac is not taken, In the cloud is, and
+    either way processing goes to the connected server."""
+    monkeypatch.setenv("MNEMA_LIVE_DIR", str(tmp_path / "notes"))
+    monkeypatch.setenv("MNEMA_RUNNER", "http://srv:8123")
+    _home_server(monkeypatch)
+    rt = BarRuntime(prefs_file=tmp_path / "bar.json")
+    rt.handle("recognition:mac")
+    assert rt.prefs.recognition == "server" and rt.processing_connection() is not None
+    rt.handle("recognition:cloud")
+    _settled()
+    assert rt.prefs.recognition == "cloud" and rt.processing_connection() is not None
+    assert json.loads((tmp_path / "bar.json").read_text(encoding="utf-8"))["recognition"] == "cloud"
+    assert [c.key for c in _processing(rt)["Движок"].choices] == ["asr:openai/gpt-4o-transcribe"]
+
+
 def test_mac_server_without_a_model_and_without_a_server() -> None:
-    """On the server, and the server has no model: "Model · Not set up on the server", summaries
-    unavailable; no server: On the server is unavailable and processing stays on this Mac."""
-    prefs = BarPrefs(where="server")
+    """The user has no model on the server: "Model · Not set up" with "Choose model…", summaries
+    unavailable; no server: On the server is unavailable and recognition stays on this Mac;
+    Linux has no On this Mac."""
+    prefs = BarPrefs(recognition="server")
     rows = {f.title: f for f in _fields(settings_model(prefs, HOME.model_copy(update={
-        "server_llm": False})))}  # fmt: skip
-    assert (rows["Модель"].value, rows["Модель"].tone) == ("Не настроена на сервере", Tone.WARN)
-    assert not rows["Составлять пересказ"].enabled and "Выбрать модель…" not in rows
-    alone = _field(settings_model(prefs, MenuEnv(mac=True)), "Где обрабатывать")
+        "server_llm": False, "server_model": None})))}  # fmt: skip
+    assert (rows["Модель"].value, rows["Модель"].tone) == ("Не настроена", Tone.WARN)
+    assert not rows["Составлять пересказ"].enabled and "Выбрать модель…" in rows
+    alone = _field(settings_model(prefs, MenuEnv(mac=True)), "Распознавание")
     assert alone.value == "на этом Mac"
     assert [(c.title, c.checked, c.enabled, c.detail) for c in alone.choices] == [
         ("На этом Mac", True, True, ""),
         ("На сервере", False, False, "Сервер не подключён"),
+        ("В облаке", False, True, ""),
     ]
     linux = settings_model(BarPrefs(), MenuEnv(server="http://srv:8123", server_name="Дом"))
-    assert "Где обрабатывать" not in [f.title for f in _fields(linux)]
+    place = _field(linux, "Распознавание")
+    assert [(c.key, c.checked) for c in place.choices] == [
+        ("recognition:server", True),
+        ("recognition:cloud", False),
+    ]
+    assert "Задать ключ OpenAI…" not in [f.title for f in _fields(linux)]
 
 
-def test_disconnect_returns_processing_to_this_mac(monkeypatch, tmp_path, env_file) -> None:
+def test_disconnect_returns_recognition_to_this_mac(monkeypatch, tmp_path, env_file) -> None:
     """Disconnect with On the server chosen turns the choice back to On this Mac, in bar.json
     too."""
     from mnema.config import set_env
@@ -809,35 +882,39 @@ def test_disconnect_returns_processing_to_this_mac(monkeypatch, tmp_path, env_fi
     set_env({"MNEMA_RUNNER": "http://srv:8123", "MNEMA_TOKEN": "s3cret-token"})
     _home_server(monkeypatch)
     rt = BarRuntime(platform=_LiveForms(), prefs_file=tmp_path / "bar.json")
-    rt.handle("where:server")
+    rt.handle("recognition:server")
     _settled()
     assert rt.processing_connection() is not None
     rt.handle("server_off")
     _settled()
-    assert rt.prefs.where == "mac" and rt.processing_connection() is None
-    assert json.loads((tmp_path / "bar.json").read_text(encoding="utf-8"))["where"] == "mac"
-    where = _field(settings_model(rt.prefs, rt.menu_env()), "Где обрабатывать")
-    assert [(c.checked, c.enabled) for c in where.choices] == [(True, True), (False, False)]
+    assert rt.prefs.recognition == "mac" and rt.processing_connection() is None
+    saved = json.loads((tmp_path / "bar.json").read_text(encoding="utf-8"))
+    assert saved["recognition"] == "mac"
+    place = _field(settings_model(rt.prefs, rt.menu_env()), "Распознавание")
+    assert [(c.checked, c.enabled) for c in place.choices] == [
+        (True, True),
+        (False, False),
+        (False, True),
+    ]
 
 
 def test_mac_on_server_while_the_server_is_away(monkeypatch, tmp_path) -> None:
     """A Mac set to On the server started while the server "Дом" did not answer: the Model row does
     not claim there is no model and summaries stay available (processing will ask anyway). Once the
-    server answers, the app learns its name, model and recognition list itself; when it goes away
-    again, what is known stays."""
+    server answers, the app learns its name, the user's model and the engines itself; when it goes
+    away again, what is known stays."""
     import mnema.bar.runtime as runtime_mod
-    import mnema.client as client_mod
     from mnema.core import base
 
     monkeypatch.setattr(base, "STANDALONE", True)
     monkeypatch.setenv("MNEMA_LIVE_DIR", str(tmp_path / "notes"))
     monkeypatch.setenv("MNEMA_RUNNER", "http://srv:8123")
-    save_prefs(BarPrefs(where="server"), tmp_path / "bar.json")
+    save_prefs(BarPrefs(recognition="server"), tmp_path / "bar.json")
     up = threading.Event()
     answers = {
         "/api/capabilities": {"ok": True, "llm": True, "name": "Дом"},
-        "/api/node/settings": {"name": "Дом", "model": "deepseek/deepseek-chat", "engines": True},
-        "/api/node/asr": {"choices": [{"id": "groq/whisper-large-v3", "title": "Groq"}]},
+        "/api/model": _MODEL,
+        "/api/node/asr": {"choices": [{"id": "parakeet", "title": "Parakeet"}]},
     }
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -845,45 +922,39 @@ def test_mac_on_server_while_the_server_is_away(monkeypatch, tmp_path) -> None:
             raise httpx.ConnectError("нет сети", request=request)
         return httpx.Response(200, json=answers[request.url.path])
 
-    real = client_mod.MnemaClient
-    transport = httpx.MockTransport(handler)
-    monkeypatch.setattr(
-        client_mod,
-        "MnemaClient",
-        lambda url, *, token=None: real(url, token=token, transport=transport),
-    )
+    _home_server(monkeypatch, handler)
     rt = BarRuntime(prefs_file=tmp_path / "bar.json")
     rt._update_next = time.time() + 3600  # update checks are not this test's business
     _settled()
     rows = _processing(rt)
-    assert rows["Модель"].value != "Не настроена на сервере"
+    assert rows["Модель"].value != "Не настроена"
     assert rows["Составлять пересказ"].enabled and rows["Составлять пересказ"].checked
 
     up.set()
     monkeypatch.setattr(runtime_mod, "_REPING_EVERY", 0.0)
     rt.tick()
     _settled()
-    _settled()  # the recognition list comes after the server answers
+    _settled()  # the engines come after the server answers
     rows = _processing(rt)
-    assert rows["Где обрабатывать"].value == "на сервере"
+    assert rows["Распознавание"].value == "на сервере"
     assert (rows["Модель"].value, rows["Модель"].tone) == ("deepseek/deepseek-chat", Tone.OK)
-    assert "asr:groq/whisper-large-v3" in [c.key for c in rows["Распознавание"].choices]
+    assert "asr:parakeet" in [c.key for c in rows["Движок"].choices]
 
     up.clear()
-    rt.handle("where:server")  # ask the server again, and it does not answer
+    rt.handle("recognition:server")  # ask the server again, and it does not answer
     _settled()
     rows = _processing(rt)
     assert not rt.server_ok
-    assert rows["Где обрабатывать"].value == "на сервере"
+    assert rows["Распознавание"].value == "на сервере"
     assert rows["Модель"].value == "deepseek/deepseek-chat"
 
 
 def test_mac_server_model_name_unknown_is_not_a_missing_model() -> None:
-    """The server summarizes (llm) but its model name is unknown: the Model row does not say "Not
-    set up on the server" and summaries stay available."""
+    """The server summarizes (llm) but the model name is unknown: the Model row does not say "Not
+    set up" and summaries stay available."""
     env = HOME.model_copy(update={"server_llm": True, "server_model": None})
-    rows = {f.title: f for f in _fields(settings_model(BarPrefs(where="server"), env))}
-    assert rows["Модель"].value != "Не настроена на сервере"
+    rows = {f.title: f for f in _fields(settings_model(BarPrefs(recognition="server"), env))}
+    assert rows["Модель"].value != "Не настроена"
     assert rows["Модель"].tone != Tone.WARN
     assert rows["Составлять пересказ"].enabled
 
@@ -907,7 +978,7 @@ def _texts(model: SettingsModel) -> list[str]:
     [
         (_HOME_EN, BarPrefs(hotkey="ctrl+opt+R")),
         (MenuEnv(mac=True), BarPrefs()),
-        (_HOME_EN, BarPrefs(where=Where.SERVER)),
+        (_HOME_EN, BarPrefs(recognition=Recognition.SERVER)),
         (MenuEnv(mac=False), BarPrefs()),
         (MenuEnv(mac=False, server="http://srv:8123", server_auth=False), BarPrefs()),
     ],
