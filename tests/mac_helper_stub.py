@@ -32,7 +32,12 @@ def shape(value):  # keys and value types, nested: what the fixture fixes about 
     return type(value).__name__
 
 
-known = [shape(r) for r in contract["requests"].values()]
+known = [(r["operation"], shape(r)) for r in contract["requests"].values()]
+
+
+def readable(request):  # the keys and types of a fixture request of the same operation
+    operation = request.get("operation") if isinstance(request, dict) else None
+    return any(operation == op and shape(request) == fixed for op, fixed in known)
 
 
 def config():
@@ -59,7 +64,7 @@ for line in sys.stdin:
     with log.open("a", encoding="utf-8") as f:
         f.write(json.dumps(entry) + "\n")
     c = config()
-    if shape(request) not in known:
+    if not readable(request):
         error("protocol")
         continue
     operation, payload = request["operation"], request["payload"]
@@ -77,6 +82,7 @@ for line in sys.stdin:
             time.sleep(300)
         while c.get("wait_for") and not Path(c["wait_for"]).exists():  # the test lets it go on
             time.sleep(0.05)
+        progress("download", 1.0)
         progress("load", None)
         c["installed"][payload["id"]] = True
         if payload["id"] == "parakeet":
@@ -89,8 +95,8 @@ for line in sys.stdin:
             continue
         progress("load", None)
         progress("recognize", 0.5)
-        known = replies["transcribe"]["value"]["tracks"]
-        tracks = [known[i] if i < len(known) else {{"words": []}}
+        given = replies["transcribe"]["value"]["tracks"]
+        tracks = [given[i] if i < len(given) else {{"words": []}}
                   for i in range(len(payload["wavs"]))]
         send({{"type": "result", "value": {{"tracks": tracks}}}})
     elif operation == "speech":

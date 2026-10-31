@@ -76,14 +76,15 @@ def test_every_request_python_sends_is_one_the_fixture_has(helper, tmp_path) -> 
 
 
 def test_the_stub_refuses_a_request_the_fixture_does_not_have(helper, tmp_path) -> None:
-    """A renamed key gets "protocol", as from mnema-asr: Python tests cannot pass with a request
-    the helper would not read."""
+    """A renamed key, or the payload of another operation, gets "protocol", as from mnema-asr:
+    Python tests cannot pass with a request the helper would not read."""
     import subprocess
 
     lines = [
         {"operation": "speech", "payload": {"path": str(tmp_path / "a.wav")}},
         {"operation": "speech", "payload": {"wav": str(tmp_path / "a.wav"), "max_s": 10}},
         {"operation": "download", "payload": {"model": "parakeet"}},
+        {"operation": "speech", "payload": {"id": "vad"}},  # the payload of download
     ]
     answer = subprocess.run(
         [str(helper.path)],
@@ -93,7 +94,7 @@ def test_the_stub_refuses_a_request_the_fixture_does_not_have(helper, tmp_path) 
         check=True,
     )
     replies = [json.loads(line) for line in answer.stdout.splitlines()]
-    assert [(r["type"], r["code"]) for r in replies] == [("error", "protocol")] * 3
+    assert [(r["type"], r["code"]) for r in replies] == [("error", "protocol")] * 4
 
 
 def test_words_of_a_track_come_with_their_times_and_progress(helper, tmp_path) -> None:
