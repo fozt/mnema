@@ -6,6 +6,7 @@ replies, cleanup, model files. The sessions are fakes of the real graphs; no mod
 from __future__ import annotations
 
 import hashlib
+import json
 import wave
 from pathlib import Path
 
@@ -74,7 +75,7 @@ def test_greedy_tdt_follows_durations() -> None:
     joint, step, calls, fed = _scripted([(1, 2), (4, 0), (2, 0), (3, 1), (4, 4)])
     out = pk.greedy_tdt(7, joint=joint, step=step, blank=4, vocab=5, durations=[0, 1, 2, 3, 4])
     assert calls == [0, 2, 3, 3, 4]
-    assert [(e.token, e.frame, e.duration) for e in out] == [(1, 0, 2), (2, 3, 1), (3, 3, 1)]
+    assert [(e.token, e.frame, e.duration) for e in out] == [(1, 0, 2), (2, 3, 0), (3, 3, 1)]
     assert fed == [1, 2, 3]
 
 
@@ -86,6 +87,26 @@ def test_greedy_tdt_forces_progress_after_max_symbols() -> None:
     )
     assert calls == [0, 0, 0, 1]
     assert len(out) == 3
+
+
+def test_tokens_become_timed_words_by_the_rule_shared_with_the_mac() -> None:
+    """tests/fixtures/word-timings-v1.json, the file the Swift side reads too: token times as
+    FluidAudio gives them (a zero-duration token ends at the next one, <unk> is dropped first),
+    then words from "▁" to "▁" without service tokens."""
+    fixture = json.loads((FIXTURES / "word-timings-v1.json").read_text(encoding="utf-8"))
+    assert fixture["frame_s"] == pk.FRAME_S
+    tokens = fixture["tokens"]
+    times = pk.token_times([(t["piece"], t["frame"], t["duration"]) for t in tokens])
+    assert times == [
+        (t["piece"], pytest.approx(t["start"]), pytest.approx(t["end"]))
+        for t in tokens
+        if t["start"] is not None
+    ]
+    words = pk.timed_words(times, offset=10.0)
+    assert [(w.text, w.start, w.end) for w in words] == [
+        (w["text"], pytest.approx(10 + w["start"]), pytest.approx(10 + w["end"]))
+        for w in fixture["words"]
+    ]
 
 
 # ─────────────────────────────────────────── the recognizer on fake sessions

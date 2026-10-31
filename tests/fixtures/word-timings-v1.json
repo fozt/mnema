@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "about": "One word-time rule for the Mac (mnema-asr: FluidAudio with TDT_EMISSION_DELAY_FRAMES=0, then Mnema's words) and the server (ONNX greedy TDT). tokens are greedy TDT emissions in order: piece, encoder frame (0.08 s), predicted duration in frames. start/end are the token's time in seconds as FluidAudio gives it (null: <unk> is dropped before timing): a token ends after its duration; one of zero duration ends at the next token's start, at least a frame later. words: a word starts at a piece with ▁ (FluidAudio gives a leading space instead) and spans its pieces; service tokens <…> are never words or parts of one.",
+  "frame_s": 0.08,
+  "tokens": [
+    {"piece": "▁При", "frame": 0, "duration": 1, "start": 0.0, "end": 0.08},
+    {"piece": "вет", "frame": 1, "duration": 0, "start": 0.08, "end": 0.24},
+    {"piece": "<unk>", "frame": 2, "duration": 1, "start": null, "end": null},
+    {"piece": ",", "frame": 3, "duration": 1, "start": 0.24, "end": 0.32},
+    {"piece": "<|nospeech|>", "frame": 5, "duration": 2, "start": 0.4, "end": 0.56},
+    {"piece": "▁как", "frame": 20, "duration": 2, "start": 1.6, "end": 1.76},
+    {"piece": "▁де", "frame": 30, "duration": 0, "start": 2.4, "end": 2.48},
+    {"piece": "ла", "frame": 30, "duration": 3, "start": 2.4, "end": 2.64},
+    {"piece": "?", "frame": 33, "duration": 1, "start": 2.64, "end": 2.72},
+    {"piece": "▁", "frame": 45, "duration": 1, "start": 3.6, "end": 3.68},
+    {"piece": "да", "frame": 50, "duration": 0, "start": 4.0, "end": 5.6},
+    {"piece": "▁нет", "frame": 70, "duration": 0, "start": 5.6, "end": 5.68}
+  ],
+  "words": [
+    {"text": "Привет,", "start": 0.0, "end": 0.32},
+    {"text": "как", "start": 1.6, "end": 1.76},
+    {"text": "дела?", "start": 2.4, "end": 2.72},
+    {"text": "да", "start": 4.0, "end": 5.6},
+    {"text": "нет", "start": 5.6, "end": 5.68}
+  ]
+}
