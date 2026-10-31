@@ -191,7 +191,7 @@ class _Cycle:
             self.previous = state.Checkpoint(server=server, library=number)
             return True
         # after a new device token a checkpoint without a number is no proof of the library either
-        check = saved.library or saved.foreign == state.UNCHECKED
+        check = saved.library or saved.foreign
         if saved.server == server and check and number and saved.library != number:
             self.previous = saved.model_copy(update={"foreign": number}, deep=True)
             self.save()

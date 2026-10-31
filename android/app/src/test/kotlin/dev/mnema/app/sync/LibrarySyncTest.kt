@@ -1276,7 +1276,8 @@ class LibrarySyncTest {
                 Files.move(file.toPath(), File(temp.root, "trash-${UUID.randomUUID()}").toPath())
             }
 
-            val status = try { run() } finally { rights?.let { Files.setPosixFilePermissions(root.toPath(), it) } }
+            val syncs = case["syncs"]?.jsonPrimitive?.content?.toInt() ?: 1
+            val status = try { (1..syncs).map { run() }.last() } finally { rights?.let { Files.setPosixFilePermissions(root.toPath(), it) } }
 
             assertEquals(name, case["errors"]?.jsonPrimitive?.boolean ?: false, status.errors.isNotEmpty())
             val held = (status.bulkMissing + status.serverMissing).map { names.getValue(it) }.sorted()

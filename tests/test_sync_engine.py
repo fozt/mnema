@@ -1315,7 +1315,8 @@ def test_shared_sync_decisions(pair, tmp_path, case):
         client_factory=lambda connection: LibraryClient(connection, transport=pair.transport),
     )
     try:
-        result = asyncio.run(engine.run_once())
+        for _ in range(case.get("syncs", 1)):
+            result = asyncio.run(engine.run_once())
     finally:
         if mode is not None:
             root.chmod(mode)
