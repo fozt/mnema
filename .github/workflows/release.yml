@@ -1,7 +1,8 @@
-# A pushed tag vX.Y.Z publishes the release: the source archive (Linux app updates), the
-# self-contained Mac app (zip for updates, DMG for installs) with the sources of its (L)GPL parts,
-# the signed APK, the manifests the apps read from releases/latest/download/ and the server image
-# ghcr.io/<repo>:X.Y.Z for linux/amd64 and linux/arm64. Everything is built first, uploaded to a
+# A pushed tag vX.Y.Z publishes the release: the source archive (Linux app updates), the wheel of
+# the mnema command with the constraints of its dependencies, the self-contained Mac app (zip for
+# updates, its code alone for updates over the same runtime, DMG for installs) with the sources
+# of its (L)GPL parts, the signed APK, the manifests the apps read from releases/latest/download/
+# and the server image ghcr.io/<repo>:X.Y.Z for linux/amd64 and linux/arm64. Everything is built first, uploaded to a
 # draft, checked; the image is tagged latest and only then the release is published as the
 # latest. Each step can be re-run while the release is a draft.
 name: Release
@@ -42,13 +43,46 @@ jobs:
             echo "::error::Tag $TAG does not match pyproject.toml version $version"
             exit 1
           fi
-      - name: Source archive
-        run: uv run --no-project --python 3.12 python -m scripts.build_release "$TAG" --dist dist
+      - name: Source archive, command wheel and constraints
+        run: |
+          uv run --no-project --python 3.12 python -m scripts.build_release "$TAG" --dist dist \
+            --wheel
       - uses: actions/upload-artifact@v7
         with:
           name: source
-          path: dist/mnema-*.tar.gz
+          path: |
+            dist/mnema-*.tar.gz
+            dist/mnema-*.whl
+            dist/mnema-*-constraints.txt
           if-no-files-found: error
+
+  # The command as users install it: uv tool, the wheel of this release, a clean tool folder
+  cli:
+    needs: source
+    strategy:
+      matrix:
+        runner: [ubuntu-latest, macos-15]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    steps:
+      - uses: astral-sh/setup-uv@v10.3.0
+        with:
+          version: "0.13.6"
+      - uses: actions/download-artifact@v8
+        with:
+          name: source
+          path: dist
+      - name: uv tool install
+        run: |
+          version=${TAG#v}
+          export UV_TOOL_DIR="$RUNNER_TEMP/tools" UV_TOOL_BIN_DIR="$RUNNER_TEMP/bin"
+          uv tool install --python 3.12 "mnema[cli] @ file://$PWD/dist/mnema-$version-py3-none-any.whl"
+          "$RUNNER_TEMP/bin/mnema" --version | grep -qx "mnema $version"
+      - name: mnema-mcp answers initialize
+        timeout-minutes: 2
+        run: |
+          printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"release","version":"0"}}}' \
+            | HOME="$RUNNER_TEMP" "$RUNNER_TEMP/bin/mnema-mcp" | grep -q '"serverInfo"'
 
   ffmpeg:
     runs-on: macos-15
@@ -97,16 +131,37 @@ jobs:
       - run: mkdir "$RUNNER_TEMP/ffmpeg-prefix" && tar -xf "$RUNNER_TEMP/ffmpeg.tar" -C "$RUNNER_TEMP/ffmpeg-prefix"
       - run: swift --version
       - run: uv python install 3.12
-      - name: Mnema.app, zip and DMG
+      # The code archive of this build must update the app of the last release when the runtime
+      # is the same (build_mac_app.py --previous)
+      - name: The last release's app
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
+          mkdir "$RUNNER_TEMP/previous"
+          if ! previous=$(gh release view --json tagName -q .tagName 2> "$RUNNER_TEMP/gh.txt"); then
+            grep -q "release not found" "$RUNNER_TEMP/gh.txt" || { cat "$RUNNER_TEMP/gh.txt"; exit 1; }
+            echo "No release yet"
+            exit 0
+          fi
+          if gh release view "$previous" --json assets -q '.assets[].name' | grep -qx 'Mnema-.*-mac\.zip'; then
+            gh release download "$previous" --pattern 'Mnema-*-mac.zip' --dir "$RUNNER_TEMP/previous"
+            ditto -x -k "$RUNNER_TEMP"/previous/Mnema-*-mac.zip "$RUNNER_TEMP/previous"
+          fi
+      - name: Mnema.app, zip, code archive and DMG
+        run: |
+          previous=()
+          if [ -d "$RUNNER_TEMP/previous/Mnema.app" ]; then
+            previous=(--previous "$RUNNER_TEMP/previous/Mnema.app")
+          fi
           uv run --no-project --python 3.12 python -m scripts.build_mac_app \
             --out "$RUNNER_TEMP/mac" --ffmpeg "$RUNNER_TEMP/ffmpeg-prefix" \
-            --sources --version "${TAG#v}" --smoke
+            --sources --version "${TAG#v}" --smoke "${previous[@]}"
       - uses: actions/upload-artifact@v7
         with:
           name: mac
           path: |
             ${{ runner.temp }}/mac/Mnema-*-mac.zip
+            ${{ runner.temp }}/mac/Mnema-*-mac-code.tar.gz
             ${{ runner.temp }}/mac/Mnema-*.dmg
             ${{ runner.temp }}/mac/third-party-sources-*.tar.gz
           if-no-files-found: error
@@ -223,7 +278,7 @@ jobs:
           if-no-files-found: error
 
   publish:
-    needs: [checks, source, mac, android, image]
+    needs: [checks, source, cli, mac, android, image]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -245,9 +300,13 @@ jobs:
           version=${TAG#v}
           uv run --no-project --python 3.12 python -m scripts.build_release "$TAG" --dist dist \
             --mac-zip "artifacts/mac/Mnema-$version-mac.zip" \
-            --apk "artifacts/android/mnema-$version.apk"
-          # the archive is reproducible: the one checked in the source job is the one described
-          cmp dist/mnema-$version.tar.gz artifacts/source/mnema-$version.tar.gz
+            --mac-code "artifacts/mac/Mnema-$version-mac-code.tar.gz" \
+            --apk "artifacts/android/mnema-$version.apk" --wheel
+          # reproducible: the files checked in the source and cli jobs are the ones described
+          for file in mnema-$version.tar.gz mnema-$version-py3-none-any.whl \
+            mnema-$version-constraints.txt; do
+            cmp "dist/$file" "artifacts/source/$file"
+          done
           cat dist/mnema-release.json dist/mnema-android.json
       - name: Draft release
         run: |
@@ -263,8 +322,10 @@ jobs:
         run: |
           version=${TAG#v}
           set -- dist/mnema-$version.tar.gz dist/mnema-release.json dist/mnema-android.json \
-            artifacts/mac/Mnema-$version-mac.zip artifacts/mac/Mnema-$version.dmg \
-            artifacts/android/mnema-$version.apk artifacts/mac/third-party-sources-$version.tar.gz
+            dist/mnema-$version-py3-none-any.whl dist/mnema-$version-constraints.txt \
+            artifacts/mac/Mnema-$version-mac.zip artifacts/mac/Mnema-$version-mac-code.tar.gz \
+            artifacts/mac/Mnema-$version.dmg artifacts/android/mnema-$version.apk \
+            artifacts/mac/third-party-sources-$version.tar.gz
           gh release upload "$TAG" --clobber "$@"
           for file in "$@"; do basename "$file"; done | sort > expected.txt
       - name: Check assets

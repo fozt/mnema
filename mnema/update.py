@@ -7,7 +7,11 @@ The server is a Docker image and is updated with a new one on its host (./mnema.
 
 The self-contained Mac app (Mnema.app from the DMG) is replaced as a whole bundle from the
 manifest's `mac` block instead: the new bundle is checked next to the old one and swapped in.
-On a Mac there is no other app; the mnema command installed with uv tool is told how to update.
+When the release's code was built for the runtime the installed bundle has (mac.code, its
+MnemaRuntime key), only the code is downloaded: the new bundle is an APFS clone of the installed
+one with the code replaced, signed here (mnema.bar.codesign). Any failure on that way takes the
+whole bundle. On a Mac there is no other app; the mnema command installed with uv tool is told
+how to update.
 """
 
 from __future__ import annotations
@@ -43,6 +47,7 @@ logger = logging.getLogger(__name__)
 _VERSION = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
 _MAX_ARCHIVE = 64 * 1024 * 1024
 _MAX_MAC_ARCHIVE = 4 * 1024 * 1024 * 1024
+_MAX_CODE_ARCHIVE = 64 * 1024 * 1024
 _MACOS = re.compile(r"^[0-9]+(\.[0-9]+){0,2}$")
 RELEASES_PAGE = "https://github.com/fozt/mnema/releases/latest"
 PREVIOUS_BUNDLE = ".Mnema-previous.app"
@@ -69,6 +74,21 @@ def _macos(value: str) -> tuple[int, ...]:
     return parts + (0,) * (3 - len(parts))
 
 
+class CodeRelease(BaseModel):
+    """The code of the release's Mnema.app (mnema.bar.codesign.CODE_PATHS), a tar.gz with paths
+    from the bundle, built for the runtime with this key."""
+
+    archive: str
+    sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    size: int = Field(gt=0, le=_MAX_CODE_ARCHIVE)
+    runtime: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+    @field_validator("archive")
+    @classmethod
+    def secure_archive(cls, value: str) -> str:
+        return _https(value)
+
+
 class MacRelease(BaseModel):
     """The self-contained Mnema.app of the release: a zip made by ditto --keepParent."""
 
@@ -76,6 +96,7 @@ class MacRelease(BaseModel):
     sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
     size: int = Field(gt=0, le=_MAX_MAC_ARCHIVE)
     min_macos: str = Field(default="14.0", pattern=_MACOS.pattern)
+    code: CodeRelease | None = None  # a release without it: every bundle takes the zip
 
     @field_validator("archive")
     @classmethod
@@ -411,6 +432,87 @@ def _checked_bundle(app: Path, version: str) -> None:
     )  # fmt: skip
 
 
+def _runtime_of(app: Path) -> str | None:
+    from .bar.codesign import RUNTIME
+
+    try:
+        info = plistlib.loads((app / "Contents/Info.plist").read_bytes())
+    except (OSError, ValueError, plistlib.InvalidFileException):
+        return None
+    key = info.get(RUNTIME) if isinstance(info, dict) else None
+    return key if isinstance(key, str) else None
+
+
+def _clones(bundle: Path, work: Path) -> bool:
+    """The folder of the bundle makes APFS clones: a code-only update copies the bundle so."""
+    probe = work / ".clone-probe"
+    try:
+        _system_tool(
+            "/bin/cp", "-c", str(bundle / "Contents/Info.plist"), str(probe),
+            what="no clones",
+        )  # fmt: skip
+    except MediaError:
+        return False
+    finally:
+        probe.unlink(missing_ok=True)
+    return True
+
+
+def _code_members(package: tarfile.TarFile) -> list[tarfile.TarInfo]:
+    """Only files of the code, inside the bundle; the archive is the code of a whole bundle."""
+    from .bar.codesign import MAIN, is_code
+
+    members = []
+    size = 0
+    for member in package:
+        size += member.size
+        if size > _MAX_CODE_ARCHIVE * 4 or len(members) >= 20000:
+            raise MediaError(_("The update package is too large"))
+        path = Path(member.name)
+        if (
+            not member.isfile()
+            or path.is_absolute()
+            or ".." in path.parts
+            or not is_code(path.as_posix())
+        ):
+            raise MediaError(_("Invalid update package contents"))
+        members.append(member)
+    if not {"Contents/Info.plist", MAIN} <= {m.name for m in members}:
+        raise MediaError(_("Invalid update package contents"))
+    return members
+
+
+def prepare_code_bundle(bundle: Path, archive: Path, work: Path, version: str) -> Path:
+    """work/Mnema.app of the version: the installed bundle cloned with its code replaced from the
+    code archive, as new files (a Mach-O rewritten in place is killed by macOS), signed and
+    checked; the installed bundle is not changed. The release check runs this function of the
+    previous release on the new archive (scripts/build_mac_app.py): keep its arguments."""
+    from .bar import codesign
+    from .bar.install import BUNDLE_ID
+
+    app = work / "Mnema.app"
+    invalid = _("Invalid update package contents")
+    with tarfile.open(archive, "r:gz") as package:
+        members = _code_members(package)
+        _system_tool("/bin/cp", "-c", "-R", str(bundle), str(app), what=invalid)
+        # a bundle from the DMG may carry the quarantine: a missing attribute is no failure
+        subprocess.run(
+            ["/usr/bin/xattr", "-dr", "com.apple.quarantine", str(app)],
+            capture_output=True, check=False, stdin=subprocess.DEVNULL,
+        )  # fmt: skip
+        codesign.remove_code(app)
+        package.extractall(app, members=members, filter="data")
+    key = _runtime_of(app)
+    if key is None or codesign.runtime_key(app) != key:
+        raise MediaError(invalid)  # built for another runtime, or this one was changed
+    unpacked = [app / member.name for member in members]
+    main_executable = app / codesign.MAIN
+    codesign.sign_files([p for p in unpacked if p != main_executable and codesign.is_macho(p)])
+    codesign.sign_bundle(app, BUNDLE_ID)
+    _checked_bundle(app, version)
+    return app
+
+
 def _app_not_running() -> None:
     """A running app keeps loading code and starting workers from its bundle: a command must not
     swap the bundle under it."""
@@ -426,8 +528,9 @@ def _app_not_running() -> None:
 
 
 def _apply_bundle(bundle: Path, release: Release, on: Progress) -> Result:
-    """Replace the running Mnema.app: download and check the new bundle next to it, then swap
-    the folders; the old bundle stays as .Mnema-previous.app until the next start."""
+    """Replace the running Mnema.app: make and check the new bundle next to it (from the code
+    archive when the runtime is the same, else from the zip), then swap the folders; the old
+    bundle stays as .Mnema-previous.app until the next start."""
     mac = release.mac
     if mac is None:
         raise MediaError(_("This Mnema version has no Mac app"))
@@ -463,29 +566,16 @@ def _apply_bundle(bundle: Path, release: Release, on: Progress) -> Result:
         )
     work = Path(tempfile.mkdtemp(prefix=_ATTEMPT, dir=folder))  # same volume: rename works
     try:
-        downloading = _("Downloading Mnema {version}…", version=release.version)
-        on(None, downloading)
-        archive = work / "Mnema.zip"
-        _fetch(
-            mac.archive, mac.sha256, archive, limit=mac.size, total=mac.size,
-            on=lambda share: on(share, downloading),
-        )  # fmt: skip
-        on(None, _("Checking the new version…"))
-        unpacked = work / "unpacked"
-        _system_tool(
-            "/usr/bin/ditto", "-x", "-k", str(archive), str(unpacked),
-            what=_("Invalid update package contents"),
-        )  # fmt: skip
-        archive.unlink()
-        app = unpacked / "Mnema.app"
-        if app.is_symlink() or not app.is_dir():
-            raise MediaError(_("Invalid update package contents"))
-        # httpx sets no quarantine, but a copy may carry it: a missing attribute is no failure
-        subprocess.run(
-            ["/usr/bin/xattr", "-dr", "com.apple.quarantine", str(app)],
-            capture_output=True, check=False, stdin=subprocess.DEVNULL,
-        )  # fmt: skip
-        _checked_bundle(app, release.version)
+        app = None
+        code = mac.code
+        if code is not None and _runtime_of(bundle) == code.runtime and _clones(bundle, work):
+            try:
+                app = _code_bundle(bundle, release, code, work / "code", on)
+            except Exception:  # whatever failed on this way, the whole bundle may still do
+                logger.warning("code-only update failed, taking the whole app", exc_info=True)
+                shutil.rmtree(work / "code", ignore_errors=True)
+        if app is None:
+            app = _whole_bundle(release, mac, work, on)
         on(None, _("Installing Mnema {version}…", version=release.version))
         _app_not_running()
         previous = folder / PREVIOUS_BUNDLE
@@ -500,6 +590,48 @@ def _apply_bundle(bundle: Path, release: Release, on: Progress) -> Result:
     finally:
         shutil.rmtree(work, ignore_errors=True)
     return Result(version=release.version, bundle=str(bundle))
+
+
+def _code_bundle(
+    bundle: Path, release: Release, code: CodeRelease, work: Path, on: Progress
+) -> Path:
+    work.mkdir()
+    downloading = _("Downloading Mnema {version}…", version=release.version)
+    on(None, downloading)
+    archive = work / "code.tar.gz"
+    _fetch(
+        code.archive, code.sha256, archive, limit=code.size, total=code.size,
+        on=lambda share: on(share, downloading),
+    )  # fmt: skip
+    on(None, _("Checking the new version…"))
+    return prepare_code_bundle(bundle, archive, work, release.version)
+
+
+def _whole_bundle(release: Release, mac: MacRelease, work: Path, on: Progress) -> Path:
+    downloading = _("Downloading Mnema {version}…", version=release.version)
+    on(None, downloading)
+    archive = work / "Mnema.zip"
+    _fetch(
+        mac.archive, mac.sha256, archive, limit=mac.size, total=mac.size,
+        on=lambda share: on(share, downloading),
+    )  # fmt: skip
+    on(None, _("Checking the new version…"))
+    unpacked = work / "unpacked"
+    _system_tool(
+        "/usr/bin/ditto", "-x", "-k", str(archive), str(unpacked),
+        what=_("Invalid update package contents"),
+    )  # fmt: skip
+    archive.unlink()
+    app = unpacked / "Mnema.app"
+    if app.is_symlink() or not app.is_dir():
+        raise MediaError(_("Invalid update package contents"))
+    # httpx sets no quarantine, but a copy may carry it: a missing attribute is no failure
+    subprocess.run(
+        ["/usr/bin/xattr", "-dr", "com.apple.quarantine", str(app)],
+        capture_output=True, check=False, stdin=subprocess.DEVNULL,
+    )  # fmt: skip
+    _checked_bundle(app, release.version)
+    return app
 
 
 def drop_previous_bundle() -> None:

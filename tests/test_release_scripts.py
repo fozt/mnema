@@ -118,8 +118,13 @@ def test_release_manifest_describes_the_mac_app_the_update_installs(source, tmp_
     assert release.mac is not None and release.mac.size == mac_zip.stat().st_size
 
 
-def _mac_zip(path: Path, version: str) -> Path:
+RUNTIME = "a" * 64
+
+
+def _mac_zip(path: Path, version: str, runtime: str | None = RUNTIME) -> Path:
     info = {"CFBundleShortVersionString": version, "LSMinimumSystemVersion": "14.2"}
+    if runtime:
+        info["MnemaRuntime"] = runtime
     with zipfile.ZipFile(path, "w") as package:
         package.writestr("Mnema.app/Contents/Info.plist", plistlib.dumps(info))
         package.writestr("Mnema.app/Contents/MacOS/Mnema", "#!/bin/sh\n")
@@ -201,3 +206,111 @@ def test_android_manifest_min_sdk_is_the_one_the_app_is_built_with():
 
     gradle = (Path(__file__).parents[1] / "android/app/build.gradle.kts").read_text()
     assert f"minSdk = {build_release.ANDROID_MIN_SDK}\n" in gradle
+
+
+def _mac_code(folder: Path, version: str, runtime: str = RUNTIME, extra: str = "") -> Path:
+    """Mnema-X.Y.Z-mac-code.tar.gz as scripts/build_mac_app.py makes it."""
+    from scripts import build_mac_app
+
+    app = folder / "Mnema.app"
+    info = {"CFBundleShortVersionString": version, "MnemaRuntime": runtime}
+    files = {"Contents/Info.plist": plistlib.dumps(info), "Contents/MacOS/Mnema": b"#!/bin/sh\n"}
+    if extra:
+        files[extra] = b"runtime"
+    for rel, data in files.items():
+        (app / rel).parent.mkdir(parents=True, exist_ok=True)
+        (app / rel).write_bytes(data)
+    archive = build_mac_app.code_archive(app, version)
+    if extra:  # code_archive takes only the code: add the stray file by hand
+        import tarfile
+
+        with tarfile.open(archive, "w:gz") as package:
+            for rel in files:
+                package.add(app / rel, arcname=rel)
+    return archive
+
+
+def test_release_manifest_offers_the_code_of_the_mac_app_for_the_same_runtime(source, tmp_path):
+    from mnema import update
+
+    bump_version.bump(source, "0.3.0")
+    mac_zip = _mac_zip(tmp_path / "Mnema-0.3.0-mac.zip", "0.3.0")
+    code = _mac_code(tmp_path / "code", "0.3.0")
+
+    _archive, manifest = build_release.build(
+        source, tmp_path / "dist", "v0.3.0", mac_zip=mac_zip, mac_code=code
+    )
+
+    data = json.loads(manifest.read_text())
+    assert data["mac"]["code"] == {
+        "archive": "https://github.com/fozt/mnema/releases/download/v0.3.0/"
+        "Mnema-0.3.0-mac-code.tar.gz",
+        "sha256": hashlib.sha256(code.read_bytes()).hexdigest(),
+        "size": code.stat().st_size,
+        "runtime": RUNTIME,
+    }
+    release = update.Release.model_validate(data)
+    assert release.mac is not None and release.mac.code is not None
+
+
+@pytest.mark.parametrize(
+    ("zip_runtime", "code_runtime", "extra", "error"),
+    [
+        (RUNTIME, "b" * 64, "", "runtime"),
+        (None, RUNTIME, "", "MnemaRuntime"),
+        (RUNTIME, RUNTIME, "Contents/MacOS/mnema-asr", "mnema-asr"),
+    ],
+)
+def test_release_refuses_a_code_archive_that_does_not_fit_the_mac_app(
+    source, tmp_path, zip_runtime, code_runtime, extra, error
+):
+    bump_version.bump(source, "0.3.0")
+    mac_zip = _mac_zip(tmp_path / "Mnema-0.3.0-mac.zip", "0.3.0", runtime=zip_runtime)
+    code = _mac_code(tmp_path / "code", "0.3.0", runtime=code_runtime, extra=extra)
+
+    with pytest.raises(ValueError, match=error):
+        build_release.build(source, tmp_path / "dist", "v0.3.0", mac_zip=mac_zip, mac_code=code)
+    assert not (tmp_path / "dist").exists()
+
+
+def test_release_builds_the_command_wheel_and_its_constraints(source, tmp_path, monkeypatch):
+    """uv builds the wheel from the source archive (the boundary here is uv itself)."""
+    from mnema import update
+
+    bump_version.bump(source, "0.3.0")
+    real_run = subprocess.run
+    built = []
+
+    def run(cmd, **kwargs):
+        if cmd[0] != "uv":
+            return real_run(cmd, **kwargs)
+        if cmd[1] == "build":
+            out = Path(cmd[cmd.index("--out-dir") + 1])
+            project = Path(cmd[-1])
+            built.append((project / "pyproject.toml").read_text())
+            out.mkdir(parents=True)
+            (out / "mnema-0.3.0-py3-none-any.whl").write_bytes(b"wheel")
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+        assert cmd[1] == "export" and "cli" in cmd
+        return subprocess.CompletedProcess(cmd, 0, "httpx==0.28.1\n", "")
+
+    monkeypatch.setattr(subprocess, "run", run)
+
+    files = build_release.build(source, tmp_path / "dist", "v0.3.0", wheel=True)
+
+    names = sorted(path.name for path in files)
+    assert names == [
+        "mnema-0.3.0-constraints.txt",
+        "mnema-0.3.0-py3-none-any.whl",
+        "mnema-0.3.0.tar.gz",
+        "mnema-release.json",
+    ]
+    assert built == [(source / "pyproject.toml").read_text()]  # from the source archive
+    assert (tmp_path / "dist/mnema-0.3.0-constraints.txt").read_text() == "httpx==0.28.1\n"
+    data = json.loads((tmp_path / "dist/mnema-release.json").read_text())
+    assert data["cli"] == {
+        "wheel": "https://github.com/fozt/mnema/releases/download/v0.3.0/"
+        "mnema-0.3.0-py3-none-any.whl",
+        "sha256": hashlib.sha256(b"wheel").hexdigest(),
+    }
+    assert update.Release.model_validate(data).cli is not None
