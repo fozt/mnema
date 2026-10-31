@@ -55,10 +55,13 @@ def cli_link() -> Path:
 
 def link_cli(venv: Path) -> bool:
     """Point ~/.local/bin/mnema at the mnema command of the environment ``venv``, replacing the
-    previous link atomically. A file that is not a link is someone else's: left alone, False."""
+    previous link atomically. A file that is not a link is someone else's: left alone, False. A
+    link to the command of uv tool stays too: the user installed that command."""
     link = cli_link()
     if link.exists() and not link.is_symlink():
         return False
+    if (Path(os.path.realpath(link)).parent.parent / "uv-receipt.toml").is_file():
+        return True
     link.parent.mkdir(parents=True, exist_ok=True)
     draft = link.with_name(f".{link.name}.{os.getpid()}")
     draft.unlink(missing_ok=True)

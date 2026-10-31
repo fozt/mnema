@@ -13,37 +13,15 @@ _PYTHON = '#!/bin/sh\necho "python=$0 bundle=$MNEMA_APP_BUNDLE args=$*"\n'
 
 
 def _bundle(root: Path) -> Path:
-    res = root / "Mnema.app" / "Contents" / "Resources"
-    python = res / "python" / "bin" / build.PY
+    python = root / "Mnema.app" / "Contents" / "Resources" / "python" / "bin" / build.PY
     python.parent.mkdir(parents=True)
     python.write_text(_PYTHON)
     python.chmod(0o755)
-    (res / "bin").mkdir()
-    for name, module in build.WRAPPERS.items():
-        wrapper = res / "bin" / name
-        wrapper.write_text(build.WRAPPER.format(name=name, module=module, py=build.PY))
-        wrapper.chmod(0o755)
     return root / "Mnema.app"
 
 
 def _run(path: Path, *args: str) -> str:
     return subprocess.run([str(path), *args], capture_output=True, text=True, check=True).stdout
-
-
-@pytest.mark.parametrize("name", list(build.WRAPPERS))
-def test_command_runs_the_python_of_its_own_bundle_through_a_link(tmp_path, name):
-    app = _bundle(tmp_path / "first")
-    moved = tmp_path / "second" / "Mnema.app"
-    moved.parent.mkdir()
-    app.rename(moved)  # copied out of the image to another folder
-    link = tmp_path / "bin" / name
-    link.parent.mkdir()
-    link.symlink_to(moved / "Contents/Resources/bin" / name)
-    out = _run(link, "--version")
-    real = Path(os.path.realpath(moved))
-    assert f"python={real}/Contents/Resources/python/bin/{build.PY} " in out
-    assert f"bundle={real} " in out
-    assert out.rstrip().endswith("--version")
 
 
 def test_console_scripts_run_the_python_next_to_them(tmp_path):
@@ -59,6 +37,17 @@ def test_console_scripts_run_the_python_next_to_them(tmp_path):
     (tmp_path / "a").rename(moved)
     out = _run(moved / "Mnema.app/Contents/Resources/python/bin/tool", "x")
     assert f"python={os.path.realpath(moved)}/Mnema.app/Contents/Resources/python/bin/" in out
+
+
+def test_mcp_client_of_the_old_app_is_told_how_to_get_the_command(tmp_path):
+    """MCP configs still start Resources/bin/mnema-mcp of the app: it fails and names the wheel of
+    this very release."""
+    stub = build.write_mcp_stub(tmp_path / "bin", "0.5.0")
+    done = subprocess.run([str(stub)], capture_output=True, text=True, input="{}\n")
+    assert done.returncode != 0 and done.stdout == ""
+    wheel = "https://github.com/fozt/mnema/releases/download/v0.5.0/mnema-0.5.0-py3-none-any.whl"
+    assert f'uv tool install "mnema[cli] @ {wheel}"' in done.stderr
+    assert len(stub.read_text().splitlines()) == 3
 
 
 def test_builder_paths_are_outside_and_system_paths_are_not():
@@ -120,11 +109,11 @@ def test_trim_drops_build_tools_and_test_suites_but_keeps_what_imports_them(tmp_
     home = tmp_path / "python"
     site = home / "lib" / build.PY / "site-packages"
     kept = [
-        "torch/testing/__init__.py",  # torch imports it
-        "torch/_dynamo/test_case.py",
-        "numpy/testing/__init__.py",
+        "numpy/testing/__init__.py",  # numpy imports it
         "numpy/__init__.py",
         "pyobjc_core-12.dist-info/METADATA",
+        "litellm/proxy/__init__.py",
+        "objc/_objc.cpython-312-darwin.so",
         "bin/python3.12",
     ]
     dropped = [
@@ -136,8 +125,12 @@ def test_trim_drops_build_tools_and_test_suites_but_keeps_what_imports_them(tmp_
         "distutils-precedence.pth",
         "PyObjCTest/test_x.py",
         "numpy/_core/tests/test_a.py",
-        "scipy/stats/tests/test_b.py",
+        "litellm/proxy/_experimental/out/index.html",
+        "objc/_objc.cpython-312-darwin.so.dSYM/Contents/Info.plist",
         "bin/pip3",
+        "bin/mnema",  # the command is a package of its own now
+        "bin/mnema-bar",
+        "bin/mnema-mcp",
     ]
     rel = {p: (home / p if p.startswith("bin/") else site / p) for p in kept + dropped}
     for path in rel.values():
@@ -148,9 +141,36 @@ def test_trim_drops_build_tools_and_test_suites_but_keeps_what_imports_them(tmp_
     assert [p for p in dropped if rel[p].exists()] == []
 
 
-def test_trim_refuses_a_bundle_with_a_package_that_must_not_ship(tmp_path):
+@pytest.mark.parametrize(
+    "dist", ["mutagen-1.47.0", "torch-2.8.0", "yt_dlp-2026.10.21", "scikit_learn-1.7.2",
+             "silero_vad-6.2.1", "rich-15.0.0", "mcp-1.20.0", "Deno-2.9.8"],
+)  # fmt: skip
+def test_trim_refuses_a_bundle_with_a_package_that_must_not_ship(tmp_path, dist):
     home = tmp_path / "python"
     (home / "bin").mkdir(parents=True)
-    (home / "lib" / build.PY / "site-packages" / "mutagen-1.47.0.dist-info").mkdir(parents=True)
-    with pytest.raises(SystemExit, match="mutagen"):
+    (home / "lib" / build.PY / "site-packages" / f"{dist}.dist-info").mkdir(parents=True)
+    with pytest.raises(SystemExit, match=dist.split("-")[0]):
         build.trim(home)
+
+
+def test_bundle_carries_the_swift_licenses_and_the_model_attribution(tmp_path):
+    """FluidAudio's license and the licenses it lists go into the bundle; the weights the app
+    downloads (CC-BY-4.0) are attributed."""
+    checkouts = tmp_path / "checkouts"
+    fluid = checkouts / "FluidAudio"
+    (fluid / "ThirdPartyLicenses" / "KokoroANE-v3").mkdir(parents=True)
+    (fluid / "LICENSE").write_text("apache")
+    (fluid / "ThirdPartyLicenses" / "vbx-LICENSE.md").write_text("vbx")
+    (fluid / "ThirdPartyLicenses" / "KokoroANE-v3" / "LICENSE").write_text("kokoro")
+    (fluid / "README.md").write_text("readme")
+    dest = tmp_path / "licenses"
+
+    build.swift_licenses(checkouts, dest)
+
+    assert (dest / "swift/FluidAudio/LICENSE").read_text() == "apache"
+    assert (dest / "swift/FluidAudio/ThirdPartyLicenses/vbx-LICENSE.md").read_text() == "vbx"
+    assert (dest / "swift/FluidAudio/ThirdPartyLicenses/KokoroANE-v3/LICENSE").exists()
+    assert not (dest / "swift/FluidAudio/README.md").exists()
+    models = (dest / "MODELS.txt").read_text()
+    for credit in ("CC-BY-4.0", "NVIDIA", "moondream", "FluidInference/parakeet-ultra-coreml"):
+        assert credit in models

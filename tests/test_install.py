@@ -748,9 +748,8 @@ def client_sync(*extras: str) -> list[str]:
     return ["uv", "sync", "--locked", "--python", "3.12", "--no-dev", *options]
 
 
-# a Mac processes itself with the engines it ships (no GigaAM), Linux only sends recordings
-MAC_SYNC = client_sync("menubar", "mcp", "parakeet", "whisper")
-LINUX_SYNC = client_sync("menubar", "mcp")
+# the tray and the mnema command; the server processes the recordings
+LINUX_SYNC = client_sync("menubar", "cli")
 
 
 @pytest.mark.parametrize(
@@ -769,14 +768,12 @@ def test_invalid_options_do_not_touch_system(system, args):
     assert not env_file(system).parent.exists()  # nothing is written before the arguments parse
 
 
-@pytest.mark.parametrize(("os_name", "sync"), [("Darwin", MAC_SYNC), ("Linux", LINUX_SYNC)])
-def test_client_installs_what_its_system_processes_with(system, os_name, sync):
-    """./install.sh client: a Mac processes itself (the app and the engines), a Linux client sends
-    recordings to the server (no engines); neither gets the dev tools."""
-    system[1]["FAKE_OS"] = os_name
+def test_client_installs_the_tray_and_the_command(system):
+    """./install.sh client on Linux: the tray and the mnema command, no engines (the server
+    processes) and no dev tools."""
     done = installer(system, "client")
     assert done.returncode == 0, done.stderr
-    assert [c for c in calls(system) if c[:2] == ["uv", "sync"]] == [sync]
+    assert [c for c in calls(system) if c[:2] == ["uv", "sync"]] == [LINUX_SYNC]
     assert "MNEMA_ASR_THREADS" not in dotenv_values(env_file(system))
 
 
@@ -790,19 +787,18 @@ def synced_into(system) -> list[str | None]:
     return [c[1] for c in calls(system) if c[0] == "uv-env"]
 
 
-@pytest.mark.parametrize("os_name", ["Darwin", "Linux"])
-def test_client_installs_into_its_own_environment_outside_the_checkout(system, os_name):
+def test_client_installs_into_its_own_environment_outside_the_checkout(system):
     """The app is synced into its own environment and runs from it; the checkout's .venv, the
     developer's, stays as it was."""
     root, env = system
-    env["FAKE_OS"] = os_name
+    env["DISPLAY"] = ":0"
     (root / ".venv").mkdir()
     done = installer(system, "client")
     assert done.returncode == 0, done.stderr
     assert synced_into(system) == [str(app_env(system))]
     assert list((root / ".venv").iterdir()) == []
-    if os_name == "Darwin":  # Mnema.app is built by the environment's own mnema-bar
-        assert ["mnema-bar-at", str(app_env(system) / "bin/mnema-bar"), None] in calls(system)
+    # the shortcut is made by the environment's own mnema-bar
+    assert ["mnema-bar-at", str(app_env(system) / "bin/mnema-bar"), None] in calls(system)
 
 
 def test_client_environment_follows_xdg_data_home(system):
@@ -831,20 +827,22 @@ def test_installer_speaks_the_language_of_the_locale(system, lang, text):
     assert text in done.stdout
 
 
-def test_mac_client_without_command_line_tools_stops_before_installing(system):
-    """Mnema.app is built with the Command Line Tools: without them the install doesn't start."""
+def test_mac_client_is_sent_to_the_dmg_before_installing(system):
+    """There is no Mnema.app from the sources: on a Mac the installer names the DMG and touches
+    nothing."""
     system[1]["FAKE_OS"] = "Darwin"
-    system[1]["FAKE_FAIL"] = "xcode-select"
-    done = installer(system, "client")
+    done = installer(system, "client", "http://203.0.113.7:43117")
     assert done.returncode != 0
-    assert "Установите Command Line Tools: xcode-select --install" in done.stdout
-    assert [c[0] for c in calls(system)] == ["uname", "xcode-select"]
+    assert (
+        "Mnema для Mac ставится из DMG: https://github.com/fozt/mnema/releases/latest"
+        in done.stdout
+    )
+    assert [c[0] for c in calls(system)] == ["uname"]
     assert not env_file(system).parent.exists()
+    assert not app_env(system).exists()
 
 
-@pytest.mark.parametrize("os_name", ["Darwin", "Linux"])
-def test_client_install_preserves_existing_local_server_configuration(system, os_name):
-    system[1]["FAKE_OS"] = os_name
+def test_client_install_preserves_existing_local_server_configuration(system):
     config = env_file(system)
     config.parent.mkdir(parents=True, exist_ok=True)
     config.write_text("MNEMA_ASR_THREADS=6\nMNEMA_MODEL=gemini/test\nMNEMA_API_KEY=private\n")
@@ -1248,3 +1246,18 @@ def test_shared_texts_are_read_in_the_language_of_the_moment():
         assert NO_SERVER_RECORD == "Сервер не подключён, сохранится только звук"
     with pytest.raises(AttributeError):
         install_setup.NO_SUCH_TEXT  # noqa: B018
+
+
+def test_client_leaves_the_command_of_uv_tool_on_the_path(system):
+    """`uv tool install mnema[cli]` linked ~/.local/bin/mnema to its own environment: the app's
+    install keeps that link, the command stays the one the user chose."""
+    tool = Path(system[1]["HOME"]) / ".local/share/uv/tools/mnema"
+    (tool / "bin").mkdir(parents=True)
+    (tool / "uv-receipt.toml").write_text("[tool]\n")
+    (tool / "bin/mnema").write_text("#!/bin/sh\n")
+    link = Path(system[1]["HOME"]) / ".local/bin/mnema"
+    link.parent.mkdir(parents=True)
+    link.symlink_to(tool / "bin/mnema")
+    done = installer(system, "client", "http://203.0.113.7:43117")
+    assert done.returncode == 0, done.stderr
+    assert Path(os.readlink(link)) == tool / "bin/mnema"

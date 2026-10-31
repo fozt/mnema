@@ -39,7 +39,7 @@ def clean_url(url: str) -> str:
     return _SHELL_ESCAPE.sub(r"\1", url)
 
 
-DENO_HINT = "YouTube needs deno: reinstall Mnema (./install.sh client or ./install.sh server)"
+DENO_HINT = "YouTube needs deno: install the mnema command again with uv tool install --force"
 BOT_HINT = "YouTube asks to sign in: add --cookies FILE or --cookies-from-browser chrome"
 LOGIN_HINT = (
     "The content seems to need a login: add --cookies FILE or --cookies-from-browser chrome"

@@ -321,13 +321,15 @@ class OnnxModel:
     """The two Ultra graphs and the vocabulary: an audio window → timed words."""
 
     def __init__(self, folder: Path, threads: int) -> None:
-        import onnxruntime as ort  # ty: ignore[unresolved-import]
+        import onnxruntime as ort
 
         cpu = ["CPUExecutionProvider"]
-        self.encoder = ort.InferenceSession(
+        self.encoder: Any = ort.InferenceSession(
             str(folder / ENCODER), _options(ort, threads), providers=cpu
         )
-        self.decoder = ort.InferenceSession(str(folder / DECODER), _options(ort, 1), providers=cpu)
+        self.decoder: Any = ort.InferenceSession(
+            str(folder / DECODER), _options(ort, 1), providers=cpu
+        )
         pieces: dict[int, str] = {}
         for line in (folder / VOCAB).read_text(encoding="utf-8").splitlines():
             piece, _sep, index = line.rpartition(" ")

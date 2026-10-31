@@ -20,7 +20,7 @@
   "“{name}” is an audio container, but some parts are video: choose a video output (such as .mp4) or the merge command for an audio mix.": "«{name}» — аудио-контейнер, а среди частей есть видео: укажите видео-выход (например .mp4) или команду merge для аудио-микса.",
   "Merging video with audio-only files is not supported (no video stream: {files}). Merge them separately, or extract the audio as mp3 and merge that.": "Склейка видео с чисто аудио-файлами не поддержана (нет видеопотока: {files}). Склейте отдельно или извлеките аудио (mp3) и клейте звук.",
   "Some files have no audio track — merging without sound": "У части файлов нет аудиодорожки — склеиваю без звука",
-  "YouTube needs deno: reinstall Mnema (./install.sh client or ./install.sh server)": "Для YouTube нужен deno: переустановите Mnema (./install.sh client или ./install.sh server)",
+  "YouTube needs deno: install the mnema command again with uv tool install --force": "Для YouTube нужен deno: поставьте команду mnema заново через uv tool install --force",
   "YouTube asks to sign in: add --cookies FILE or --cookies-from-browser chrome": "YouTube просит войти: добавьте --cookies файл или --cookies-from-browser chrome",
   "The content seems to need a login: add --cookies FILE or --cookies-from-browser chrome": "Похоже, контент за логином: добавьте --cookies файл или --cookies-from-browser chrome",
   "Empty download link": "Пустая ссылка для скачивания",

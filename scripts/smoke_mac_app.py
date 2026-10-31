@@ -2,13 +2,15 @@
 
     uv run python -m scripts.smoke_mac_app path/to/Mnema.app [--version X.Y.Z] [--ffmpeg]
 
-The signature holds, no Mach-O loads anything outside the bundle and the system, the bundled
-mnema and mnema-mcp start, mnema finds and runs the bundled ffmpeg and ffprobe, the recognition
-engines of the Mac list (mnema/extras.py) are installed and nothing else is, the libraries they
-import load after the bundle trim, and the engine started the way the app starts it (the Swift
-launcher, the embedded Python) answers with a panel state and quits; started as `mnema-bar
---headless`, it offers exactly Automatic and the shipped engines. Everything runs under a
-temporary HOME: nothing of the real user's settings is read or written.
+The signature holds, no Mach-O loads anything outside the bundle and the system, mnema-asr answers
+--version and lists its models without downloading any, the bundled ffmpeg and ffprobe run and
+mnema finds them, no package of the forbidden list is in the bundle and every library in it
+imports after the trim (system audio included), and the old mnema-mcp names the wheel of the
+command. Then the engine is started the way the app starts it (the Swift launcher, the embedded
+Python): it answers with a panel state and quits, its first start writes app.json and the login
+item, and `mnema-bar --headless` offers exactly Automatic and the models of mnema-asr, as
+local_asr_choices does. Everything runs under a temporary HOME: nothing of the real user's
+settings is read or written.
 """
 
 from __future__ import annotations
@@ -16,6 +18,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import plistlib
 import queue
 import re
 import subprocess
@@ -29,7 +32,7 @@ from pathlib import Path
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from scripts.build_mac_app import _DIST_DROP, NOT_SHIPPED, load_commands, macho_files, outside
+from scripts.build_mac_app import FORBIDDEN, WHEEL, load_commands, macho_files, outside
 
 
 class SmokeError(SystemExit):
@@ -79,23 +82,33 @@ def run(cmd: list[str], env: dict[str, str], **kw) -> subprocess.CompletedProces
     return subprocess.run(cmd, env=env, capture_output=True, text=True, **kw)
 
 
-def check_mcp(app: Path, env: dict[str, str]) -> None:
-    hello = {
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "initialize",
-        "params": {
-            "protocolVersion": "2025-06-18",
-            "capabilities": {},
-            "clientInfo": {"name": "smoke", "version": "0"},
-        },
-    }
-    out = run([str(app / "Contents/Resources/bin/mnema-mcp")], env, input=json.dumps(hello) + "\n")
-    answers = [json.loads(line) for line in out.stdout.splitlines() if line.startswith("{")]
-    if not any(a.get("id") == 1 and "serverInfo" in a.get("result", {}) for a in answers):
-        raise SmokeError(
-            f"mnema-mcp did not answer initialize:\n{out.stdout}\n{out.stderr[-2000:]}"
-        )
+def check_asr(app: Path, env: dict[str, str], home: Path) -> list[str]:
+    """mnema-asr starts from the bundle (no build folder next to it), says its protocol version
+    and lists its models; nothing is downloaded. Returns the model ids."""
+    asr = str(app / "Contents" / "MacOS" / "mnema-asr")
+    out = run([asr, "--version"], env, cwd=home)
+    if out.returncode != 0 or not re.fullmatch(r"mnema-asr \d+", out.stdout.strip()):
+        raise SmokeError(f"mnema-asr --version:\n{out.stdout}\n{out.stderr[-2000:]}")
+    request = json.dumps({"operation": "models", "payload": {}}) + "\n"
+    out = run([asr], env, cwd=home, input=request)
+    replies = [json.loads(line) for line in out.stdout.splitlines() if line.startswith("{")]
+    models = [r["value"] for r in replies if r.get("type") == "result"]
+    if out.returncode != 0 or len(models) != 1 or not models[0]:
+        raise SmokeError(f"mnema-asr models:\n{out.stdout}\n{out.stderr[-2000:]}")
+    if any(m["installed"] for m in models[0]):
+        raise SmokeError(f"mnema-asr sees models in an empty HOME: {models[0]}")
+    if downloaded := [p for p in home.rglob("*") if p.is_file()]:
+        raise SmokeError(f"mnema-asr models wrote files: {downloaded[:5]}")
+    return [m["id"] for m in models[0]]
+
+
+def check_mcp(app: Path, env: dict[str, str], version: str) -> None:
+    """The mnema-mcp of old MCP configs fails and names the command's wheel of this release."""
+    stub = app / "Contents" / "Resources" / "bin" / "mnema-mcp"
+    out = run([str(stub)], env, input="{}\n")
+    wheel = WHEEL.format(version=version)
+    if out.returncode == 0 or out.stdout or wheel not in out.stderr:
+        raise SmokeError(f"mnema-mcp:\n{out.stdout}\n{out.stderr[-2000:]}")
 
 
 # mnema's own media path inside the bundle, run the way the engine runs it: the tools it resolves
@@ -131,102 +144,87 @@ def check_media(app: Path, env: dict[str, str], work: Path) -> None:
         raise SmokeError(f"the 2 s tone came out {found['seconds']} s long")
 
 
-# The engines inside the bundle: the registry against the Mac list, every library the shipped
-# engines' extras pull in imports (what the trim must not break), silero-vad's bundled weights on
-# a tone, and yt-dlp's format selection without mutagen
-_ENGINES_CHECK = """
-import importlib, importlib.metadata as md, importlib.util, json, sys
-from packaging.requirements import Requirement
-from packaging.utils import canonicalize_name
-from mnema import extras, node_settings
-from mnema.core import backends
-removed = set(json.loads(sys.argv[1]))
-shipped = [e for e in backends.ENGINES if e.extra in extras.MAC and not e.cloud]
-
-def requires(dist, extra=""):
-    found = []
-    for line in md.requires(dist) or []:
-        req = Requirement(line)
-        marker = req.marker
-        if marker is None:
-            applies = not extra
-        else:  # an extra's lines name it; another dist's optional extras are not installed
-            applies = (not extra or "extra" in str(marker)) and marker.evaluate({"extra": extra})
-        if applies:
-            found.append(canonicalize_name(req.name))
-    return found
-
-direct = {d for e in shipped for d in requires("mnema", e.extra)}
-todo, seen, missing = list(direct), set(), []
-while todo:
-    dist = todo.pop()
-    if dist in seen:
-        continue
-    seen.add(dist)
-    try:
-        todo += requires(dist)
-    except md.PackageNotFoundError:
-        if dist in direct or dist not in removed:
-            missing.append(dist)
-modules = {canonicalize_name(d): set() for d in seen}
-for name, dists in md.packages_distributions().items():
-    for dist in dists:
-        modules.get(canonicalize_name(dist), set()).add(name)
-names = sorted({m for found in modules.values() for m in found if m.isidentifier()})
+# The packages inside the bundle: none of the forbidden list, and every top-level module of every
+# distribution imports (what the trim must not break), with the app's own modules that load
+# libraries late: system audio (numpy, pyobjc) and the recognition worker.
+_PACKAGES_CHECK = """
+import importlib, importlib.metadata as md, importlib.util, json, re, sys
+forbidden = set(json.loads(sys.argv[1]))
+dists = {re.sub(r"[-_.]+", "-", d.metadata["Name"]).lower() for d in md.distributions()}
+names = sorted({m for m in md.packages_distributions() if m.isidentifier()})
 failed = {}
-for name in [*names, "mnema.core.parakeet_mlx", "mnema.core.worker"]:
+for name in [*names, "mnema.live.system_audio", "mnema.core.worker", "mnema.bar.headless"]:
     if name.startswith("_") or importlib.util.find_spec(name) is None:
         continue
     try:
         importlib.import_module(name)
     except Exception as e:
         failed[name] = repr(e)[:300]
-if importlib.util.find_spec("silero_vad") is not None:
-    import torch
-    tone = torch.sin(torch.arange(32000) * (2 * 3.14159 * 440 / 16000)) * 0.5
-    backends._speech_timestamps(tone)
-import yt_dlp
-from yt_dlp.dependencies import mutagen
-info = {"id": "x", "title": "t", "extractor": "generic", "extractor_key": "Generic",
-        "webpage_url": "https://example.com/x", "formats": [
-            {"format_id": "a", "url": "https://example.com/a.m4a", "ext": "m4a",
-             "acodec": "mp4a.40.2", "vcodec": "none", "abr": 128},
-            {"format_id": "v", "url": "https://example.com/v.mp4", "ext": "mp4",
-             "acodec": "none", "vcodec": "avc1", "height": 720}]}
-with yt_dlp.YoutubeDL({"quiet": True, "format": "ba/b"}) as ydl:
-    picked = ydl.process_ie_result(info, download=False)["format_id"]
-print(json.dumps({
-    "shipped": [e.id for e in shipped],
-    "installed": [e.id for e in backends.installed_engines()],
-    "choices": [c["id"] for c in node_settings.local_asr_choices()],
-    "missing": sorted(missing), "failed": failed, "imported": len(names),
-    "mutagen": mutagen is not None, "format": picked,
-}))
+print(json.dumps({"forbidden": sorted(dists & forbidden), "failed": failed,
+                  "imported": len(names), "dists": len(dists)}))
 """
 
 
-def check_engines(app: Path, env: dict[str, str]) -> tuple[list[str], int]:
-    """The engines of the Mac list are installed and no other is, and every library their extras
-    pull in imports; returns Automatic with them and how many libraries imported."""
+def check_packages(app: Path, env: dict[str, str]) -> tuple[int, int]:
+    """No forbidden package, and everything in the bundle imports; returns how many
+    distributions and modules."""
     python = app / "Contents" / "Resources" / "python" / "bin" / "python3.12"
     env = {**env, "MNEMA_APP_BUNDLE": str(app)}
-    removed = json.dumps([*_DIST_DROP, *NOT_SHIPPED])
-    out = run([str(python), "-I", "-B", "-c", _ENGINES_CHECK, removed], env)
+    out = run([str(python), "-I", "-B", "-c", _PACKAGES_CHECK, json.dumps(FORBIDDEN)], env)
     if out.returncode != 0:
-        raise SmokeError(f"engine check failed:\n{out.stdout}\n{out.stderr[-3000:]}")
+        raise SmokeError(f"package check failed:\n{out.stdout}\n{out.stderr[-3000:]}")
     found = json.loads(out.stdout.strip().splitlines()[-1])
-    if not found["shipped"] or found["installed"] != found["shipped"]:
-        raise SmokeError(f"engines installed {found['installed']}, shipped {found['shipped']}")
-    if found["missing"]:
-        raise SmokeError(f"the shipped engines need {found['missing']}, not in the bundle")
+    if found["forbidden"]:
+        raise SmokeError(f"the bundle carries {found['forbidden']}")
     if found["failed"]:
-        raise SmokeError(f"libraries of the shipped engines do not import: {found['failed']}")
-    expected = ["auto", *found["shipped"]]
-    if found["choices"] != expected:
-        raise SmokeError(f"local recognition {found['choices']}, expected {expected}")
-    if found["mutagen"] or found["format"] != "a":
-        raise SmokeError(f"yt-dlp without mutagen: {found}")
-    return expected, found["imported"]
+        raise SmokeError(f"libraries in the bundle do not import: {found['failed']}")
+    return found["dists"], found["imported"]
+
+
+# What the engine of this bundle offers for recognition on this Mac, as the settings list it
+_CHOICES_CHECK = """
+import json
+from mnema import node_settings
+print(json.dumps([c["id"] for c in node_settings.local_asr_choices()]))
+"""
+
+
+def check_choices(app: Path, env: dict[str, str], models: list[str]) -> list[str]:
+    """local_asr_choices in the bundle: Automatic and the models of mnema-asr."""
+    python = app / "Contents" / "Resources" / "python" / "bin" / "python3.12"
+    asr = app / "Contents" / "MacOS" / "mnema-asr"
+    env = {**env, "MNEMA_APP_BUNDLE": str(app), "MNEMA_ASR": str(asr)}
+    out = run([str(python), "-I", "-B", "-c", _CHOICES_CHECK], env)
+    if out.returncode != 0:
+        raise SmokeError(f"local_asr_choices failed:\n{out.stdout}\n{out.stderr[-3000:]}")
+    found = json.loads(out.stdout.strip().splitlines()[-1])
+    expected = ["auto", *models]
+    if found != expected:
+        raise SmokeError(f"local recognition {found}, mnema-asr lists {models}")
+    return expected
+
+
+def check_first_start(app: Path, home: Path, version: str) -> None:
+    """The engine's first start: app.json names this bundle, its mnema-asr and version (the
+    command finds the app there); no mnema link into the bundle; the login item opens it."""
+    record = home / ".local" / "share" / "mnema" / "app.json"
+    try:
+        found = json.loads(record.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        raise SmokeError(f"first start did not write {record}: {e}") from None
+    wanted = {
+        "bundle": str(app),
+        "asr": str(app / "Contents" / "MacOS" / "mnema-asr"),
+        "version": version,
+    }
+    if {key: found.get(key) for key in wanted} != wanted:
+        raise SmokeError(f"{record}: {found}, expected {wanted}")
+    link = home / ".local" / "bin" / "mnema"
+    if link.is_symlink() and Path(os.path.realpath(link)).is_relative_to(app):
+        raise SmokeError(f"first start linked {link} into the bundle")
+    agent = home / "Library" / "LaunchAgents" / "com.mnema.bar.plist"
+    if not agent.exists() or str(app) not in agent.read_text(errors="replace"):
+        raise SmokeError(f"first start did not point {agent} at {app}")
 
 
 def _recognition(state: dict) -> list[str] | None:
@@ -241,12 +239,14 @@ def _recognition(state: dict) -> list[str] | None:
 
 
 def check_recognition(app: Path, env: dict[str, str], expected: list[str]) -> None:
-    """mnema-bar --headless in the bundle offers Automatic and the shipped engines, no more."""
+    """mnema-bar --headless in the bundle offers Automatic and the models of mnema-asr, no
+    more."""
     python = app / "Contents" / "Resources" / "python" / "bin" / "python3.12"
     res = app / "Contents" / "Resources"
     env = {
         **env,
         "MNEMA_APP_BUNDLE": str(app),
+        "MNEMA_ASR": str(app / "Contents" / "MacOS" / "mnema-asr"),
         "PATH": f"{res / 'bin'}:{res / 'python' / 'bin'}:{env['PATH']}",
     }
     cmd = [str(python), "-I", "-B", "-m", "mnema.bar", "--headless"]
@@ -293,6 +293,11 @@ def check_recognition(app: Path, env: dict[str, str], expected: list[str]) -> No
         raise SmokeError(f"the app offers recognition {offered}, expected {expected}")
 
 
+def _log(home: Path) -> str:
+    path = home / "bar.log"
+    return path.read_text(errors="replace") if path.exists() else ""
+
+
 def smoke(app: Path, *, version: str | None = None, ffmpeg: bool = False) -> None:
     """ffmpeg: the app must carry its own ffmpeg and ffprobe (a release build)."""
     app = app.resolve()
@@ -304,15 +309,17 @@ def smoke(app: Path, *, version: str | None = None, ffmpeg: bool = False) -> Non
         raise SmokeError(f"codesign --verify failed:\n{out.stderr}")
     say("signature ok")
     say(f"{check_links(app)} Mach-O files load only the bundle and the system")
+    info = plistlib.loads((app / "Contents" / "Info.plist").read_bytes())
+    built = info.get("CFBundleShortVersionString", "")
+    if version and built != version:
+        raise SmokeError(f"the bundle is version {built}, expected {version}")
     with tempfile.TemporaryDirectory(prefix="mnema-smoke-") as tmp:
         home = Path(tmp)
         env = isolated_env(home)
-        out = run([str(res / "bin" / "mnema"), "--version"], env)
-        if out.returncode != 0 or not re.search(rf"mnema {re.escape(version or '')}", out.stdout):
-            raise SmokeError(f"mnema --version:\n{out.stdout}\n{out.stderr[-2000:]}")
-        say(out.stdout.strip().splitlines()[-1])
-        check_mcp(app, env)
-        say("mnema-mcp answers initialize")
+        models = check_asr(app, env, home)
+        say(f"mnema-asr answers, models {', '.join(models)}, none downloaded")
+        check_mcp(app, env, built)
+        say("mnema-mcp names the wheel of the mnema command")
         tools = res / "bin"
         if (tools / "ffmpeg").exists():
             for tool in ("ffmpeg", "ffprobe"):
@@ -326,26 +333,22 @@ def smoke(app: Path, *, version: str | None = None, ffmpeg: bool = False) -> Non
             raise SmokeError("no bundled ffmpeg and ffprobe in Contents/Resources/bin")
         else:
             say("WARNING: no bundled ffmpeg, the app needs ffmpeg on PATH")
+        dists, imported = check_packages(app, env)
+        say(f"{dists} distributions, none forbidden; {imported} libraries import")
         out = run([str(app / "Contents" / "MacOS" / "Mnema"), "--engine-check"], env)
-        log = (home / "bar.log").read_text(errors="replace") if (home / "bar.log").exists() else ""
         if out.returncode != 0:
-            raise SmokeError(f"engine check failed:\n{out.stdout}\n{out.stderr}\n{log[-4000:]}")
-        if "Traceback" in log:
-            raise SmokeError(f"the engine logged an error:\n{log[-4000:]}")
+            raise SmokeError(
+                f"engine check failed:\n{out.stdout}\n{out.stderr}\n{_log(home)[-4000:]}"
+            )
+        if "Traceback" in _log(home):
+            raise SmokeError(f"the engine logged an error:\n{_log(home)[-4000:]}")
         say("the engine answered the app with a state and quit")
-        link = home / ".local" / "bin" / "mnema"
-        if Path(os.path.realpath(link)) != (res / "bin" / "mnema").resolve():
-            raise SmokeError(f"first start did not link {link} to the bundle")
-        agent = home / "Library" / "LaunchAgents" / "com.mnema.bar.plist"
-        if not agent.exists() or str(app) not in agent.read_text(errors="replace"):
-            raise SmokeError(f"first start did not point {agent} at {app}")
-        say("first start linked the mnema command and the login item to this bundle")
-        expected, imported = check_engines(app, env)
-        say(f"engines {', '.join(expected[1:])} installed, no other; {imported} libraries load")
+        check_first_start(app, home, built)
+        say("first start wrote app.json and pointed the login item at this bundle")
+        expected = check_choices(app, env, models)
         check_recognition(app, env, expected)
-        log = (home / "bar.log").read_text(errors="replace")
-        if "Traceback" in log:
-            raise SmokeError(f"the engine logged an error:\n{log[-4000:]}")
+        if "Traceback" in _log(home):
+            raise SmokeError(f"the engine logged an error:\n{_log(home)[-4000:]}")
         say(f"the app offers recognition: {', '.join(expected)}")
     say(f"{app} ok")
 
