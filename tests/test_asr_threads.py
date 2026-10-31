@@ -1,4 +1,4 @@
-"""Recognition CPU budget: the ffmpeg, Silero and ASR loading boundaries are stubbed."""
+"""Recognition CPU budget: the ffmpeg, silero session and ASR loading boundaries are stubbed."""
 
 import subprocess
 import sys
@@ -9,8 +9,7 @@ from pathlib import Path
 import pytest
 
 from mnema.core import backends as b
-from mnema.core import parakeet
-from mnema.core.models import Segment
+from tests import onnx_stubs
 
 
 @pytest.fixture(autouse=True)
@@ -29,34 +28,18 @@ def cpu_environment(monkeypatch):
     return files
 
 
-@pytest.mark.parametrize("backend", [b.GigaAmBackend, b.ParakeetBackend])
 @pytest.mark.parametrize("seconds, fail", [(3, False), (30, False), (30, True)])
-def test_asr_uses_configured_threads_after_vad_and_restores_caller(
-    monkeypatch, tmp_path, backend, seconds, fail
-):
-    """VAD on one thread, ASR on the default budget, the budget survives an error."""
+def test_asr_uses_configured_threads_and_restores_caller(monkeypatch, tmp_path, seconds, fail):
+    """GigaAM on the default torch budget (speech search is the silero session); the caller's
+    budget survives an error."""
     torch = pytest.importorskip("torch")
     before = torch.get_num_threads()
     events = []
     monkeypatch.setattr(b.os, "sched_getaffinity", lambda _: set(range(16)), raising=False)
-    monkeypatch.setattr(b, "_SILERO_VAD", None)
     monkeypatch.setattr(b, "_GIGAAM_MODEL", None)
-    monkeypatch.setattr(parakeet, "_MODEL", None)
-    monkeypatch.setattr(parakeet.platform, "machine", lambda: "x86_64")  # Parakeet's torch path
-
-    # A fresh import reproduces the library's real side effect on torch.
-    (tmp_path / "silero_vad.py").write_text(
-        "import torch\n"
-        "torch.set_num_threads(1)\n"
-        "def load_silero_vad():\n"
-        "    assert torch.get_num_threads() == 1\n"
-        "    return object()\n"
-        "def get_speech_timestamps(audio, model, **kwargs):\n"
-        "    assert torch.get_num_threads() == 1\n"
-        "    return [{'start': 0, 'end': 16000}]\n"
+    onnx_stubs.install(
+        monkeypatch, silero_vad=onnx_stubs.silero(onnx_stubs.speech_probs([(0, 1)], 30))
     )
-    monkeypatch.syspath_prepend(str(tmp_path))
-    monkeypatch.delitem(sys.modules, "silero_vad", raising=False)
 
     def ffmpeg(cmd, **kwargs):
         assert cmd[0] == "ffmpeg"
@@ -80,30 +63,18 @@ def test_asr_uses_configured_threads_after_vad_and_restores_caller(
                 raise RuntimeError("ошибка движка")
             return audio, length
 
-        def transcribe(self, audio, lang):
-            self.forward(audio, None)
-            return [Segment(start=0, end=1, text="Привет.")]
-
     monkeypatch.setitem(sys.modules, "gigaam", types.SimpleNamespace(load_model=Model))
-    monkeypatch.setattr(parakeet, "Model", Model)
-    monkeypatch.setenv("HF_HOME", str(tmp_path))
-    snapshot = tmp_path / "hub/models--moondream--parakeet-ultra/snapshots/test"
-    snapshot.mkdir(parents=True)
-    for name in ("model.safetensors", "config.json", "tokenizer.json"):
-        (snapshot / name).write_text("test")
-
     try:
         torch.set_num_threads(2)
         if fail:
             with pytest.raises(RuntimeError, match="ошибка движка"):
-                backend().run(Path("call.wav"), lang="ru")
+                b.GigaAmBackend().run(Path("call.wav"), lang="ru")
         else:
-            assert backend().run(Path("call.wav"), lang="ru").text == "Привет."
+            assert b.GigaAmBackend().run(Path("call.wav"), lang="ru").text == "Привет."
         assert events == [("load", 15), ("infer", 15)]
         assert torch.get_num_threads() == 2
     finally:
         torch.set_num_threads(before)
-        sys.modules.pop("silero_vad", None)
 
 
 @pytest.mark.parametrize(

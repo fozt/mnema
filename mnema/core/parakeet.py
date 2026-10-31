@@ -1,35 +1,43 @@
-"""Parakeet Ultra: an audio window → replies.
+"""Parakeet Ultra on ONNX Runtime: a track → words with times.
 
 moondream/parakeet-ultra is a fine-tuned nvidia/parakeet-tdt-0.6b-v3 (same architecture and
-tokenizer, 25 languages). ParakeetForTDT exists only in transformers 5, which conflicts with
-whisperx on Linux (huggingface-hub), so the encoder is the installed transformers'
-ParakeetEncoder, while the features and the greedy TDT decoder are our own (matched against
-transformers 5.19 word for word).
+tokenizer, 25 languages). The graphs are a public ONNX export pinned by revision and sha256:
+the encoder takes our numpy log-mel features, the greedy TDT decoder steps through
+decoder_joint. Long tracks go in ~15 s windows of speech (silero, core/vad.py).
 
-The module imports without torch: heavy work happens inside functions.
+The module imports without numpy and onnxruntime: heavy work happens inside functions.
 """
 
 from __future__ import annotations
 
-import json
-import platform
+import hashlib
 import re
-import sys
 import threading
 from pathlib import Path
 from typing import Any, NamedTuple
 
 from ..i18n import _
+from . import vad
+from .asr_engine import Word, group_speech, read_wav
 from .base import MediaError, Progress, noop
 from .models import Segment
 
-REPO = "moondream/parakeet-ultra"
-_FILES = ("model.safetensors", "config.json", "tokenizer.json")
+MODEL = "parakeet-ultra"
+# Pinned public export of Ultra (CC-BY-4.0); the code does not depend on the file names.
+ONNX_REPO = "marcosremar2/parakeet-ultra-onnx"
+ONNX_REVISION = "b4508be0373bcd39598369c1473454f826b71815"
+ENCODER = "encoder-model.int8.onnx"
+DECODER = "decoder_joint-model.int8.onnx"
+VOCAB = "vocab.txt"
+ONNX_FILES = {  # name → sha256
+    ENCODER: "291fa5678048c8ee3007a5995fa9e817213fdb2e3d60ea8fed549dbeb154b33b",
+    DECODER: "667ffde2242a560923cba6bc7f69ef03d736f8a36ca9588f2e6f9fa818cf2fc1",
+    VOCAB: "d58544679ea4bc6ac563d1f545eb7d474bd6cfa467f0a6e2c1dc1c7d37e3c35d",
+}
 SR = 16000
 FRAME_S = 0.08  # encoder frame: 10 ms feature hop × subsampling 8
 # Recognition window (as in FluidAudio): on a short chunk the model mistakes the language.
 WINDOW_S = 15.0
-REPLICA_GAP_S = 0.6  # a longer pause between words starts a new reply (as with GigaAM)
 # the model's languages (parakeet-tdt-0.6b-v3 model card)
 LANGS = frozenset(
     "bg hr cs da nl en et fi fr de el hu it lv lt mt pl pt ro sk sl es sv ru uk".split()
@@ -37,9 +45,11 @@ LANGS = frozenset(
 
 _N_FFT, _HOP, _WIN, _MELS, _PREEMPH = 512, 160, 400, 128, 0.97
 _LOG_GUARD, _EPS = 2.0**-24, 1e-5
-_BAN = -1e4  # logit shift of a banned token
+_DURATIONS = (0, 1, 2, 3, 4)  # TDT durations in frames: the last logits of decoder_joint
+_MAX_SYMBOLS = 10  # tokens on one frame before the decoder is forced forward
+_STATE = (2, 1, 640)  # LSTM state of decoder_joint
 
-_UK = set("іїєґІЇЄҐ")  # Ukrainian letters: in a Russian call a model slip, not speech
+_UK = set("іїєґІЇЄҐ")  # Ukrainian letters: only Ukrainian has many of them
 _FILLER_YES = {"mm-hmm", "mhm", "uh-huh", "mm", "hmm", "mm-mm"}  # → "Угу."
 _FILLER_DROP = {"uh", "um", "ah", "er", "erm"}
 
@@ -90,34 +100,34 @@ def mel_filters(sr: int = SR, n_fft: int = _N_FFT, n_mels: int = _MELS) -> Any:
 _MEL: Any = None
 
 
-def features(audio: Any) -> tuple[Any, Any]:
-    """Audio [n] float32 16 kHz → (features [1, T, 128], length mask [1, T])."""
-    import torch
+def features(audio: Any) -> tuple[Any, int]:
+    """Audio [n] float32 16 kHz → (features [1, 128, T] float32, speech frames): the torch
+    STFT of ParakeetFeatureExtractor in numpy (centered, symmetric hann(400) inside 512),
+    every band normalized over the speech frames, the frames after them zero."""
+    import numpy as np
 
     global _MEL
     if _MEL is None:
-        _MEL = torch.from_numpy(mel_filters())
-    x = audio.to(torch.float32)
-    n = x.shape[0]
-    x = torch.cat([x[:1], x[1:] - _PREEMPH * x[:-1]])
-    spec = torch.stft(
-        x,
-        _N_FFT,
-        hop_length=_HOP,
-        win_length=_WIN,
-        window=torch.hann_window(_WIN, periodic=False),
-        return_complex=True,
-        pad_mode="constant",
-    )
-    power = torch.view_as_real(spec).pow(2).sum(-1).sqrt().pow(2)
-    mel = torch.log(_MEL @ power + _LOG_GUARD).T  # [T, 128]
-    length = max(1, (n + _N_FFT // 2 * 2 - _N_FFT) // _HOP)
-    mask = torch.arange(mel.shape[0]) < length
-    valid = mel[mask]
-    mean = valid.mean(0)
-    std = ((valid - mean) ** 2).sum(0).div(max(length - 1, 1)).sqrt()
-    mel = (mel - mean) / (std + _EPS) * mask[:, None]
-    return mel[None], mask[None]
+        _MEL = mel_filters()
+    n = len(audio)
+    x = np.asarray(audio, np.float32)
+    x = np.concatenate([x[:1], x[1:] - _PREEMPH * x[:-1]])
+    x = np.pad(x, _N_FFT // 2)
+    window = np.zeros(_N_FFT, np.float32)
+    left = (_N_FFT - _WIN) // 2
+    window[left : left + _WIN] = np.hanning(_WIN)
+    frames = 1 + (len(x) - _N_FFT) // _HOP
+    index = np.arange(_N_FFT)[None, :] + _HOP * np.arange(frames)[:, None]
+    spec = np.fft.rfft(x[index] * window, axis=1)
+    power = (spec.real**2 + spec.imag**2).astype(np.float32)
+    mel = np.log(power @ _MEL.T + _LOG_GUARD).T  # [128, T]
+    length = max(1, n // _HOP)
+    valid = mel[:, :length]
+    mean = valid.mean(1, keepdims=True)
+    std = np.sqrt(((valid - mean) ** 2).sum(1, keepdims=True) / max(length - 1, 1))
+    mel = (mel - mean) / (std + _EPS)
+    mel[:, length:] = 0
+    return mel[None].astype(np.float32), length
 
 
 # ─────────────────────────────────────────── greedy TDT
@@ -156,27 +166,7 @@ def greedy_tdt(
     return out
 
 
-# ─────────────────────────────────────────── replies and cleanup
-
-
-def split_replicas(
-    pieces: list[tuple[str, float, float]], gap: float = REPLICA_GAP_S
-) -> list[list[tuple[str, float, float]]]:
-    """Window tokens (SentencePiece piece, start, end in s) → replies: a new one at a pause
-    > gap, only at a word start ("▁") so words are never split."""
-    out: list[list[tuple[str, float, float]]] = []
-    for piece in pieces:
-        if out and not (piece[0].startswith("▁") and piece[1] - out[-1][-1][2] > gap):
-            out[-1].append(piece)
-        else:
-            out.append([piece])
-    return out
-
-
-def banned_tokens(vocab: dict[str, int]) -> list[int]:
-    """Tokens with Ukrainian letters, banned in a Russian call (Latin stays allowed: API, MCP
-    are real words in Russian speech)."""
-    return sorted(i for piece, i in vocab.items() if _UK & set(piece))
+# ─────────────────────────────────────────── cleanup
 
 
 def tidy_ru(text: str) -> str:
@@ -196,14 +186,6 @@ _EN_COMMON = frozenset(
     "the a an and or but of to in on at for with is are was were be been it this that you i we "
     "they he she not do does did have has had will would can could so if as what yes no".split()
 )
-
-
-def ukrainian_slip(text: str) -> bool:
-    """Russian speech where the model, without a language hint, slipped in Ukrainian letters:
-    Cyrillic text with few such words (real Ukrainian has them in every third or fourth)."""
-    words = [w for w in re.findall(r"\w+", text.lower()) if _CYRILLIC.search(w)]
-    slips = sum(1 for w in words if _UK & set(w))
-    return 0 < slips <= max(1, len(words) * 0.15)
 
 
 def guess_lang(text: str) -> str | None:
@@ -234,28 +216,33 @@ def tidy(segments: list[Segment], lang: str | None) -> list[Segment]:
     return out
 
 
-# ─────────────────────────────────────────── model
+# ─────────────────────────────────────────── model files
 
 
-def _cached_snapshot() -> Path | None:
-    """A complete Ultra weights snapshot in the HF cache, or None."""
-    from .backends import _hf_cache_dir
+def available() -> bool:
+    """Whether everything Parakeet needs is installed (without importing modules or weights)."""
+    import importlib.util
 
-    snaps = _hf_cache_dir() / ("models--" + REPO.replace("/", "--")) / "snapshots"
-    for snap in sorted(snaps.iterdir()) if snaps.is_dir() else []:
-        if all((snap / f).is_file() and (snap / f).stat().st_size > 0 for f in _FILES):
-            return snap
-    return None
+    return all(
+        importlib.util.find_spec(m) is not None for m in ("onnxruntime", "numpy", "huggingface_hub")
+    )
 
 
-def snapshot_dir(on: Progress = noop) -> Path:
-    """The Ultra weights folder in the HF cache (downloaded once, ~1.3 GB)."""
-    cached = _cached_snapshot()
-    if cached is not None:
-        return cached
-    on(None, _("Downloading the recognition model, only the first time…"))
+def model_dir(on: Progress = noop) -> Path:
+    """The folder with ONNX_FILES: MNEMA_PARAKEET_ONNX_DIR as is, otherwise the pinned revision
+    in the HF cache (downloaded once, ~860 MB, each file checked by sha256)."""
+    from .settings import RuntimeSettings
+
+    given = RuntimeSettings().parakeet_onnx_dir
+    if given is not None:
+        folder = given.expanduser()
+        for name in ONNX_FILES:
+            if not (folder / name).is_file():
+                raise MediaError(_("No {name} in {folder}", name=name, folder=folder))
+        return folder
     try:
-        from huggingface_hub import snapshot_download
+        import huggingface_hub
+        from huggingface_hub.errors import LocalEntryNotFoundError
     except ImportError as e:
         raise MediaError(
             _(
@@ -263,188 +250,196 @@ def snapshot_dir(on: Progress = noop) -> Path:
                 "(./install.sh client or ./install.sh server)."
             )
         ) from e
-    return Path(snapshot_download(repo_id=REPO, allow_patterns=list(_FILES)))
 
-
-def available() -> bool:
-    """Whether everything Parakeet needs is installed (without importing modules or weights)."""
-    import importlib.util
-
-    try:
-        if not all(
-            importlib.util.find_spec(m)
-            for m in ("torch", "tokenizers", "safetensors", "silero_vad")
-        ):
-            return False
-        if _use_mlx():
-            return all(importlib.util.find_spec(m) for m in ("mlx", "parakeet_mlx"))
-        # Finding a nested spec imports transformers, and it imports torch. Checking the
-        # installed folder keeps engine selection in the parent truly light.
-        spec = importlib.util.find_spec("transformers")
-        return bool(
-            spec and spec.origin and (Path(spec.origin).parent / "models/parakeet").is_dir()
+    def fetch(name: str, *, cached: bool) -> Path:
+        return Path(
+            huggingface_hub.hf_hub_download(
+                ONNX_REPO, name, revision=ONNX_REVISION, local_files_only=cached
+            )
         )
-    except (ImportError, ValueError):
-        return False
+
+    folders, told = set(), False
+    for name, sha256 in ONNX_FILES.items():
+        try:  # in the cache: checked when it was downloaded
+            path = fetch(name, cached=True)
+        except LocalEntryNotFoundError:
+            if not told:
+                on(None, _("Downloading the recognition model, only the first time…"))
+                told = True
+            path = fetch(name, cached=False)
+            if _sha256(path) != sha256:
+                blob = path.resolve()
+                path.unlink(missing_ok=True)
+                blob.unlink(missing_ok=True)
+                raise MediaError(
+                    _("The recognition model did not download correctly. Try again")
+                ) from None
+        folders.add(path.parent)
+    (folder,) = folders  # one snapshot of the revision
+    return folder
 
 
-class Model:
-    """Ultra on CPU/GPU: the transformers encoder plus our TDT decoder on the same weights."""
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as f:
+        while block := f.read(1 << 20):
+            digest.update(block)
+    return digest.hexdigest()
 
-    def __init__(self, path: Path, device: str = "cpu") -> None:
-        import contextlib
-        import io
 
-        import torch
-        from safetensors import safe_open
-        from tokenizers import Tokenizer
+# ─────────────────────────────────────────── model
 
-        with contextlib.redirect_stdout(io.StringIO()):  # transformers 4.57 prints "🚨 Config…"
-            from transformers.models.parakeet import ParakeetEncoder, ParakeetEncoderConfig
-        skip_init: Any = contextlib.nullcontext  # other transformers: random init, slower
-        with contextlib.suppress(ImportError):
-            from transformers.modeling_utils import no_init_weights as skip_init
 
-        cfg = json.loads((path / "config.json").read_text(encoding="utf-8"))
-        enc_cfg = {k: v for k, v in cfg["encoder_config"].items() if k != "model_type"}
-        with skip_init():  # weights come from the file anyway: random init costs 5 s and a copy
-            self.encoder = ParakeetEncoder(ParakeetEncoderConfig(**enc_cfg)).eval()
-        h = cfg["decoder_hidden_size"]
-        self.lstm = torch.nn.LSTM(h, h, num_layers=cfg["num_decoder_layers"], batch_first=True)
-        self.w = {}
-        # tensor by tensor straight into the parameters (float16 → float32 in place): the whole
-        # file in float32 next to the model would add 2.4 GB of peak; the model keeps copies only
-        # (a slice would keep the whole file alive)
-        targets = {f"encoder.{k}": v for k, v in self.encoder.state_dict(keep_vars=True).items()}
-        targets |= {f"decoder.lstm.{k}": v for k, v in self.lstm.state_dict(keep_vars=True).items()}
-        with safe_open(str(path / "model.safetensors"), "pt") as f, torch.no_grad():
-            for k in f.keys():  # noqa: SIM118 - safe_open has no __iter__
-                if k in targets:
-                    targets.pop(k).copy_(f.get_tensor(k))
-                elif not k.startswith(("encoder.", "decoder.lstm.", "vad_head.")):
-                    self.w[k] = f.get_tensor(k).to(torch.float32, copy=True)
-            # convolution_bias=false, but transformers 4.x still has the bias
-            for k, t in targets.items():
-                if not k.endswith(".bias"):
-                    raise MediaError(
-                        _(
-                            "The Parakeet weights do not match the encoder: {name} is missing",
-                            name=k,
-                        )
-                    )
-                t.zero_()
-        self.blank, self.vocab = cfg["blank_token_id"], cfg["vocab_size"]
-        self.durations = list(cfg["durations"])
-        self.max_symbols = int(cfg.get("max_symbols_per_step", 10))
-        self.tokenizer = Tokenizer.from_file(str(path / "tokenizer.json"))
-        self.banned = torch.tensor(banned_tokens(self.tokenizer.get_vocab()), dtype=torch.long)
-        self.device = device
-        self.encoder.to(device)
-        self.lstm.to(device)
-        self.w = {k: v.to(device) for k, v in self.w.items()}
+def _options(ort: Any, threads: int) -> Any:
+    options = ort.SessionOptions()
+    options.intra_op_num_threads = threads
+    options.inter_op_num_threads = 1
+    options.add_session_config_entry("session.intra_op.allow_spinning", "0")
+    return options
 
-    def _linear(self, name: str, x: Any) -> Any:
-        import torch
 
-        return torch.nn.functional.linear(x, self.w[f"{name}.weight"], self.w[f"{name}.bias"])
+class OnnxModel:
+    """The two Ultra graphs and the vocabulary: an audio window → timed words."""
 
-    def transcribe(self, audio: Any, lang: str | None = None) -> list[Segment]:
-        """An audio window (≤ ~15 s) → replies timed from the window start. Without a language
-        there is no hint; if Ukrainian letters slip into Russian speech, the same encoder output
-        (90% of the time) is decoded again with them banned."""
-        import torch
+    def __init__(self, folder: Path, threads: int) -> None:
+        import onnxruntime as ort  # ty: ignore[unresolved-import]
 
-        feats, mask = features(audio)
-        with torch.inference_mode():
-            hidden = self.encoder(
-                input_features=feats.to(self.device), attention_mask=mask.to(self.device)
-            ).last_hidden_state[0]
-            frames = min(hidden.shape[0], int(_out_len(int(mask.sum()))))
-            enc = self._linear("encoder_projector", hidden)
-            segments = self._decode(enc, frames, ban=lang == "ru")
-            if lang is None and ukrainian_slip(" ".join(s.text for s in segments)):
-                segments = self._decode(enc, frames, ban=True)
-        return tidy(segments, lang)
+        cpu = ["CPUExecutionProvider"]
+        self.encoder = ort.InferenceSession(
+            str(folder / ENCODER), _options(ort, threads), providers=cpu
+        )
+        self.decoder = ort.InferenceSession(str(folder / DECODER), _options(ort, 1), providers=cpu)
+        pieces: dict[int, str] = {}
+        for line in (folder / VOCAB).read_text(encoding="utf-8").splitlines():
+            piece, _sep, index = line.rpartition(" ")
+            pieces[int(index)] = piece
+        self.pieces = [pieces[i] for i in range(len(pieces))]
+        self.blank = self.pieces.index("<blk>")
 
-    def _decode(self, enc: Any, frames: int, *, ban: bool) -> list[Segment]:
-        import torch
+    def words(self, audio: Any, offset: float = 0.0) -> list[Word]:
+        """A window (≤ ~15 s) → its words, timed from offset (seconds)."""
+        import numpy as np
 
-        with torch.inference_mode():
-            bias = torch.zeros(self.vocab + len(self.durations), device=self.device)
-            if ban and len(self.banned):
-                bias[self.banned.to(self.device)] = _BAN
-            state: list[Any] = [None, None]
+        feats, length = features(audio)
+        enc, enc_len = self.encoder.run(
+            ["outputs", "encoded_lengths"],
+            {"audio_signal": feats, "length": np.array([length], np.int64)},
+        )
+        frames = min(enc.shape[2], int(enc_len[0]))
+        emitted = self._decode(enc[0, :, :frames])
+        return _words(
+            [(self.pieces[e.token], e.frame, e.frame + e.duration) for e in emitted], offset
+        )
 
-            def step(token: int) -> None:
-                emb = self.w["decoder.embedding.weight"][token].view(1, 1, -1)
-                out, state[1] = self.lstm(emb, state[1])
-                state[0] = self._linear("decoder.decoder_projector", out[0, 0])
+    def _decode(self, enc: Any) -> list[Emitted]:
+        """Greedy TDT on decoder_joint: it starts from blank and zero states, and its new
+        states are taken only after an emitted token."""
+        import numpy as np
 
-            def joint(t: int) -> Any:
-                return self._linear("joint.head", torch.relu(enc[t] + state[0])) + bias
+        state = [np.zeros(_STATE, np.float32), np.zeros(_STATE, np.float32)]
+        target = [self.blank]
+        pending: list[Any] = [None]
 
-            step(self.blank)
-            emitted = greedy_tdt(
-                frames,
-                joint=joint,
-                step=step,
-                blank=self.blank,
-                vocab=self.vocab,
-                durations=self.durations,
-                max_symbols=self.max_symbols,
+        def joint(t: int) -> Any:
+            out, s1, s2 = self.decoder.run(
+                ["outputs", "output_states_1", "output_states_2"],
+                {
+                    "encoder_outputs": np.ascontiguousarray(enc[None, :, t : t + 1]),
+                    "targets": np.array([[target[0]]], np.int32),
+                    "target_length": np.array([1], np.int32),
+                    "input_states_1": state[0],
+                    "input_states_2": state[1],
+                },
             )
-        pieces = [
-            (
-                self.tokenizer.id_to_token(e.token) or "",
-                e.frame * FRAME_S,
-                (e.frame + e.duration) * FRAME_S,
-            )
-            for e in emitted
-        ]
-        segments: list[Segment] = []
-        for rep in split_replicas(pieces):
-            text = self.tokenizer.decode(
-                [self.tokenizer.token_to_id(p) for p, *_rest in rep]
-            ).strip()
-            if text:
-                segments.append(Segment(start=rep[0][1], end=rep[-1][2], text=text))
-        return segments
+            pending[0] = (s1, s2)
+            return out.reshape(-1)
+
+        def step(token: int) -> None:
+            state[0], state[1] = pending[0]
+            target[0] = token
+
+        return greedy_tdt(
+            enc.shape[1],
+            joint=joint,
+            step=step,
+            blank=self.blank,
+            vocab=len(self.pieces),
+            durations=list(_DURATIONS),
+            max_symbols=_MAX_SYMBOLS,
+        )
 
 
-def _out_len(n_feats: int) -> int:
-    """Encoder output length from the feature length: three 3×3 convolutions, stride 2."""
-    for _layer in range(3):
-        n = (n_feats + 2 * 1 - 3) // 2 + 1
-        n_feats = n
-    return n_feats
+def _words(pieces: list[tuple[str, int, int]], offset: float) -> list[Word]:
+    """SentencePiece pieces (piece, first frame, end frame) → words: a word starts at "▁";
+    service tokens (<unk>, <|…|>) are dropped."""
+    words: list[Word] = []
+    fresh = True
+    for piece, start, end in pieces:
+        if piece.startswith("<") and piece.endswith(">"):
+            continue
+        fresh = fresh or piece.startswith("▁")
+        text = piece.replace("▁", "")
+        if not text:
+            continue
+        if fresh:
+            words.append(Word(text=text, start=offset + start * FRAME_S, end=0.0))
+            fresh = False
+        else:
+            words[-1].text += text
+        words[-1].end = offset + end * FRAME_S
+    return words
 
 
 _LOCK = threading.Lock()
-_MODEL: Any = None
+_MODEL: OnnxModel | None = None
 
 
-def _use_mlx() -> bool:
-    return sys.platform == "darwin" and platform.machine() == "arm64"
-
-
-def model(on: Progress = noop) -> Any:
-    """One model per process (lazy, under a lock, ~2.4 GB in float32); the memory goes away
-    with the job process (core/worker.py)."""
+def model(on: Progress = noop) -> OnnxModel:
+    """One model per process (lazy, under a lock); the memory goes away with the job process
+    (core/worker.py). The encoder gets this job's CPU budget."""
     global _MODEL
-    current = _MODEL
-    if current is None:
-        with _LOCK:
-            if _MODEL is None:
-                path = snapshot_dir(on)
-                on(None, _("Loading the recognition model…"))
-                from .backends import _CUDA_LOAD_LOCK, _quiet_third_party, _torch_device
+    with _LOCK:
+        if _MODEL is None:
+            folder = model_dir(on)
+            on(None, _("Loading the recognition model…"))
+            from .backends import _asr_cpu_threads
 
-                with _CUDA_LOAD_LOCK, _quiet_third_party():
-                    if _use_mlx():
-                        from .parakeet_mlx import Model as MlxModel
+            _MODEL = OnnxModel(folder, _asr_cpu_threads())
+        return _MODEL
 
-                        _MODEL = MlxModel(path)
-                    else:
-                        _MODEL = Model(path, device=_torch_device())
-            current = _MODEL
-    return current
+
+class OnnxParakeet:
+    """The Recognizer of the server and Linux: Parakeet Ultra on ONNX Runtime."""
+
+    id: str = "parakeet"
+    model: str = MODEL
+    langs: frozenset[str] = LANGS
+
+    def available(self) -> bool:
+        return available()
+
+    def words(self, wav: Path, *, on: Progress = noop) -> list[Word]:
+        """Up to 15 s: one window; longer: windows of speech joined across any pause up to
+        15 s (on a short chunk the model mistakes the language)."""
+        recognizer = model(on)
+        audio = read_wav(wav)
+        window = int(WINDOW_S * SR)
+        if len(audio) <= window:
+            spans = [(0, len(audio))] if len(audio) else []
+        else:
+            on(None, _("Looking for speech…"))
+            spans = group_speech(self._speech(audio, WINDOW_S), window, window)
+        on(None, _("Recognizing…"))
+        words: list[Word] = []
+        for i, (s, e) in enumerate(spans, 1):
+            words += recognizer.words(audio[s:e], offset=s / SR)
+            on(i / len(spans), _("Recognizing…"))
+        return words
+
+    def speech(self, wav: Path, *, max_s: float) -> list[tuple[int, int]]:
+        return self._speech(read_wav(wav), max_s)
+
+    @staticmethod
+    def _speech(audio: Any, max_s: float) -> list[tuple[int, int]]:
+        found = vad.speech_timestamps(audio, max_speech_duration_s=max_s)
+        return [(int(x["start"]), int(x["end"])) for x in found]

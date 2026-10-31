@@ -11,6 +11,7 @@ from mnema.core.backends import (
 )
 from mnema.core.base import MediaError
 from mnema.i18n import using
+from tests import onnx_stubs
 
 
 @pytest.mark.parametrize(
@@ -167,7 +168,7 @@ def test_selected_backend_reports_name_and_model(monkeypatch) -> None:
     monkeypatch.setattr(b.MlxBackend, "available", lambda self: True)
 
     be = b.select_backend("auto", lang="ru", model="ignored-for-parakeet")
-    assert (be.name, be.model) == ("parakeet", "moondream/parakeet-ultra")
+    assert (be.name, be.model) == ("parakeet", "parakeet-ultra")
     be = b.select_backend("gigaam", model="ignored-for-gigaam")
     assert (be.name, be.model) == ("gigaam", "v3_e2e_rnnt")
     be = b.select_backend("auto", lang="ja")  # not a Parakeet language: the platform's whisper
@@ -244,7 +245,7 @@ def test_gigaam_run_short_and_longform(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(b, "extract_audio", fake_extract)
     monkeypatch.setattr(b, "_gigaam_model", lambda: object())
     # the engine boundary: tensor inference and WAV reading
-    monkeypatch.setattr(b, "_read_wav_tensor", lambda w: object())
+    monkeypatch.setattr(b, "read_wav", lambda w: object())
     monkeypatch.setattr(b, "_gigaam_infer", lambda model, chunk: "Привет, как дела?")
 
     be = b.GigaAmBackend()
@@ -315,38 +316,29 @@ def test_whisperx_available_without_cuda_and_device_auto(monkeypatch) -> None:
 
 SR = 16000
 _PAUSED = [
-    {"start": 0, "end": 2 * SR},
-    {"start": int(2.3 * SR), "end": 3 * SR},  # the same breath: joined
-    {"start": 6 * SR, "end": 7 * SR},  # after a 3 s pause: a new reply
+    (0, 2 * SR),
+    (int(2.3 * SR), 3 * SR),  # the same breath: joined
+    (6 * SR, 7 * SR),  # after a 3 s pause: a new reply
 ]
+_BREATH = int(0.6 * SR)
 
 
 @pytest.mark.parametrize(
-    ("speech", "limit", "kw", "expected"),
+    ("speech", "limit", "gap", "expected"),
     [
         # neighbours join while they fit the window; going over starts a new window
-        (
-            [
-                {"start": 0, "end": 100},
-                {"start": 150, "end": 300},
-                {"start": 350, "end": 450},
-                {"start": 500, "end": 600},
-            ],
-            400,
-            {},
-            [(0, 300), (350, 600)],
-        ),
-        ([], 400, {}, []),
-        (_PAUSED, 22 * SR, {}, [(0, 3 * SR), (6 * SR, 7 * SR)]),
-        (_PAUSED, 22 * SR, {"max_gap": 10 * SR}, [(0, 7 * SR)]),  # joined with the given max_gap
+        ([(0, 100), (150, 300), (350, 450), (500, 600)], 400, _BREATH, [(0, 300), (350, 600)]),
+        ([], 400, _BREATH, []),
+        (_PAUSED, 22 * SR, _BREATH, [(0, 3 * SR), (6 * SR, 7 * SR)]),
+        (_PAUSED, 22 * SR, 10 * SR, [(0, 7 * SR)]),  # joined across a longer allowed pause
     ],
 )
-def test_gigaam_group_vad_windows_splits_on_pause(speech, limit, kw, expected) -> None:
+def test_speech_groups_into_windows_split_on_pause(speech, limit, gap, expected) -> None:
     """Replies across a pause > 0.6 s are separate windows with their own times (otherwise the
     other track's reply in the pause landed after the whole chunk)."""
-    from mnema.core.backends import _group_vad_windows
+    from mnema.core.asr_engine import group_speech
 
-    assert _group_vad_windows(speech, limit, **kw) == expected
+    assert group_speech(speech, limit, gap) == expected
 
 
 def test_whisper_segments_split_on_word_pauses() -> None:
@@ -378,9 +370,7 @@ def test_whisper_segments_split_on_word_pauses() -> None:
 def test_gigaam_segment_per_window_with_model_text(monkeypatch) -> None:
     """A long recording: one reply per VAD window with its own time, the text as the model gave
     it (decode returns (text, ids, frames)); a window without text gives no reply. Boundaries:
-    ffmpeg, silero-vad and the gigaam model."""
-    import sys
-    import types
+    ffmpeg, the silero session and the gigaam model."""
     import wave
     from pathlib import Path
 
@@ -414,72 +404,55 @@ def test_gigaam_segment_per_window_with_model_text(monkeypatch) -> None:
             return wav, length
 
     speech = [(1, 3), (10, 12), (20, 21)]
-    vad = types.SimpleNamespace(
-        get_speech_timestamps=lambda *a, **kw: [{"start": s * sr, "end": e * sr} for s, e in speech]
+    onnx_stubs.install(
+        monkeypatch, silero_vad=onnx_stubs.silero(onnx_stubs.speech_probs(speech, 30))
     )
     monkeypatch.setattr(b, "extract_audio", fake_extract)
     monkeypatch.setattr(b, "_gigaam_model", Model)
-    monkeypatch.setattr(b, "_silero_vad", lambda: object())
-    monkeypatch.setitem(sys.modules, "silero_vad", vad)
 
     tr = b.GigaAmBackend().run(Path("call.wav"), lang="ru")
     assert [(s.start, s.end, s.text) for s in tr.segments] == [
-        (1.0, 3.0, "Привет, как дела?"),
-        (10.0, 12.0, "Нормально."),
+        (pytest.approx(1.0, abs=0.05), pytest.approx(3.0, abs=0.05), "Привет, как дела?"),
+        (pytest.approx(10.0, abs=0.05), pytest.approx(12.0, abs=0.05), "Нормально."),
     ]
     assert tr.text == "Привет, как дела? Нормально."
 
 
-@pytest.mark.usefixtures("torch_thread_budget")
-def test_parakeet_run_short_and_long_by_wav_length(monkeypatch, tmp_path) -> None:
-    """A short recording (≤ 15 s) is one window without VAD; longer ones are VAD windows.
-    Replies are as the model gave them (times from the recording start)."""
+def test_parakeet_gives_replies_cleaned_by_the_language(monkeypatch, tmp_path) -> None:
+    """Parakeet recognizes without a hint; replies break at pauses; a given language cleans
+    them, without one the language is named from the text. Boundaries: ffmpeg and the ONNX
+    sessions."""
+    import wave
     from pathlib import Path
 
     from mnema.core import backends as b
+    from mnema.core import parakeet as pk
 
-    wav = tmp_path / "audio.wav"
+    pieces = ["▁Привет", ".", "▁Mm", "-", "hmm", ".", "<blk>"]
+    folder = tmp_path / "onnx"
+    folder.mkdir()
+    for name in pk.ONNX_FILES:
+        (folder / name).write_bytes(b"graph")
+    (folder / pk.VOCAB).write_text("".join(f"{p} {i}\n" for i, p in enumerate(pieces)))
+    monkeypatch.setenv("MNEMA_PARAKEET_ONNX_DIR", str(folder))
 
     def fake_extract(src, dest, **kw):
-        wav.write_bytes(b"\x00" * int(fake_extract.secs * 32000))
-        return wav
-
-    class FakeModel:
-        def transcribe(self, chunk, lang):
-            return [b.Segment(start=0.1, end=1.0, text=f"кусок {lang}")]
+        with wave.open(str(dest), "wb") as w:
+            w.setparams((1, 2, SR, 0, "NONE", "not compressed"))
+            w.writeframes(b"\x01\x00" * 8 * SR)
+        return dest
 
     monkeypatch.setattr(b, "extract_audio", fake_extract)
-    monkeypatch.setattr(b.parakeet, "model", lambda on=None: FakeModel())
-    monkeypatch.setattr(b, "_read_wav_tensor", lambda w: [0] * 10)
-    seen = {}
-    monkeypatch.setattr(
-        b,
-        "_windowed_longform",
-        lambda engine, model, wav, lang, on: seen.update(engine=engine.name, lang=lang) or [],
-    )
-    be = b.ParakeetBackend()
-    fake_extract.secs = 8.3
-    tr = be.run(Path("voice.ogg"), lang="ru")
-    assert (tr.text, tr.language, seen) == ("кусок ru", "ru", {})
-    fake_extract.secs = 40.3
-    be.run(Path("call.wav"), lang="en")
-    assert seen == {"engine": "parakeet", "lang": "en"}
-
-
-def test_parakeet_windows_join_across_pauses_up_to_15s() -> None:
-    """Parakeet windows span up to 15 s across any pause (on a short chunk the model mistakes
-    the language); GigaAM windows end at a 0.6 s pause."""
-    from mnema.core import backends as b
-
-    sr = 16000
-    speech = [
-        {"start": 0, "end": 1 * sr},
-        {"start": 4 * sr, "end": 5 * sr},  # a 3 s pause
-        {"start": 9 * sr, "end": 14 * sr},
-        {"start": 16 * sr, "end": 18 * sr},  # does not fit 15 s from the window start
-    ]
-    assert b._group_window_speech(b.WINDOWED["parakeet"], speech) == [
-        (0, 14 * sr),
-        (16 * sr, 18 * sr),
-    ]
-    assert len(b._group_window_speech(b.WINDOWED["gigaam"], speech)) == 4
+    script = {0: 0, 1: 1, 30: 2, 31: 3, 32: 4, 33: 5}  # «Привет.» at 0 s, «Mm-hmm.» at 2.4 s
+    for lang, texts in (("ru", ["Привет.", "Угу."]), (None, ["Привет.", "Угу."]),
+                        ("en", ["Привет.", "Mm-hmm."])):  # fmt: skip
+        onnx_stubs.install(
+            monkeypatch,
+            silero_vad=onnx_stubs.silero([]),
+            encoder=onnx_stubs.encoder([script]),
+            decoder=onnx_stubs.decoder(len(pieces)),
+        )
+        tr = b.ParakeetBackend().run(Path("voice.ogg"), lang=lang)
+        assert [s.text for s in tr.segments] == texts
+        assert tr.segments[1].start == pytest.approx(2.4)
+        assert tr.language == (lang or "ru")

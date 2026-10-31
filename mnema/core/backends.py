@@ -21,7 +21,8 @@ from pathlib import Path
 from typing import Any, ClassVar, Protocol, runtime_checkable
 
 from ..i18n import _
-from . import parakeet
+from . import asr_engine, parakeet, vad
+from .asr_engine import group_speech, read_wav
 from .audio import extract_audio
 from .base import (
     DEFAULT_LOCAL_MODEL,
@@ -35,8 +36,7 @@ from .base import (
 from .models import Segment, Transcript
 
 logger = logging.getLogger(__name__)
-# torch C++ warnings (silero's "quantize_per_tensor … deprecated") bypass Python and print
-# to stderr over the UI; keep errors only.
+# torch C++ warnings bypass Python and print to stderr over the UI; keep errors only.
 os.environ.setdefault("TORCH_CPP_LOG_LEVEL", "ERROR")
 
 
@@ -348,16 +348,11 @@ def _gigaam_model() -> Any:
 _GIGAAM_SR = 16000
 # Windows ≤ 22 s (margin below the 25 s short-inference limit).
 _GIGAAM_WINDOW_S = 22.0
-_SILERO_VAD: Any = None
 
 
 @contextlib.contextmanager
 def _torch_threads(count: int) -> Any:
-    """A temporary thread budget under _GIGAAM_LOCK; the previous one is restored after errors.
-
-    Silero sets torch to one thread on first import. Its speech search stays single-threaded,
-    but that choice must not stick to the next recognition.
-    """
+    """A temporary torch thread budget; the previous one is restored after errors."""
     import torch
 
     before = torch.get_num_threads()
@@ -379,78 +374,15 @@ def _asr_cpu_threads() -> int:
     return available if requested == "auto" else min(requested, available)
 
 
-def _silero_vad() -> Any:
-    """Lazy silero-vad (weights ship in the pip package: no network, tokens or gated models)."""
-    global _SILERO_VAD
-    if _SILERO_VAD is None:
-        from silero_vad import load_silero_vad
-
-        with _quiet_third_party():  # torch.jit.load inside prints a FutureWarning
-            _SILERO_VAD = load_silero_vad()
-    return _SILERO_VAD
-
-
-def _speech_timestamps(audio: Any, *, max_speech_duration_s: float = float("inf")) -> list[dict]:
-    """Speech search under the caller's _GIGAAM_LOCK: the shared VAD keeps state across windows."""
-    with _torch_threads(1):
-        from silero_vad import get_speech_timestamps
-
-        return get_speech_timestamps(
-            audio, _silero_vad(), sampling_rate=_GIGAAM_SR,
-            max_speech_duration_s=max_speech_duration_s,
-        )  # fmt: skip
-
-
 _GIGAAM_MAX_GAP_S = 0.6  # a longer pause starts a new reply
-
-
-def _group_vad_windows(
-    speech: list[dict], max_window: int, max_gap: int | None = None
-) -> list[tuple[int, int]]:
-    """Join VAD chunks (samples, each ≤ max_window) into inference windows ≤ max_window.
-
-    Neighbours join only across a pause ≤ max_gap (one breath), so each window is one reply
-    with its own start and end. Joining across pauses gave a window one start time, and the
-    other track's reply in the middle landed after the whole window.
-    """
-    gap = max_gap if max_gap is not None else int(_GIGAAM_MAX_GAP_S * _GIGAAM_SR)
-    windows: list[tuple[int, int]] = []
-    cur: tuple[int, int] | None = None
-    for seg in speech:
-        s, e = int(seg["start"]), int(seg["end"])
-        if cur is not None and e - cur[0] <= max_window and s - cur[1] <= gap:
-            cur = (cur[0], e)
-        else:
-            if cur is not None:
-                windows.append(cur)
-            cur = (s, e)
-    if cur is not None:
-        windows.append(cur)
-    return windows
-
-
-def _read_wav_tensor(wav: Path) -> Any:
-    """PCM16 mono WAV (from our extract_audio) → torch.FloatTensor in [-1..1].
-
-    Our own reader instead of silero read_audio / torchaudio.load: torchaudio ≥ 2.9 delegates to
-    torchcodec, which fails to load without a matching ffmpeg. extract_audio guarantees the
-    format, so no third-party decoder is needed.
-    """
-    import wave
-
-    import numpy as np
-    import torch
-
-    with wave.open(str(wav)) as w:
-        audio = np.frombuffer(w.readframes(w.getnframes()), dtype="<i2").astype(np.float32)
-    audio *= 1 / 32768  # in place: a copy costs 4 more bytes per sample (1 GB for 4.7 h)
-    return torch.from_numpy(audio)
 
 
 def _gigaam_infer(model: Any, chunk: Any) -> str:
     """Direct tensor inference: windows are slices of the loaded recording, no file per window."""
+    import numpy as np
     import torch
 
+    chunk = torch.from_numpy(np.ascontiguousarray(chunk))
     chunk = chunk.to(model._device).unsqueeze(0).to(model._dtype)
     length = torch.tensor([chunk.shape[-1]], device=model._device)
     with torch.inference_mode():
@@ -460,8 +392,8 @@ def _gigaam_infer(model: Any, chunk: Any) -> str:
 
 
 class _Windowed:
-    """A windowed engine (GigaAM, Parakeet): silero-vad cuts the recording into windows that are
-    recognized independently. One lock for both engines and the shared stateful VAD."""
+    """A windowed engine (GigaAM): silero cuts the recording into windows that are recognized
+    independently."""
 
     name = ""
     title = ""
@@ -487,24 +419,13 @@ class _GigaAmWindows(_Windowed):
         return [Segment(start=0.0, end=len(chunk) / _GIGAAM_SR, text=text)] if text else []
 
 
-class _ParakeetWindows(_Windowed):
-    # ~15 s windows with no pause limit: on a short chunk the multilingual model mixes up languages
-    name, title, window_s, max_gap_s = "parakeet", "Parakeet", parakeet.WINDOW_S, None
-
-    def load(self, on: Progress) -> Any:
-        return parakeet.model(on)
-
-    def infer(self, model: Any, chunk: Any, lang: str | None) -> list[Segment]:
-        return model.transcribe(chunk, lang)
-
-
-WINDOWED: dict[str, _Windowed] = {e.name: e for e in (_GigaAmWindows(), _ParakeetWindows())}
+WINDOWED: dict[str, _Windowed] = {e.name: e for e in (_GigaAmWindows(),)}
 
 
 def _group_window_speech(engine: _Windowed, speech: list[dict]) -> list[tuple[int, int]]:
     window = int(engine.window_s * _GIGAAM_SR)
     gap = window if engine.max_gap_s is None else int(engine.max_gap_s * _GIGAAM_SR)
-    return _group_vad_windows(speech, window, gap)
+    return group_speech([(int(x["start"]), int(x["end"])) for x in speech], window, gap)
 
 
 def _infer_windows(
@@ -532,14 +453,14 @@ def _infer_windows(
 def _windowed_longform(
     engine: _Windowed, model: Any, wav: Path, lang: str | None, on: Progress
 ) -> list[Segment]:
-    """A long recording: silero-vad → windows → direct tensor inference.
+    """A long recording: silero → windows → direct tensor inference.
 
     Instead of gigaam.transcribe_longform, which needs pyannote VAD (a gated model, HF_TOKEN);
-    silero-vad works offline and gives real per-window progress.
+    silero works offline and gives real per-window progress.
     """
-    audio = _read_wav_tensor(wav)
+    audio = read_wav(wav)
     on(None, _("Looking for speech…"))
-    speech = _speech_timestamps(audio, max_speech_duration_s=engine.window_s)
+    speech = vad.speech_timestamps(audio, max_speech_duration_s=engine.window_s)
     windows = _group_window_speech(engine, speech)
     return _infer_windows(engine, model, audio, windows, base=0, lang=lang, on=on)
 
@@ -580,22 +501,22 @@ class GigaAmBackend(Engine):
                     segments = _windowed_longform(WINDOWED["gigaam"], model, wav, "ru", on)
                 else:
                     on(None, _("Recognizing…"))
-                    text = _gigaam_infer(model, _read_wav_tensor(wav))
+                    text = _gigaam_infer(model, read_wav(wav))
                     segments = [Segment(start=0.0, end=total_duration, text=text)] if text else []
         text = " ".join(s.text for s in segments).strip()
         return Transcript(text=text, segments=segments, language="ru")
 
 
 class ParakeetBackend(Engine):
-    """Parakeet Ultra, the default for Russian: writes Latin terms (API, MCP) better than
-    GigaAM. 25 European languages."""
+    """Parakeet Ultra, the default: 25 European languages, the language named from the text.
+    Recognition is this machine's Recognizer (asr_engine.local_recognizer)."""
 
     id = name = "parakeet"
     title, extra, langs = "Parakeet", "parakeet", parakeet.LANGS
-    model = parakeet.REPO
+    model = parakeet.MODEL
 
     def available(self) -> bool:
-        return parakeet.available()
+        return asr_engine.local_recognizer().available()
 
     def run(
         self,
@@ -605,23 +526,19 @@ class ParakeetBackend(Engine):
         total_duration: float = 0.0,
         on: Progress = noop,
     ) -> Transcript:
+        """A given language only checks the choice and cleans the replies: the model recognizes
+        without a hint; without one the language is named from the recognized text."""
         if lang is not None and lang not in parakeet.LANGS:
             raise MediaError(
                 _("Parakeet does not support the language {lang} — choose Whisper.", lang=lang)
             )
-        engine = WINDOWED["parakeet"]
         with tempfile.TemporaryDirectory() as tmp:
             wav = extract_audio(src, Path(tmp) / "audio.wav", pad_start_ms=300, on=on)
-            with _GIGAAM_LOCK, _torch_threads(_asr_cpu_threads()):
-                model = engine.load(on)
-                if wav.stat().st_size / 32000.0 > parakeet.WINDOW_S:
-                    segments = _windowed_longform(engine, model, wav, lang, on)
-                else:
-                    on(None, _("Recognizing…"))
-                    segments = engine.infer(model, _read_wav_tensor(wav), lang)
-        if lang is None:  # no language given: guess it from the recognized text
+            words = asr_engine.local_recognizer().words(wav, on=on)
+        segments = asr_engine.replies(words)
+        if lang is None:
             lang = parakeet.guess_lang(" ".join(s.text for s in segments))
-            segments = parakeet.tidy(segments, lang)
+        segments = parakeet.tidy(segments, lang)
         text = " ".join(s.text for s in segments).strip()
         return Transcript(text=text, segments=segments, language=lang)
 
@@ -887,12 +804,12 @@ def _wav_bytes(wav: Path, start: int, end: int) -> bytes:
     return out.getvalue()
 
 
-def _utterances(speech: list[dict]) -> list[list[tuple[int, int]]]:
+def _utterances(speech: list[tuple[int, int]]) -> list[list[tuple[int, int]]]:
     """VAD speech (samples) → utterances split at pauses as for GigaAM, each in parts of at most
     _CLOUD_PART_S; a part follows the previous one of its utterance without a pause."""
     gap = int(_GIGAAM_MAX_GAP_S * _GIGAAM_SR)
     out: list[list[tuple[int, int]]] = []
-    for part in _group_vad_windows(speech, int(_CLOUD_PART_S * _GIGAAM_SR), gap):
+    for part in group_speech(speech, int(_CLOUD_PART_S * _GIGAAM_SR), gap):
         if out and part[0] - out[-1][-1][1] <= gap:
             out[-1].append(part)
         else:
@@ -906,7 +823,7 @@ def _answer_text(answer: Any) -> str:
 
 
 class CloudBackend(Engine):
-    """OpenAI recognition: silero-vad cuts the track into utterances, each utterance is one
+    """OpenAI recognition: this machine's speech search cuts the track into utterances, each one
     request (a long one in parts) with the track's previous text as a prompt; several requests
     at once. A failure after retries propagates: no other engine takes over."""
 
@@ -924,7 +841,7 @@ class CloudBackend(Engine):
     def available(self) -> bool:
         import importlib.util
 
-        return all(importlib.util.find_spec(m) is not None for m in ("litellm", "silero_vad"))
+        return importlib.util.find_spec("litellm") is not None and vad.available()
 
     def run(
         self,
@@ -939,10 +856,7 @@ class CloudBackend(Engine):
         with tempfile.TemporaryDirectory() as tmp:
             wav = src if _is_track(src) else extract_audio(src, Path(tmp) / "audio.wav", on=on)
             on(None, _("Looking for speech…"))
-            with _GIGAAM_LOCK:
-                speech = _speech_timestamps(
-                    _read_wav_tensor(wav), max_speech_duration_s=_CLOUD_PART_S
-                )
+            speech = asr_engine.local_recognizer().speech(wav, max_s=_CLOUD_PART_S)
             segments = self._recognize(wav, _utterances(speech), lang, on)
         text = " ".join(s.text for s in segments)
         return Transcript(text=text, segments=segments, language=lang)

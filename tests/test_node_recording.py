@@ -318,7 +318,7 @@ def test_auto_with_only_gigaam_validates_language_before_claim(tmp_path, monkeyp
             object()
             if n == "gigaam"
             else None
-            if n in ("whisperx", "mlx_whisper", "silero_vad")
+            if n in ("whisperx", "mlx_whisper", "onnxruntime")
             else find(n, *a, **kw)
         ),
     )

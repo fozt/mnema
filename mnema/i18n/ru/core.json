@@ -55,9 +55,8 @@
   "Unknown backend: {name} ({allowed})": "Неизвестный backend: {name} ({allowed})",
   "No transcription engine is installed: install the full extra (uv sync --extra full) or set a runner (--runner/MNEMA_RUNNER).": "Нет установленного движка транскрибации: поставьте extra full (uv sync --extra full) или задайте раннер (--runner/MNEMA_RUNNER).",
   "huggingface_hub is missing — reinstall Mnema (./install.sh client or ./install.sh server).": "Нет huggingface_hub — переустановите Mnema (./install.sh client или ./install.sh server).",
-  "The Parakeet weights do not match the encoder: {name} is missing": "Веса Parakeet не подходят к энкодеру: нет {name}",
-  "The MLX engine does not support this Parakeet configuration": "Конфигурация Parakeet не поддерживается MLX-движком",
-  "Unknown Parakeet weight: {name}": "Неизвестный вес Parakeet: {name}",
   "{name} recognition is not installed on this computer": "Распознавание {name} не установлено на этом компьютере",
-  "No OpenAI key for recognition. Set it in Mnema settings on the Mac": "Нет ключа OpenAI для распознавания. Задайте его в настройках Mnema на Mac"
+  "No OpenAI key for recognition. Set it in Mnema settings on the Mac": "Нет ключа OpenAI для распознавания. Задайте его в настройках Mnema на Mac",
+  "The recognition model did not download correctly. Try again": "Модель распознавания скачалась с ошибкой. Попробуйте ещё раз",
+  "No {name} in {folder}": "В папке {folder} нет {name}"
 }
