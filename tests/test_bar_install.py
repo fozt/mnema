@@ -74,6 +74,7 @@ def test_launch_agent_opens_the_running_bundle(home, monkeypatch, tmp_path) -> N
 def test_mac_install_from_the_sources_is_sent_to_the_dmg(home, monkeypatch, capsys) -> None:
     """`mnema-bar install` on a Mac builds nothing and starts nothing: the app is the DMG."""
     monkeypatch.setattr(install.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(install.platform, "machine", lambda: "arm64")
     monkeypatch.setattr(sys, "argv", ["mnema-bar", "install"])
     with pytest.raises(SystemExit) as refused:
         main()
@@ -88,6 +89,7 @@ def test_update_of_a_mac_app_built_from_the_sources_is_sent_to_the_dmg(
     """The 0.4 update of a source-built Mac app runs install_release of the new release: one
     line naming the DMG, the old app stays."""
     monkeypatch.setattr(install.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(install.platform, "machine", lambda: "arm64")
     with pytest.raises(SystemExit) as refused:
         install.install_release(terminal=terminal)
     assert refused.value.code == DMG
