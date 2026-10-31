@@ -1303,7 +1303,8 @@ def cmd_serve(args) -> None:
     from ..cleanup import remove_old_weights_in_background
 
     remove_old_weights_in_background(server=Settings().container)
-    uvicorn.run(app, host=args.host, port=port, log_level="warning")
+    # idle connections outlive the clients' pools (phone 30 s, httpx 5 s), not uvicorn's 5 s
+    uvicorn.run(app, host=args.host, port=port, log_level="warning", timeout_keep_alive=75)
 
 
 def _node_root(args) -> Path:
