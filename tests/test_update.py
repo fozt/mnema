@@ -18,6 +18,10 @@ from mnema import __version__, install_setup, update
 from mnema.core import base
 from mnema.core.base import MediaError
 
+# the next major: newer than the running version whatever it is
+NEWER = f"{int(__version__.split('.')[0]) + 1}.0.0"
+AFTER_NEWER = f"{int(__version__.split('.')[0]) + 2}.0.0"
+
 
 @pytest.fixture
 def release(monkeypatch, tmp_path):
@@ -32,13 +36,13 @@ def release(monkeypatch, tmp_path):
         "find_spec",
         lambda name, *a: object() if name == "pystray" else real_find_spec(name, *a),
     )
-    # 99.0.0: a release newer than any real one
-    state = {"version": "99.0.0", "calls": [], "commands": [], "failure": ""}
+    # a release newer than any installed one: the next major
+    state = {"version": NEWER, "calls": [], "commands": [], "failure": ""}
 
     def archive(extra=None):
         files = {
             "pyproject.toml": (
-                '[project]\nname="mnema"\nversion="99.0.0"\n'
+                f'[project]\nname="mnema"\nversion="{NEWER}"\n'
                 '[project.scripts]\nmnema = "mnema.cli:main"\n'
             ),
             "uv.lock": "locked",
@@ -87,7 +91,7 @@ def release(monkeypatch, tmp_path):
 
 def test_check_shows_only_application_version_without_git_or_dependency_resolution(release):
     found = update.check()
-    assert found.any and found.release is not None and found.release.version == "99.0.0"
+    assert found.any and found.release is not None and found.release.version == NEWER
     assert release["commands"] == []
     assert release["calls"] == ["/latest"]
 
@@ -117,7 +121,7 @@ def test_http_redirect_is_rejected_before_request_even_if_next_hop_is_https(
         if archive:
             update._download(
                 update.Release(
-                    version="99.0.0", archive="https://release.test/archive", sha256="0" * 64
+                    version=NEWER, archive="https://release.test/archive", sha256="0" * 64
                 ),
                 tmp_path / "release.tar.gz",
             )
@@ -137,7 +141,7 @@ def test_apply_prepares_new_locked_environment_and_never_changes_checkout(
     monkeypatch.setenv("PYTHONPATH", str(checkout))
     monkeypatch.setenv("PYTHONEXECUTABLE", str(checkout / ".venv/bin/python"))
     result = update.apply()
-    assert result.version == "99.0.0" and result.changed
+    assert result.version == NEWER and result.changed
     assert result.python is not None
     assert Path(result.python).parent.parent.parent.is_relative_to(tmp_path / "data/mnema/releases")
     commands = release["commands"]
@@ -208,7 +212,7 @@ def test_damaged_archive_never_runs_installer(release, tmp_path, damage):
     elif damage == "traversal":
         release["archive"] = release["build_archive"]({"../outside": "escape"})
     else:
-        release["version"] = "98.0.0"
+        release["version"] = AFTER_NEWER
     with pytest.raises(MediaError):
         update.apply()
     assert release["commands"] == []
@@ -328,7 +332,7 @@ def test_mac_update_tells_why_the_new_app_did_not_build(release, tmp_path, monke
 def test_interrupted_attempts_are_removed_but_installed_versions_kept(release, tmp_path):
     """An exit or a crash during preparation must not leave its folder behind for good."""
     root = tmp_path / "data/mnema/releases"
-    (root / "99.0.0-abc123/.venv").mkdir(parents=True)
+    (root / f"{NEWER}-abc123/.venv").mkdir(parents=True)
     (root / "0.1.0").mkdir()
     (root / "0.1.0/.mnema-installed.json").write_text("{}")
     (root / "personal").mkdir()
@@ -367,15 +371,15 @@ def test_github_release_assets_are_followed_to_their_host_over_https(release, mo
         seen.append(url)
         if request.url.host == "github.com":
             if "/latest/download/" in path:
-                tagged = url.replace("/latest/download/", "/download/v99.0.0/")
+                tagged = url.replace("/latest/download/", f"/download/v{NEWER}/")
                 return httpx.Response(302, headers={"Location": tagged})
             asset = f"https://release-assets.githubusercontent.com/asset/{path.rsplit('/', 1)[1]}"
             return httpx.Response(302, headers={"Location": asset + "?sp=r&sig=signed"})
         assert request.url.host == "release-assets.githubusercontent.com"
         if path.endswith("/mnema-release.json"):
             manifest = {
-                "version": "99.0.0",
-                "archive": f"{releases}/download/v99.0.0/mnema-99.0.0.tar.gz",
+                "version": NEWER,
+                "archive": f"{releases}/download/v{NEWER}/mnema-{NEWER}.tar.gz",
                 "sha256": hashlib.sha256(release["archive"]).hexdigest(),
             }
             return httpx.Response(
@@ -386,11 +390,11 @@ def test_github_release_assets_are_followed_to_their_host_over_https(release, mo
         return httpx.Response(200, content=release["archive"])
 
     monkeypatch.setattr(update, "TRANSPORT", httpx.MockTransport(github))
-    assert update.apply().version == "99.0.0"
+    assert update.apply().version == NEWER
     assert all(url.startswith("https://") for url in seen)
     assert [url for url in seen if "release-assets" in url] == [
         "https://release-assets.githubusercontent.com/asset/mnema-release.json?sp=r&sig=signed",
-        "https://release-assets.githubusercontent.com/asset/mnema-99.0.0.tar.gz?sp=r&sig=signed",
+        f"https://release-assets.githubusercontent.com/asset/mnema-{NEWER}.tar.gz?sp=r&sig=signed",
     ]
 
 
@@ -434,12 +438,12 @@ def test_download_reports_its_share_and_the_steps_after_it_have_none(release, mo
 
     update.apply(on=lambda share, message: steps.append((share, message)))
 
-    downloading = "Скачиваю Mnema 99.0.0…"
+    downloading = f"Скачиваю Mnema {NEWER}…"
     shares = [share for share, message in steps if message == downloading]
     assert shares[0] is None and shares[-1] == 1.0
     assert shares[1:] == sorted(shares[1:]) and len(shares) == 5  # a share per piece
     after = steps[len(shares) :]
-    assert [m for _s, m in after] == ["Готовлю новую версию…", "Устанавливаю Mnema 99.0.0…"]
+    assert [m for _s, m in after] == ["Готовлю новую версию…", f"Устанавливаю Mnema {NEWER}…"]
     assert all(share is None for share, _m in after)
 
 
@@ -474,9 +478,9 @@ def test_terminal_prints_each_step_once(release, monkeypatch, capsys):
 
     lines = capsys.readouterr().out.splitlines()
     assert lines[:3] == [
-        "Скачиваю Mnema 99.0.0…",
+        f"Скачиваю Mnema {NEWER}…",
         "Готовлю новую версию…",
-        "Устанавливаю Mnema 99.0.0…",
+        f"Устанавливаю Mnema {NEWER}…",
     ]
 
 
