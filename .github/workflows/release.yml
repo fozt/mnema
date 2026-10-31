@@ -32,6 +32,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v10.3.0
+        with:
+          version: "0.13.6"
       - name: Tag matches the version
         run: |
           version=$(uv run --no-project --python 3.12 python -c \
@@ -76,8 +78,17 @@ jobs:
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v7
-      # no uv cache: a tag cannot reuse it, and gigabytes per release would push CI caches out
+      # setup-uv prunes the cache to what uv built from source, so a tag's own copy stays small
       - uses: astral-sh/setup-uv@v10.3.0
+        with:
+          version: "0.13.6"
+          enable-cache: true
+      # CI saves this one on main (a tag sees only its own caches and those of main), the release
+      # never saves
+      - uses: actions/cache/restore@v6
+        with:
+          path: ~/Library/Caches/org.swift.swiftpm
+          key: swiftpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('mnema/bar/macos/Package.resolved') }}
       - uses: actions/download-artifact@v8
         with:
           name: ffmpeg
@@ -224,6 +235,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v10.3.0
+        with:
+          version: "0.13.6"
       - uses: actions/download-artifact@v8
         with:
           path: artifacts

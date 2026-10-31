@@ -24,6 +24,7 @@ jobs:
       # setup-uv publishes no major tags since v8, so the release is pinned exactly.
       - uses: astral-sh/setup-uv@v10.3.0
         with:
+          version: "0.13.6"
           enable-cache: true
       # The core and the tools (the default group), Python from .python-version; the tests don't
       # import the recognition engines.
@@ -40,8 +41,20 @@ jobs:
         working-directory: mnema/bar/macos
     steps:
       - uses: actions/checkout@v7
+      # Saved on main only: a tag sees the caches of its own ref and of main, and the release
+      # restores this one. Without Package.resolved the key is just the platform.
+      - id: swiftpm
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/Library/Caches/org.swift.swiftpm
+          key: swiftpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('mnema/bar/macos/Package.resolved') }}
       - run: swift build
       - run: swift test
+      - if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.swiftpm.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ~/Library/Caches/org.swift.swiftpm
+          key: ${{ steps.swiftpm.outputs.cache-primary-key }}
 
   android:
     runs-on: ubuntu-latest
