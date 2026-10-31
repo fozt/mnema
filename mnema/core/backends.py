@@ -843,7 +843,7 @@ class WhisperBackend(Engine):
 # OpenAI in the cloud: the user's choice is the model, the key is the user's recognition key
 CLOUD_MODELS = ("openai/gpt-4o-transcribe", "openai/gpt-4o-mini-transcribe")
 NO_CLOUD_KEY = "No OpenAI key for recognition. Set it in Mnema settings on the Mac"
-_CLOUD_PART_S = 600.0  # the API takes up to 25 MB, about 13 minutes of our WAV
+_CLOUD_PART_S = 150.0  # the models answer up to 2,000 tokens: a longer part would be cut short
 _CLOUD_PROMPT_WORDS = 200
 _CLOUD_REQUESTS = 4
 

@@ -112,20 +112,22 @@ def test_each_utterance_is_one_request_and_keeps_its_time(tmp_path, speech, sent
 def test_a_long_utterance_goes_in_parts_with_the_text_before_as_prompt(
     tmp_path, speech, sent
 ) -> None:
-    """A 12-minute utterance is two requests of at most 10 minutes split at a pause; the second
-    one's prompt is the last 200 words of the first; the chosen language goes to every part."""
-    speech += [(0, 300), (300.3, 720)]
+    """Continuous speech goes in parts of at most 2.5 minutes, so an answer never reaches the
+    model's output limit; each part's prompt is the last 200 words before it; the chosen language
+    goes to every part."""
+    speech += [(0, 100), (100.3, 200), (200.3, 300)]
     words = [f"слово{i}" for i in range(250)]
     sent.answers[1] = " ".join(words)
-    wav = _track(tmp_path / "mic.wav", 721)
+    wav = _track(tmp_path / "mic.wav", 301)
     tr = _recognize(wav, model="openai/gpt-4o-mini-transcribe", lang="ru")
-    first, second = sent.calls
-    assert (first["seconds"], second["seconds"]) == (300.0, 419.7)
+    first, second, third = sent.calls
+    assert max(c["seconds"] for c in sent.calls) <= 150
     assert not first.get("prompt")
     assert second["prompt"] == " ".join(words[-200:])
+    assert third["prompt"].endswith("реплика 2")
     assert {c["language"] for c in sent.calls} == {"ru"}
     assert {c["model"] for c in sent.calls} == {"openai/gpt-4o-mini-transcribe"}
-    assert [(s.start, s.end) for s in tr.segments] == [(0.0, 300.0), (300.3, 720.0)]
+    assert [(s.start, s.end) for s in tr.segments] == [(0.0, 100.0), (100.3, 200.0), (200.3, 300.0)]
     assert tr.language == "ru"
 
 

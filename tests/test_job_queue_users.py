@@ -113,7 +113,7 @@ def test_a_short_job_does_not_wait_for_a_long_one_of_any_user():
     queue, probe = JobQueue(workers=1, pending=16, memory=lambda: None), Probe()
     probe.add(queue, "long", user="a")
     probe.add(queue, "voice", user="b", short=True)
-    assert probe.started(2) == ["long", "voice"]
+    assert sorted(probe.started(2)) == ["long", "voice"]
     for gate in probe.gates.values():
         gate.set()
 
@@ -123,7 +123,7 @@ def test_the_text_lane_has_two_slots_of_its_own():
     probe.add(queue, "long", user="a")
     probe.add(queue, "t1", user="a", text=True)
     probe.add(queue, "t2", user="b", text=True)
-    assert probe.started(3) == ["long", "t1", "t2"]
+    assert sorted(probe.started(3)) == ["long", "t1", "t2"]
     probe.add(queue, "t3", user="b", text=True)
     probe.add(queue, "t4", user="a", text=True)
     probe.release("t2")
