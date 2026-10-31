@@ -274,38 +274,17 @@ def _en_tracks() -> list[Track]:
     ]
 
 
-@pytest.mark.parametrize("deepl", [True, False])
-def test_finalize_without_llm_translates_final_via_deepl(monkeypatch, tmp_path, deepl) -> None:
-    """Finalization without an LLM does NOT fail and saves the transcript; with DeepL the final
-    text is translated by DeepL, without it the file has no translation.
-
-    Without a model the final translation does not break finalization before save()."""
-    import mnema.live.translate as translate_mod
-
+def test_finalize_without_llm_saves_transcript_without_translation(monkeypatch, tmp_path) -> None:
+    """Without a model the final translation does not break finalization: the transcript is
+    saved, there is no translation file."""
     _patch_build(monkeypatch, {})
     _no_llm(monkeypatch)  # llm_available() → False
-    if deepl:
-        monkeypatch.setenv("DEEPL_API_KEY", "dl-test")
-    else:
-        monkeypatch.delenv("DEEPL_API_KEY", raising=False)
-
-    class FakeDeepL:
-        def __init__(self, to_lang, **_kw) -> None:
-            self.to_lang = to_lang
-
-        def push(self, text, on_partial=None) -> str:
-            return "итоговый перевод"
-
-    monkeypatch.setattr(translate_mod, "DeepLTranslator", FakeDeepL)
 
     prepared = build_live(LiveConfig(translate="ru"), base=tmp_path / "live-x")
     result, _full = finalize_live(prepared, _en_tracks(), retitle=False)
 
-    assert result.transcript_txt.exists()  # finalization did not fail: the transcript is on disk
-    tr_md = prepared.base / "translation.md"
-    assert tr_md.exists() == deepl
-    if deepl:
-        assert "итоговый перевод" in tr_md.read_text(encoding="utf-8")
+    assert result.transcript_txt.exists()
+    assert not (prepared.base / "translation.md").exists()
 
 
 def test_finalize_empty_wav_keeps_live_text(monkeypatch, tmp_path) -> None:
@@ -329,7 +308,6 @@ def test_finalize_dialog_pins_offline_speaker_labels(monkeypatch, tmp_path) -> N
     import mnema.live.system_audio as system_audio_mod
 
     _patch_build(monkeypatch, {})
-    _no_llm(monkeypatch)  # retitle is not called
 
     class FakeSystem:
         def __init__(self, *a, **k) -> None:
@@ -353,20 +331,13 @@ def test_finalize_dialog_pins_offline_speaker_labels(monkeypatch, tmp_path) -> N
             "language": "en",
         },
     )
-    import mnema.live.translate as translate_mod
-
     translated: dict = {}
 
-    class FakeDeepL:  # without an LLM the final text is translated by DeepL (the user's real setup)
-        def __init__(self, to_lang, **_kw) -> None:
-            pass
+    def fake_translate(text, **_kw) -> str:
+        translated["input"] = text
+        return "перевод"
 
-        def push(self, text, on_partial=None) -> str:
-            translated["input"] = text
-            return "перевод"
-
-    monkeypatch.setenv("DEEPL_API_KEY", "dl-test")
-    monkeypatch.setattr(translate_mod, "DeepLTranslator", FakeDeepL)
+    monkeypatch.setattr(setup_mod.claude, "translate", fake_translate)
 
     prepared = build_live(LiveConfig(system=True, translate="ru"), base=tmp_path / "live-x")
     _write_wav(prepared)

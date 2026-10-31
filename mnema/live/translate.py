@@ -1,5 +1,4 @@
-"""Live sentence-by-sentence translation with a sliding context (DeepL with DEEPL_API_KEY, else
-the LLM).
+"""Live sentence-by-sentence translation with a sliding context (by the configured model).
 
 Only the newly committed sentence is translated, with the last N lines as context (terminology,
 pronouns, coherence); earlier lines are never rewritten, so nothing flickers. The context holds
@@ -10,25 +9,15 @@ like "So..." come out incoherent). The final full-text translation is claude.tra
 
 from __future__ import annotations
 
-import logging
 import re
 import threading
-import time
 from collections import deque
 from collections.abc import Callable
 from typing import Protocol
 
-import httpx
-
-from ..core.base import MediaError, noop
-from ..i18n import _
+from ..core.base import noop
 from ..llm import claude
 from ..llm.config import LLMSettings
-
-logger = logging.getLogger(__name__)
-
-# transient DeepL answers: a retry helps (unlike 400/403/456)
-_DEEPL_TRANSIENT = {429, 500, 502, 503, 504, 529}
 
 # the model prompt stays as it is: prompts are tuned separately
 _SYSTEM = (
@@ -157,127 +146,16 @@ class LiveTranslator:
         return out
 
 
-# DeepL target_lang codes: en/pt without a region are deprecated, pick the variant explicitly
-_DEEPL_TARGET = {"en": "EN-US", "pt": "PT-BR"}
-
-
-class DeepLTranslator:
-    """Live translator over the DeepL API: does not stream (on_partial is ignored) but answers
-    fast (~0.3–0.7 s per phrase). Plain httpx, no deepl package.
-
-    A key ending in ":fx" is the free plan (api-free.deepl.com), otherwise api.deepl.com. The
-    context is the same "line ⟶ translation" pairs in the context parameter (DeepL uses it but
-    does not translate it). An error or timeout raises: the session worker commits the line
-    without a translation and the session goes on.
-    """
-
-    def __init__(
-        self,
-        to_lang: str,
-        *,
-        api_key: str | None = None,
-        context: int = 8,
-        context_lines: Callable[[], list[str]] | None = None,
-        timeout: float = 5.0,
-    ) -> None:
-        from ..config import Settings
-
-        key = api_key or Settings().deepl_api_key or ""
-        if not key:
-            raise MediaError(_("DeepL translation needs DEEPL_API_KEY."))
-        self._key = key
-        host = "api-free.deepl.com" if key.endswith(":fx") else "api.deepl.com"
-        self._url = f"https://{host}/v2/translate"
-        low = to_lang.lower()
-        self._target = _DEEPL_TARGET.get(low, low.upper())
-        self._timeout = timeout
-        self._context_lines = context_lines
-        self._window = _ContextWindow(context)
-
-    def _request(self, payload: dict) -> str:
-        resp = httpx.post(
-            self._url,
-            json=payload,
-            headers={"Authorization": f"DeepL-Auth-Key {self._key}"},
-            timeout=self._timeout,
-        )
-        resp.raise_for_status()
-        return str(resp.json()["translations"][0]["text"]).strip()
-
-    def push(self, sentence: str, on_partial: Callable[[str], None] | None = None) -> str:
-        sentence = sentence.strip()
-        if not sentence:
-            return ""
-        if self._context_lines is not None:
-            prev = self._context_lines()
-        else:
-            self._window.add(sentence)
-            prev = self._window.prev()
-        payload: dict = {"text": [sentence], "target_lang": self._target}
-        if prev:
-            payload["context"] = "\n".join(prev)
-        try:
-            out = self._request(payload)
-        except (httpx.TransportError, httpx.TimeoutException):
-            time.sleep(0.4)  # transient network failure: one quick retry
-            out = self._request(payload)
-        except httpx.HTTPStatusError as e:
-            if e.response.status_code not in _DEEPL_TRANSIENT:
-                raise  # 400/403/456 (quota, key): a retry will not help, the LLM fallback will
-            time.sleep(0.4)
-            out = self._request(payload)
-        if self._context_lines is None:
-            self._window.resolve(sentence, out)
-        return out
-
-
-class _FallbackTranslator:
-    """DeepL with an LLM fallback: when DeepL fails even after a retry, the phrase is translated
-    by the LLM instead of staying untranslated. The LLM translator is created on the first
-    failure, so the DeepL path never touches the LLM."""
-
-    def __init__(
-        self, primary: PushTranslator, make_fallback: Callable[[], PushTranslator]
-    ) -> None:
-        self._primary = primary
-        self._make_fallback = make_fallback
-        self._fallback: PushTranslator | None = None
-
-    def push(self, sentence: str, on_partial: Callable[[str], None] | None = None) -> str:
-        try:
-            return self._primary.push(sentence, on_partial)
-        except Exception:  # noqa: BLE001 - DeepL did not answer even after a retry
-            logger.warning(
-                "DeepL did not answer, translating the phrase with the LLM", exc_info=True
-            )
-            if self._fallback is None:
-                self._fallback = self._make_fallback()
-            return self._fallback.push(sentence, on_partial)
-
-
 def make_live_translator(
     to_lang: str, context_lines: Callable[[], list[str]] | None = None
 ) -> PushTranslator:
-    """Live translator of one direction: DeepL with DEEPL_API_KEY (faster and cheaper), else the
-    LLM. With a model configured, DeepL falls back to the LLM instead of losing the phrase.
-    """
-    from ..config import Settings
-
-    if Settings().deepl_api_key:
-        deepl = DeepLTranslator(to_lang, context_lines=context_lines)
-        if claude.llm_available():
-            return _FallbackTranslator(
-                deepl, lambda: LiveTranslator(to_lang, context_lines=context_lines)
-            )
-        return deepl
+    """Live translator of one direction: the configured model."""
     return LiveTranslator(to_lang, context_lines=context_lines)
 
 
 def live_translate_available() -> bool:
-    """Whether live translation is possible: DeepL (DEEPL_API_KEY) or a configured model."""
-    from ..config import Settings
-
-    return bool(Settings().deepl_api_key) or claude.llm_available()
+    """Whether live translation is possible: a model is configured."""
+    return claude.llm_available()
 
 
 def detect_lang(text: str) -> str:
@@ -321,7 +199,7 @@ class LiveDialog:
     translated into the other side's language (I read it aloud); any other phrase gets «они» and
     is translated into mine. The labels are context for the model, not interface text. The
     context is shared by both directions, so the translator sees the whole dialog.
-    make_translator builds the translator of each direction (DeepL or LLM; LLM by default).
+    make_translator builds the translator of each direction (the model by default).
     """
 
     def __init__(

@@ -35,7 +35,6 @@ def model(monkeypatch):
     """The node model at the litellm boundary: answers "<lang>: <phrase>", FAIL means no balance."""
     import litellm
 
-    monkeypatch.delenv("DEEPL_API_KEY", raising=False)
     calls: list[dict] = []
 
     def completion(**kw):

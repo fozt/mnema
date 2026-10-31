@@ -19,6 +19,5 @@
   "Couldn't connect to the server: {error}": "Не удалось подключиться к серверу: {error}",
   "the server closed the connection": "сервер закрыл соединение",
   "Lost connection to the server: {error}": "Связь с сервером потеряна: {error}",
-  "No connection to the server: the phrase was not translated": "Нет связи с сервером: фраза без перевода",
-  "DeepL translation needs DEEPL_API_KEY.": "Нет DEEPL_API_KEY для перевода через DeepL."
+  "No connection to the server: the phrase was not translated": "Нет связи с сервером: фраза без перевода"
 }

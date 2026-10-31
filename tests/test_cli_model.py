@@ -79,7 +79,7 @@ def test_four_steps_write_the_model_and_keep_other_lines(
     """Provider by number; a wrong key gives the reason and asks again; Enter takes the
     recommended model; once it answers, two lines in .env (others intact, 600, folder 700), no
     key in the output; LLMSettings sees the model without a restart."""
-    path = _env("# мои настройки", "MNEMA_RUNNER=http://runner:8000", "DEEPL_API_KEY=deepl-keep")
+    path = _env("# мои настройки", "MNEMA_RUNNER=http://runner:8000", "HF_TOKEN=hf-keep")
     asked = _typed(monkeypatch, ["1", ""], [BAD, GOOD])
     _run()
     out = capsys.readouterr()
@@ -92,7 +92,7 @@ def test_four_steps_write_the_model_and_keep_other_lines(
     assert call["max_tokens"] <= 2048 and call["stream"] is True
     text = path.read_text()
     assert text.startswith("# мои настройки\nMNEMA_RUNNER=http://runner:8000\n")
-    assert "DEEPL_API_KEY=deepl-keep" in text
+    assert "HF_TOKEN=hf-keep" in text
     assert path.stat().st_mode & 0o777 == 0o600 and path.parent.stat().st_mode & 0o777 == 0o700
     settings = LLMSettings()
     assert (settings.source, settings.model, settings.api_key) == (
@@ -156,10 +156,10 @@ def test_failed_check_goes_back_to_the_model(monkeypatch, capsys, gemini, model_
     written only after an answer."""
     calls, answers = model_calls
     answers["gemini/gemini-flash-latest"] = error("models/gemini-flash-latest is not found", 404)
-    path = _env("DEEPL_API_KEY=deepl-keep")
+    path = _env("HF_TOKEN=hf-keep")
 
     def typed_model(prompt: str = "") -> str:
-        assert path.read_text() == "DEEPL_API_KEY=deepl-keep\n"  # unchanged before the check
+        assert path.read_text() == "HF_TOKEN=hf-keep\n"  # unchanged before the check
         return lines.pop(0)
 
     lines = ["1", "", "1"]

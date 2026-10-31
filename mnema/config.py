@@ -162,7 +162,6 @@ class Settings(RuntimeSettings):
     job_workers: int = Field(default=1, ge=1, validation_alias="MNEMA_JOB_WORKERS")
     job_queue_size: int = Field(default=16, ge=0, validation_alias="MNEMA_JOB_QUEUE_SIZE")
     live_connections: int = Field(default=2, ge=1, validation_alias="MNEMA_LIVE_CONNECTIONS")
-    deepl_api_key: str | None = Field(default=None, validation_alias="DEEPL_API_KEY")
     live_dir: str | None = Field(default=None, validation_alias="MNEMA_LIVE_DIR")
     # HTTP client (MnemaClient)
     http_connect_timeout: float = Field(default=10.0, validation_alias="MNEMA_HTTP_CONNECT_TIMEOUT")
