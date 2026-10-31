@@ -119,7 +119,7 @@ class SettingsViewModel(private val graph: AppGraph) : ViewModel() {
         addLine = Line(CHECKING, Tone.BUSY)
         viewModelScope.launch {
             val result = try {
-                joinNode(text, Build.MODEL, graph::runner, graph.settings)
+                joinNode(text, Build.MODEL, graph::runner, graph.settings, graph.sync::joined)
             } catch (e: IOException) {
                 Log.w(LOG_TAG, "Node not saved", e)
                 JoinResult.Refused(SAVE_FAILED)

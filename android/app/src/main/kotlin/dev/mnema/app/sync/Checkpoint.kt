@@ -33,6 +33,14 @@ fun saveCheckpoint(file: File, state: Checkpoint) {
     atomicReplace(file, (wire.encodeToString(Checkpoint.serializer(), state) + "\n").toByteArray(), private = true)
 }
 
+/** foreign after a new device token at the address of the last sync: whose library the server has is unknown until its list. */
+internal const val UNCHECKED_LIBRARY = "?"
+
+internal fun markUnchecked(file: File, server: String) {
+    val state = loadCheckpoint(file)
+    if (state.server == server && state.foreign != UNCHECKED_LIBRARY) saveCheckpoint(file, state.copy(foreign = UNCHECKED_LIBRARY))
+}
+
 /** The folder's transcript and summary match the last sync with [server], and its library is still there: the audio can go, the texts stay there. */
 internal fun textsOnServer(root: File, dir: File, state: Checkpoint, server: String): Boolean {
     if (state.server != server || state.foreign.isNotEmpty()) return false

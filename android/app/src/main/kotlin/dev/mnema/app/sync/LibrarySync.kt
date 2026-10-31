@@ -125,7 +125,9 @@ class LibrarySync(
                 previous = Checkpoint(server = server, library = number)
                 return true
             }
-            if (loaded.server == server && loaded.library.isNotEmpty() && number.isNotEmpty() && loaded.library != number) {
+            // after a new device token a checkpoint without a number is no proof of the library either
+            val check = loaded.library.isNotEmpty() || loaded.foreign == UNCHECKED_LIBRARY
+            if (loaded.server == server && check && number.isNotEmpty() && loaded.library != number) {
                 previous = loaded.copy(foreign = number)
                 save()
                 return false

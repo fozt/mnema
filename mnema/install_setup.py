@@ -138,11 +138,14 @@ def exchange_invite(url: str, code: str, *, transport: Any = None) -> str:
 def connect(url: str, token: str) -> None:
     """Connect this device to a server, for the installer and the Server window alike: the
     address and device token go to ~/.config/mnema/.env, and a new library (no sync checkpoint
-    yet) starts with this server. Where to process is not decided here
-    (node.selected_processing)."""
-    from .config import library_root, set_env
-    from .sync.state import checkpoint_path, initialize_library
+    yet) starts with this server. Another token than the saved one leaves the last sync's library
+    unchecked. Where to process is not decided here (node.selected_processing)."""
+    from .config import Settings, library_root, set_env
+    from .sync.state import checkpoint_path, initialize_library, mark_unchecked, server_key
 
+    saved = Settings()
+    if saved.runner != url or (saved.token or "") != token:
+        mark_unchecked(checkpoint_path(), server_key(url))
     set_env({"MNEMA_RUNNER": url, "MNEMA_TOKEN": token})
     initialize_library(library_root(), checkpoint_path())
 

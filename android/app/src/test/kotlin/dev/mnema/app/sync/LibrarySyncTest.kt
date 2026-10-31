@@ -1248,6 +1248,7 @@ class LibrarySyncTest {
             root = temp.newFolder("decisions-$i")
             checkpoint = File(temp.newFolder("decisions-state-$i"), "sync.json")
             library.records.clear(); library.sections.clear(); busy.clear(); library.before = { null }
+            selected = Connection(server.url("/").toString().trimEnd('/'), "private-token")
             library.number = case["library"]?.jsonPrimitive?.content ?: OWN_LIBRARY
             val ids = strings("synced").associateWith { synced(it).second }
             val names = ids.entries.associate { (path, id) -> id to path }
@@ -1260,6 +1261,10 @@ class LibrarySyncTest {
             pairs("server_renamed").forEach { (from, to) -> remote(ids.getValue(from)).path = to }
             if (case["checkpoint_lost"]?.jsonPrimitive?.boolean == true) assertTrue(checkpoint.delete())
             strings("busy").forEach { busy += ids.getValue(it) }
+            if (case["rejoined"]?.jsonPrimitive?.boolean == true) runBlocking { // a new invitation at the same address
+                SyncController(root, checkpoint, { selected }, { emptySet() }, {}, {}).joined(selected!!.url)
+                selected = selected!!.copy(token = "another")
+            }
             case["server_library"]?.let { library.number = it.jsonPrimitive.content }
             if (case["server_unavailable"]?.jsonPrimitive?.boolean == true) library.before = { response(503) }
             val unreadable = case["root_unreadable"]?.jsonPrimitive?.boolean == true

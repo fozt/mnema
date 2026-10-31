@@ -24,6 +24,7 @@ from mnema.bar.state import BarPrefs, BarState, MenuEnv
 from mnema.config import library_root
 from mnema.core import base
 from mnema.i18n import using
+from mnema.install_setup import connect
 from mnema.library.disk import read_record
 from mnema.library.models import FileName, Record, Stamp
 from mnema.live.remarks import Remark, Step
@@ -235,10 +236,15 @@ def test_shared_cleanup_rule(tmp_path, case):
         known = Record(id=data["id"], path="Запись", files={FileName.META: meta, **texts}, tag="")
         server = SERVER if case["server"] == "selected" else case["server"]
         foreign = case.get("foreign", "")
+        if case.get("rejoined"):
+            connect(SERVER, "t")
         save(
             checkpoint_path(),
             Checkpoint(server=server, foreign=foreign, records={known.id: known}),
         )
+        if case.get("rejoined"):
+            connect(SERVER, "another")  # a new invitation, no sync since
+            connection = f"{SERVER}#token=another"
     assert model(tmp_path, connection=connection).cleanup is not None  # every case has audio
     plan = cleanup_plan(tmp_path, connection=connection, busy=lambda: set())
     assert plan.records == (1 if case["removed"] else 0) and bool(plan.reason)

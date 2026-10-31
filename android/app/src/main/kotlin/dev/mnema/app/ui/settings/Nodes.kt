@@ -11,6 +11,7 @@ import dev.mnema.app.server.RunnerException
 import dev.mnema.app.server.formatConnection
 import dev.mnema.app.server.message
 import dev.mnema.app.server.parseConnection
+import dev.mnema.app.settings.NodeEntry
 import dev.mnema.app.settings.SettingsStore
 import dev.mnema.app.settings.nodeOf
 
@@ -49,6 +50,7 @@ suspend fun joinNode(
     device: String,
     connect: (Connection) -> RunnerClient,
     store: SettingsStore,
+    joined: suspend (String) -> Unit,
 ): JoinResult {
     val parsed = try {
         parseConnection(text)
@@ -56,7 +58,7 @@ suspend fun joinNode(
         return JoinResult.Refused(e.message.orEmpty())
     }
     if (parsed.token != null) return JoinResult.Refused(PASTE_INVITE)
-    val invite = parsed.invite ?: return joinOpen(parsed.url, connect, store)
+    val invite = parsed.invite ?: return joinOpen(parsed.url, connect, store, joined)
     val token = try {
         connect(Connection(parsed.url, null)).claimInvite(invite, device)
     } catch (e: RunnerException) {
@@ -68,16 +70,22 @@ suspend fun joinNode(
         return JoinResult.Refused(BAD_TOKEN)
     }
     val entry = checkNotNull(nodeOf(line))
-    store.update { it.withNode(entry) }
+    saveNode(entry, store, joined)
     val check = connect(parseConnection(line)).capabilities()
     store.update { it.withNode(entry.copy(name = check.name ?: entry.name)) }
     return JoinResult.Added(entry.address)
 }
 
-private suspend fun joinOpen(url: String, connect: (Connection) -> RunnerClient, store: SettingsStore): JoinResult {
+private suspend fun joinOpen(url: String, connect: (Connection) -> RunnerClient, store: SettingsStore, joined: suspend (String) -> Unit): JoinResult {
     val check = connect(Connection(url, null)).capabilities()
     check.health.message()?.let { return JoinResult.Refused(it) }
     val entry = checkNotNull(nodeOf(url))
-    store.update { it.withNode(entry.copy(name = check.name ?: entry.name)) }
+    saveNode(entry.copy(name = check.name ?: entry.name), store, joined)
     return JoinResult.Added(entry.address)
+}
+
+/** Another token than the saved one for this address: the last sync with it is no longer trusted. */
+private suspend fun saveNode(entry: NodeEntry, store: SettingsStore, joined: suspend (String) -> Unit) {
+    if (store.current().nodes.none { it.connection == entry.connection }) joined(entry.address)
+    store.update { it.withNode(entry) }
 }

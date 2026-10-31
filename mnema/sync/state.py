@@ -13,6 +13,8 @@ from ..connection import parse_connection
 from ..library.layout import TEXTS
 from ..library.models import LEGACY_SUMMARY, FileName, Record, Stamp
 
+UNCHECKED = "?"  # foreign after a new device token at this address: whose library is unknown
+
 
 class Checkpoint(BaseModel):
     server: str = ""
@@ -108,6 +110,17 @@ def save(path: Path, state: Checkpoint) -> None:
             os.close(fd)
     finally:
         temporary.unlink(missing_ok=True)
+
+
+def mark_unchecked(path: Path, server: str) -> None:
+    """A new device token at the address of the last sync (a new invitation, maybe another user):
+    until the server lists its library, nothing counts as confirmed there."""
+    from .scan import FILES_LOCK
+
+    with FILES_LOCK:
+        saved = load(path)
+        if saved.server == server and saved.foreign != UNCHECKED:
+            save(path, saved.model_copy(update={"foreign": UNCHECKED}))
 
 
 def initialize_library(root: Path, checkpoint: Path) -> None:

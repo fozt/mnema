@@ -31,6 +31,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -168,8 +169,10 @@ class AudioCleanupTest {
                     FileName.entries.single { it.fileName == file } to Stamp(sha256(text.jsonPrimitive.content.toByteArray()), 0)
                 }, "")))
             val state = File(base.parentFile, "sync.json").also { saveCheckpoint(it, checkpoint) }
-            val selected = if (case["selected"] is JsonNull) null else parseConnection("$SELECTED#token=t")
+            val rejoined = case["rejoined"]?.jsonPrimitive?.boolean == true // a new invitation, no sync since
+            val selected = if (case["selected"] is JsonNull) null else parseConnection("$SELECTED#token=${if (rejoined) "another" else "t"}")
             val sync = SyncController(base, state, { selected }, { emptySet() }, {}, {})
+            if (rejoined) sync.joined(SELECTED)
             val removed = mutableListOf<String>()
             val store = FolderRecordingStore(base, CoroutineScope(Dispatchers.Unconfined), { null }, { false }, Dispatchers.Unconfined,
                 trash = { removed += it.name; assertTrue(it.delete()) }, textsOnServer = sync::textsOnServer)
