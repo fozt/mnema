@@ -20,9 +20,9 @@ serve several people, each with their own devices, library and model.
 
 - **One-click call recording** from the macOS menu bar, the Linux top panel or an Android phone.
   Your microphone and the other side of the call are kept as two separate tracks.
-- **Local speech recognition**: Parakeet (25 European languages) and Whisper (everything else),
-  plus GigaAM (Russian) on your server. No audio leaves your machines unless you choose cloud
-  recognition (OpenAI).
+- **Local speech recognition** with Parakeet Ultra: 25 European languages, on the Neural Engine
+  of your Mac or on the CPU of your server. No audio leaves your machines unless you choose cloud
+  recognition (OpenAI), which is also the only place for the languages Parakeet doesn't know.
 - **A title and a short summary** of every call from a cloud model of your choice: Gemini,
   DeepSeek, OpenAI, Claude, Qwen, OpenRouter or Groq. Free tiers are enough for daily use. You
   choose the model in the Mac app; on a server it is kept per person.
@@ -31,8 +31,8 @@ serve several people, each with their own devices, library and model.
 - **Your own server** for Linux and the phone, with invites per device and sync of texts
   between all devices. Friends and family can share it: each person gets their own devices,
   recordings library, model and keys.
-- **Command line** for files and links: transcribe a video or a YouTube link, translate,
-  compress, merge tracks.
+- **Command line** (a separate package) for files and links: transcribe a video or a YouTube
+  link, live captions, translate, compress, merge tracks.
 - **MCP server** so Claude and other assistants can transcribe and read your recordings.
 - **English and Russian interface**, following the system language.
 
@@ -59,9 +59,10 @@ and their own key.
 
 Requirements: Apple Silicon, macOS 14.2 or later.
 
-1. Download `Mnema-X.Y.Z.dmg` from [Releases](https://github.com/fozt/mnema/releases/latest), open
-   it and drag Mnema to *Applications*. The app carries everything it needs: Python, the speech
-   engines (Parakeet and Whisper) and ffmpeg.
+1. Download `Mnema-X.Y.Z.dmg` (about 84 MB) from
+   [Releases](https://github.com/fozt/mnema/releases/latest), open it and drag Mnema to
+   *Applications*. The app carries what it needs: Python, ffmpeg and `mnema-asr`, the program
+   that recognizes speech on the Neural Engine.
 2. Open Mnema from *Applications*. The app isn't notarized by Apple, so the first time macOS says
    it couldn't verify Mnema and offers only *Done* and *Move to Trash*: click *Done*, open *System
    Settings → Privacy & Security*, scroll down to *Security*, click *Open Anyway* next to "Mnema
@@ -73,25 +74,35 @@ Requirements: Apple Silicon, macOS 14.2 or later.
    server, under your name; without one, on this Mac.
 4. Click *Start recording*. macOS asks for microphone and system audio access the first time.
 
-Speech models (about 1.3 GB) are downloaded on the first recording.
+The speech model (about 630 MB) is not in the app: Mnema downloads it once, when you turn on
+recognition *On this Mac* or make the first recording without it, and shows the progress. It needs
+about 1 GB of free disk space and a connection; the model lives in
+`~/Library/Application Support/Mnema/models`.
 
 Opened straight from the disk image, Mnema asks to be moved to *Applications* first. On its first
-start it turns on *Open at login* and links the `mnema` command to `~/.local/bin/mnema` unless
-something else is already there. Updates come from GitHub Releases: *⋯ → Settings… → General →
-Check for updates* downloads the new app and replaces this one in place, so Mnema has to stay in a
-folder you can write to, such as *Applications*. To remove Mnema, turn off *Open at login*
-(*Settings → General*), quit it, move it to the Trash and delete the `~/.local/bin/mnema` link if
-Mnema made it; settings stay in `~/.config/mnema`, recordings in `~/mnema`. The licenses of
-everything inside the app are in `Mnema.app/Contents/Resources/licenses`; the source code of its
-LGPL and GPL parts is in `third-party-sources-X.Y.Z.tar.gz` on the same release page, except the
-ones that `licenses/SOURCE-OFFER.txt` lists as on request.
+start it turns on *Open at login*. The `mnema` command is not part of the app any more: install it
+separately (see [Command line](#command-line)). Updates come from GitHub Releases: *⋯ → Settings…
+→ General → Check for updates* downloads the new app and replaces this one in place, so Mnema has
+to stay in a folder you can write to, such as *Applications*. When only Mnema's own code changed,
+the update is a few megabytes instead of the whole app. To remove Mnema, turn off *Open at login*
+(*Settings → General*), quit it and move it to the Trash; settings stay in `~/.config/mnema`,
+recordings in `~/mnema`, the speech model in `~/Library/Application Support/Mnema`. The licenses
+of everything inside the app are in `Mnema.app/Contents/Resources/licenses`; the source code of
+its LGPL and GPL parts is in `third-party-sources-X.Y.Z.tar.gz` on the same release page, except
+the ones that `licenses/SOURCE-OFFER.txt` lists as on request. The speech models have their own
+licenses, see [Speech models](#speech-models).
+
+**Coming from 0.4?** The app now recognizes with Parakeet Ultra only: Whisper and GigaAM are
+gone, and the old model files are removed on the first start. The `mnema` command and `mnema-mcp`
+left the app: install them as described in [Command line](#command-line), and point an MCP
+configuration that started the app's `mnema-mcp` at the new one.
 
 ### Server (Linux)
 
 Needed for Linux desktops and the phone. The server runs in Docker on a Linux machine (x86_64 or
 arm64), at home or on a VPS, and recognizes speech on the CPU. Install
 [Docker Engine with the Compose plugin](https://docs.docker.com/engine/install/) first and give
-the machine at least 6 GB of memory (the installer offers to add 4 GB of swap when there is
+the machine at least 4 GB of memory (the installer offers to add 4 GB of swap when there is
 none; `--swap-size 4G` does it without asking, `--swap-size 0` never asks).
 
 ```bash
@@ -99,7 +110,10 @@ git clone https://github.com/fozt/mnema.git && cd mnema
 ./install.sh server
 ```
 
-The installer starts the `mnema` container from the published image and prints an invite: a
+The installer starts the `mnema` container from the published image. Speech is recognized by
+Parakeet Ultra on ONNX Runtime, on the CPU; the model (under 1 GB) is downloaded into `data/cache`
+on the first job, and the files left by an earlier version are removed. The installer prints an
+invite: a
 link like `http://host:port#invite=…` that connects one device of the owner and expires in 6
 hours. The server has no model of its own: each person sets theirs in the Mac app (see
 [Choosing a model](#choosing-a-model)).
@@ -172,7 +186,7 @@ anyone else `~/mnema-server/data/users/NAME/library`, models and keys are in
 
 Recognition jobs from all people share one queue, and a free place goes to the person whose last
 job started longest ago, so one long batch does not hold up the others. A recognition job starts
-only when at least 5 GB of memory is free (or nothing else recognizes at that moment) and waits
+only when at least 2 GB of memory is free (or nothing else recognizes at that moment) and waits
 otherwise. By default the server runs one recognition per three CPU cores and splits the cores
 but one between the running ones. To set it by hand, add `MNEMA_JOB_WORKERS=2` (jobs at a time)
 and `MNEMA_ASR_THREADS=8` (CPU threads of one job, or `auto` for all of them) to
@@ -194,8 +208,9 @@ git clone https://github.com/fozt/mnema.git && cd mnema
 ./install.sh client 'http://host:port#invite=…'
 ```
 
-Mnema appears in the applications menu and in the top panel. Without a server it only records;
-recordings are processed once you connect one in *Settings → Server*.
+Mnema appears in the applications menu and in the top panel, and the installer adds the `mnema`
+command. Without a server it only records; recordings are processed once you connect one in
+*Settings → Server*.
 
 ### Android
 
@@ -231,7 +246,8 @@ are sections; move recordings between them from the card menu. Texts sync betwee
 through the server; audio stays where it was recorded.
 
 **Language** is detected from the speech. If it comes out wrong, pick it in the menu of the
-recording that is being processed, or in *⋯ → Process recording…* for an existing one.
+recording that is being processed, or in *⋯ → Process recording…* for an existing one; the chosen
+language is told to cloud recognition and used for cleaning up the text and for the summary.
 
 **Without a model** you still get the transcript; the card offers *Summarize* once a model is
 set.
@@ -242,9 +258,16 @@ set.
 
 | Place | Who recognizes | Engines |
 |---|---|---|
-| On this Mac (Mac only) | The Mac itself | Automatic, Parakeet, Whisper |
-| On the server | Your server, on its CPU | Automatic and the engines installed there, GigaAM among them |
+| On this Mac (Mac only) | The Mac itself, on the Neural Engine | Automatic, Parakeet Ultra |
+| On the server | Your server, on its CPU | Automatic, Parakeet Ultra |
 | In the cloud | OpenAI | `gpt-4o-transcribe`, `gpt-4o-mini-transcribe` |
+
+Parakeet Ultra recognizes 25 languages: Bulgarian, Croatian, Czech, Danish, Dutch, English,
+Estonian, Finnish, French, German, Greek, Hungarian, Italian, Latvian, Lithuanian, Maltese,
+Polish, Portuguese, Romanian, Russian, Slovak, Slovenian, Spanish, Swedish and Ukrainian, and
+names the language itself. For any other language the recording gets no transcript and the note
+"This language is recognized only in the cloud": audio never goes to the cloud by itself, so
+choose *In the cloud* for that recording (*⋯ → Process recording…*).
 
 *On the server* is unavailable until a server is connected. Linux offers *On the server* and *In
 the cloud*. The title and the summary are written by your model in every case: a Mac connected to
@@ -273,16 +296,29 @@ key on the server under your name, and the server uses them for your recordings 
 device, Linux and phone included; they show the model but cannot change it yet. Keys are shown
 only masked and are kept in a file readable by the server alone.
 
-### Live translation
+### Live text and translation
 
-Live translation (`mnema live --translate` through a server) uses the model too. If you have a
-DeepL key, set it in *Settings → Server → Set the DeepL key…* and the server translates phrases
-with it, otherwise with your model.
+`mnema live` shows captions as you speak, through a server: a phrase is recognized when you pause
+(or after 15 seconds), together with the last seconds before it, so it appears a moment after it
+ends instead of word by word. Live translation (`mnema live --translate`) uses the model too. If
+you have a DeepL key, set it in *Settings → Server → Set the DeepL key…* and the server translates
+phrases with it, otherwise with your model.
 
 ## Command line
 
-The Mac app and the installer link `mnema` into `~/.local/bin`; add that folder to `PATH` if your
-shell doesn't have it.
+The command is a package of its own, installed with [uv](https://docs.astral.sh/uv/) from the
+wheel of a release (put the version of the
+[latest release](https://github.com/fozt/mnema/releases/latest) in place of `X.Y.Z`):
+
+```bash
+uv tool install "mnema[cli] @ https://github.com/fozt/mnema/releases/download/vX.Y.Z/mnema-X.Y.Z-py3-none-any.whl"
+```
+
+It installs `mnema` and `mnema-mcp` into `~/.local/bin`; add that folder to `PATH` if your shell
+doesn't have it. Update with the same command and `--force` (`mnema update` prints it). On a Mac
+the command recognizes through the installed Mnema app, so install the app too, or connect a
+server; on Linux it recognizes on the CPU with Parakeet or on a server. The Linux app installer
+adds the command itself.
 
 ```bash
 mnema transcribe meeting.mov                    # → meeting.txt
@@ -298,22 +334,22 @@ mnema compress screen.mov                       # HEVC, roughly 9 GB → 1 GB
 | `transcribe` | Speech to text; files, folders and links, several at once |
 | `translate` | Translate a transcript or a media file with the model |
 | `rec`, `finish` | Record a call; process a saved recording or a part of it |
-| `live` | Live captions and live translation through a server |
+| `live` | Live captions, phrase by phrase, and live translation through a server |
 | `compress`, `concat`, `merge`, `mp3` | Compress video, join files, mix tracks, extract audio |
 | `users`, `invite`, `devices` | Manage the people and devices of a server (on the server) |
 | `update` | Update Mnema |
 
-On a Mac commands run locally; on Linux they run on the connected server. `--local` and
+On a Mac commands run locally, with the app's recognizer, unless the app is set to recognize on a server; on Linux they run on the connected server. `--local` and
 `--runner URL` choose explicitly. For YouTube videos that require sign-in add
 `--cookies-from-browser chrome`.
 
 ### Claude and other assistants
 
-`mnema-mcp` is an MCP server with four tools: `transcribe`, `translate`, `list_recordings` and
-`read_transcript`. Add it to Claude Code:
+`mnema-mcp` comes with the command and is an MCP server with four tools: `transcribe`,
+`translate`, `list_recordings` and `read_transcript`. Add it to Claude Code:
 
 ```bash
-claude mcp add mnema -- "$(dirname "$(readlink ~/.local/bin/mnema)")/mnema-mcp"
+claude mcp add mnema -- mnema-mcp
 ```
 
 ## Privacy
@@ -323,6 +359,8 @@ claude mcp add mnema -- "$(dirname "$(readlink ~/.local/bin/mnema)")/mnema-mcp"
 - **The model provider** receives only the transcript text, to write the title and the summary.
   On a shared server that is the provider each person chose, with their key.
 - **Sync** carries texts only: `transcript.txt`, `summary.txt` and processing history.
+- **Speech models** are downloaded once from Hugging Face, on the Mac at the first use, on the
+  server with the first job; recognition itself works offline.
 - **Cloud recognition** sends the audio to OpenAI and is off unless a person chooses *In the
   cloud*; it is paid on their OpenAI account.
 - **On a shared server** people's recordings, jobs and keys are separate from each other, but
@@ -336,8 +374,37 @@ claude mcp add mnema -- "$(dirname "$(readlink ~/.local/bin/mnema)")/mnema-mcp"
 - **No microphone or call audio:** allow Mnema in *System Settings → Privacy & Security →
   Microphone* and *Screen & System Audio Recording*.
 - **The phone can't start the helper:** turn on Wi-Fi debugging and stay on Wi-Fi.
+- **"Could not download the recognition model":** check the connection and that about 1 GB of
+  disk space is free, then try again.
+- **"Install Mnema or connect a server" from the `mnema` command on a Mac:** the command
+  recognizes through the Mnema app, which isn't installed; install it or give `--runner`.
 - **"Update the app" or "Update the server":** the app and the server run different Mnema
   versions (the first two numbers differ). Update the side the notice names.
+
+## Speech models
+
+Mnema recognizes speech with **Parakeet Ultra** and finds pauses with silero VAD. The weights are
+not part of the app and the repository: they are downloaded on first use, and they have their own
+licenses.
+
+- [NVIDIA parakeet-tdt-0.6b-v3](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3), the base
+  model, by NVIDIA (CC-BY-4.0).
+- [parakeet-ultra](https://huggingface.co/moondream/parakeet-ultra), a fine-tune of it by
+  moondream (CC-BY-4.0).
+- On the Mac: the CoreML conversion
+  [FluidInference/parakeet-ultra-coreml](https://huggingface.co/FluidInference/parakeet-ultra-coreml)
+  (CC-BY-4.0), run through FluidAudio by FluidInference, and
+  [silero-vad-coreml](https://huggingface.co/FluidInference/silero-vad-coreml).
+- On the server and Linux: the ONNX conversions
+  [marcosremar2/parakeet-ultra-onnx](https://huggingface.co/marcosremar2/parakeet-ultra-onnx)
+  (the int8 encoder) and
+  [Masterx/parakeet-tdt-0.6b-ultra-onnx](https://huggingface.co/Masterx/parakeet-tdt-0.6b-ultra-onnx)
+  (the decoder), both CC-BY-4.0.
+- [silero VAD](https://github.com/snakers4/silero-vad) by the Silero team (MIT); its ONNX model is
+  inside Mnema.
+
+CC-BY-4.0 is at [creativecommons.org/licenses/by/4.0](https://creativecommons.org/licenses/by/4.0/).
+Mnema uses the models as their authors published them, converted to CoreML and ONNX (the server's encoder in int8).
 
 ## Development
 
