@@ -239,8 +239,13 @@ if [ "$MODE" = server ]; then
   exit 0
 fi
 
-# Mnema.app is built only as the DMG of a release (scripts/build_mac_app.py)
+# Mnema.app is built only as the DMG of a release (scripts/build_mac_app.py), for arm64 only
 if [ "$OS" = Darwin ]; then
+  if [ "$(uname -m)" != arm64 ]; then
+    say "The Mnema app needs a Mac with Apple silicon. On this Mac, use the mnema command with a server: https://github.com/fozt/mnema#command-line" \
+      "Приложению Mnema нужен Mac на Apple silicon. На этом Mac пользуйтесь командой mnema с сервером: https://github.com/fozt/mnema/blob/main/README.ru.md#командная-строка"
+    exit 1
+  fi
   say "Mnema for Mac installs from the DMG: https://github.com/fozt/mnema/releases/latest" \
     "Mnema для Mac ставится из DMG: https://github.com/fozt/mnema/releases/latest"
   exit 1
