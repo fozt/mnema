@@ -21,14 +21,20 @@ SERVER_DIR="${MNEMA_SERVER_DIR:-$HOME/mnema-server}"
 # The commands of ./mnema.sh, one per line
 server_commands() {
   if [ -n "$RU" ]; then cat <<'HELP'
-  ./mnema.sh invite                 приглашение для одного устройства (--hours до 72)
+  ./mnema.sh users                  люди сервера
+  ./mnema.sh users add ИМЯ          добавить человека и напечатать его приглашение
+  ./mnema.sh users remove ИМЯ       отключить устройства человека, записи остаются
+  ./mnema.sh invite                 приглашение для одного устройства (--hours до 72, --user ИМЯ)
   ./mnema.sh devices                подключённые устройства
   ./mnema.sh devices revoke ID      отключить устройство
   ./mnema.sh update                 новая версия сервера
   ./mnema.sh logs                   журнал сервера
 HELP
   else cat <<'HELP'
-  ./mnema.sh invite                 an invitation for one device (--hours up to 72)
+  ./mnema.sh users                  the people of the server
+  ./mnema.sh users add NAME         add a person and print their invitation
+  ./mnema.sh users remove NAME      disconnect a person's devices, the recordings stay
+  ./mnema.sh invite                 an invitation for one device (--hours up to 72, --user NAME)
   ./mnema.sh devices                connected devices
   ./mnema.sh devices revoke ID      disconnect a device
   ./mnema.sh update                 the newest version of the server

@@ -127,7 +127,7 @@ cd ~/mnema && ./mnema.sh invite
 | `./mnema.sh users add NAME` | Add a person and print their invite |
 | `./mnema.sh users remove NAME` | Disconnect all of a person's devices; their recordings stay |
 | `./mnema.sh devices` | Connected devices; `./mnema.sh devices revoke <id>` disconnects one |
-| `./mnema.sh update` | Pull the latest image and restart the server with it |
+| `./mnema.sh update` | Pull the latest image and restart the server with it, always: a changed server config applies |
 | `./mnema.sh logs` | Server log |
 
 `./install.sh server --build` builds the image from the checkout instead of pulling it.

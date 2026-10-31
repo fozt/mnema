@@ -152,21 +152,29 @@ if [ "$MODE" = server ]; then
     say "--swap-size is for Linux." "--swap-size только для Linux."
     exit 1
   fi
-  # No swap: ask at a terminal, otherwise tell how to add it. --swap-size 0 leaves it alone.
-  if [ -z "$SWAP_SIZE" ] && [ "$OS" = Linux ] && command -v swapon >/dev/null \
-    && [ -z "$(swapon --show=NAME --noheadings)" ]; then
+  # No swap (/proc/swaps lists none): ask at a terminal, otherwise tell how to add it.
+  # --swap-size 0 leaves it alone. Swap only offered never stops the install; asked for, it does.
+  SWAPS="${MNEMA_PROC_SWAPS:-/proc/swaps}" OFFERED=""
+  if [ -z "$SWAP_SIZE" ] && [ "$OS" = Linux ] && [ -r "$SWAPS" ] \
+    && [ -z "$(awk 'NR > 1' "$SWAPS")" ]; then
     if [ -t 0 ]; then
       answer=y
-      if [ -n "$RU" ]; then read -r -p "Подкачки нет. Добавить 4 ГБ? [Y/n] " answer
-      else read -r -p "No swap. Add 4 GB? [Y/n] " answer; fi
-      case "$answer" in [Nn]*) ;; *) SWAP_SIZE=4;; esac
+      if [ -n "$RU" ]; then read -r -p "Подкачки нет. Добавить 4 ГБ? [Y/n] " answer || answer=n
+      else read -r -p "No swap. Add 4 GB? [Y/n] " answer || answer=n; fi
+      case "$answer" in [Nn]*) ;; *) SWAP_SIZE=4 OFFERED=1;; esac
     else
       say "No swap. Add it with: ./install.sh server --swap-size 4G" \
         "Подкачки нет. Добавьте её: ./install.sh server --swap-size 4G"
     fi
   fi
   if [ -n "$SWAP_SIZE" ] && [ "$SWAP_SIZE" != 0 ]; then
-    as_root bash "$PWD/scripts/setup-swap.sh" "$SWAP_SIZE"
+    if [ -n "$OFFERED" ]; then
+      as_root bash "$PWD/scripts/setup-swap.sh" "$SWAP_SIZE" \
+        || say "Swap wasn't added, installing without it. Try later: ./install.sh server --swap-size 4G" \
+          "Подкачка не добавлена, установка идёт без неё. Попробуйте позже: ./install.sh server --swap-size 4G"
+    else
+      as_root bash "$PWD/scripts/setup-swap.sh" "$SWAP_SIZE"
+    fi
   fi
 
   DIR="$SERVER_DIR"
@@ -223,7 +231,8 @@ if [ "$MODE" = server ]; then
   say "The server listens on port $PORT." "Сервер принимает подключения на порту $PORT."
   if [ -n "$URL" ]; then ./mnema.sh invite --url "$URL"; else ./mnema.sh invite; fi
   echo
-  say "The model is set in the app: Settings → Model" "Модель задаётся в приложении: Настройки → Модель"
+  say "The model is set in the Mnema app on a Mac: Settings → Recording → Choose model…" \
+    "Модель задаётся в приложении Mnema на Mac: Настройки → Запись → Выбрать модель…"
   echo
   say "The server's commands, in $PWD:" "Команды сервера, в папке $PWD:"
   server_commands

@@ -144,12 +144,13 @@ def test_cloud_job_starts_while_memory_holds_a_local_one_which_starts_when_memor
 ):
     monkeypatch.setenv("MNEMA_JOB_WORKERS", "2")
     machine["free"] = GIB
-    release = threading.Event()
+    release, first_entered = threading.Event(), threading.Event()
     started = []
 
     def op(path, params, on):
         started.append(params["index"])
         if params["index"] == 0:
+            first_entered.set()
             assert release.wait(5)
         return {}
 
@@ -158,6 +159,7 @@ def test_cloud_job_starts_while_memory_holds_a_local_one_which_starts_when_memor
     client = TestClient(app)
     first = submit(client, tmp_path / "a", 0).json()["id"]
     try:
+        assert first_entered.wait(3)
         held = submit(client, tmp_path / "a", 1).json()["id"]
         cloud = submit(client, tmp_path / "a", 2, asr="openai/gpt-4o-transcribe").json()["id"]
         assert finished(client, cloud)["status"] == "done"

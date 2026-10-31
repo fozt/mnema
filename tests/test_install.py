@@ -20,6 +20,7 @@ from mnema.devices import DeviceStore
 from mnema.sync.state import checkpoint_path
 
 REPO = Path(__file__).resolve().parents[1]
+SWAPS_HEADER = "Filename Type Size Used Priority\n"
 COMMAND = r"""
 import json, os, pathlib, shutil, subprocess, sys
 name, args = pathlib.Path(sys.argv[0]).name, sys.argv[1:]
@@ -218,6 +219,8 @@ def system(tmp_path):
     log = tmp_path / "calls.jsonl"
     active = tmp_path / "active"
     active.write_text("")
+    swaps = tmp_path / "proc-swaps"  # /proc/swaps: the header and a line for each active swap
+    swaps.write_text(SWAPS_HEADER)
     user_home = tmp_path / "home"
     user_home.mkdir()
     env = {
@@ -230,6 +233,7 @@ def system(tmp_path):
         "FAKE_BIN": str(bindir),
         "FAKE_COMMAND": str(command),
         "FAKE_ACTIVE": str(active),
+        "MNEMA_PROC_SWAPS": str(swaps),
     }
     for name in (
         "BASH_ENV",
@@ -418,7 +422,7 @@ def test_server_runs_in_docker_and_writes_only_its_folder(system):
     }  # fmt: skip
     assert "http://203.0.113.7:43117#invite=one-time-code" in done.stdout
     assert "Сервер принимает подключения на порту 43117." in done.stdout
-    assert "Модель задаётся в приложении: Настройки → Модель" in done.stdout
+    assert "Настройки → Запись → Выбрать модель…" in done.stdout
     assert f"Команды сервера, в папке {root}:" in done.stdout
     assert "./mnema.sh logs" in done.stdout
 
@@ -552,6 +556,34 @@ def test_server_without_swap_asks_at_a_terminal(system, answer, added):
     assert "--swap-size 4G" not in done.stdout
 
 
+def test_swap_is_offered_where_swapon_is_not_on_the_path(system):
+    """Debian's usual user has no sbin on PATH: swapon is not found, swap is still told apart."""
+    (Path(system[1]["FAKE_BIN"]) / "swapon").unlink()
+    done = installer(system, "server", answer="\n")
+    assert done.returncode == 0, done.stderr
+    assert [c[-1] for c in swap_calls(system)] == ["4"]
+
+
+def test_swap_that_was_only_offered_does_not_stop_the_install(system):
+    """The question was answered with Enter and the swap script fails: the install goes on, with
+    a word on how to add swap later; asked for with --swap-size, the same failure stops it."""
+    system[1]["FAKE_FAIL"] = "sudo"
+    done = installer(system, "server", answer="\n")
+    assert done.returncode == 0, done.stderr
+    assert "Подкачка не добавлена" in done.stdout or "Swap wasn't added" in done.stdout
+    assert "#invite=" in done.stdout
+    asked = installer(system, "server", "--swap-size", "4G")
+    assert asked.returncode != 0
+    assert "#invite=" not in asked.stdout
+
+
+def test_the_end_of_input_at_the_swap_question_means_no(system):
+    done = installer(system, "server", answer="\x04")
+    assert done.returncode == 0, done.stderr
+    assert swap_calls(system) == []
+    assert "#invite=" in done.stdout
+
+
 def test_swap_size_zero_neither_asks_nor_hints(system):
     done = installer(system, "server", "--swap-size", "0", answer="")
     assert done.returncode == 0, done.stderr
@@ -561,7 +593,7 @@ def test_swap_size_zero_neither_asks_nor_hints(system):
 
 
 def test_server_with_swap_neither_asks_nor_hints(system):
-    Path(system[1]["FAKE_ACTIVE"]).write_text("/swapfile\n")
+    Path(system[1]["MNEMA_PROC_SWAPS"]).write_text(SWAPS_HEADER + "/swapfile file 4194300 0 -2\n")
     done = installer(system, "server", answer="")
     assert done.returncode == 0, done.stderr
     assert "--swap-size 4G" not in done.stdout
@@ -678,7 +710,7 @@ def test_host_update_pulls_the_image_and_recreates_the_container(system, built_h
     expected = [
         compose(system, "config", "--images"),
         ["image", "inspect", "-f", "{{.Id}}", image],
-        compose(system, "up", "-d", "--wait"),
+        compose(system, "up", "-d", "--wait", "--force-recreate"),
         ["image", "inspect", "-f", "{{.Id}}", image],
         ["exec", "mnema", "mnema", "--version"],
     ]
@@ -702,7 +734,7 @@ def test_host_update_goes_back_when_the_new_image_does_not_start(system):
     assert docker(system) == [
         compose(system, "config", "--images"),
         ["image", "inspect", "-f", "{{.Id}}", image],
-        compose(system, "up", "-d", "--wait"),
+        compose(system, "up", "-d", "--wait", "--force-recreate"),
         ["image", "inspect", "-f", "{{.Id}}", image],
         ["tag", "sha256:old", image],
         compose(system, "up", "-d", "--wait", "--pull", "never"),

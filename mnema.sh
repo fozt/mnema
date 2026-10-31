@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # The server's commands on its machine, run in this folder (the one with install.sh):
-#   ./mnema.sh invite | devices [revoke ID] | update | logs
+#   ./mnema.sh users [add NAME | remove NAME] | invite [--user NAME] | devices [revoke ID] | update | logs
 # The server is the container that ./install.sh server set up in ~/mnema-server (or
-# MNEMA_SERVER_DIR). update pulls the newest image and recreates the container (compose.yaml:
-# pull_policy); a new image that does not become healthy is replaced by the previous one. logs
+# MNEMA_SERVER_DIR). update pulls the newest image and always recreates the container (compose.yaml:
+# pull_policy), so new lines of the server's .env apply; a new image that does not become healthy is replaced by the previous one. logs
 # follows the container's log. Every other command runs as mnema in the container.
 set -euo pipefail
 # shellcheck source=scripts/common.sh
@@ -44,7 +44,7 @@ elif [ "$1" = update ]; then
       "Образ $image собран здесь или указан при установке и не скачивается: сервер перезапускается с ним как есть."
   fi
   old="$(docker image inspect -f '{{.Id}}' "$image" 2>/dev/null || true)"
-  if ! compose up -d --wait; then
+  if ! compose up -d --wait --force-recreate; then
     new="$(docker image inspect -f '{{.Id}}' "$image" 2>/dev/null || true)"
     if [ -n "$old" ] && [ "$old" != "$new" ]; then
       say "The new version didn't start. Going back to the previous one." \
