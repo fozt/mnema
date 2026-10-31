@@ -263,8 +263,7 @@ def model_dir(on: Progress = noop) -> Path:
             if not (folder / name).is_file():
                 raise MediaError(_("No {name} in {folder}", name=name, folder=folder))
         return folder
-    pins = "".join(f"{name} {f.repo} {f.revision} {f.sha256}\n" for name, f in ONNX_FILES.items())
-    folder = cache_home() / "mnema" / MODEL / hashlib.sha256(pins.encode()).hexdigest()[:16]
+    folder = _cached()
     if all((folder / name).is_file() for name in ONNX_FILES):
         return folder
     on(None, _("Downloading the recognition model, only the first time…"))
@@ -283,6 +282,22 @@ def model_dir(on: Progress = noop) -> Path:
             path.replace(folder / name)
         shutil.rmtree(staging, ignore_errors=True)
     return folder
+
+
+def _cached() -> Path:
+    """The cache folder of exactly these pins: another file or revision is another folder."""
+    pins = "".join(f"{name} {f.repo} {f.revision} {f.sha256}\n" for name, f in ONNX_FILES.items())
+    return cache_home() / "mnema" / MODEL / hashlib.sha256(pins.encode()).hexdigest()[:16]
+
+
+def downloaded() -> bool:
+    """Whether model_dir() goes without a download: a given folder (model_dir checks it) or
+    the pinned revision already in the cache."""
+    from .settings import RuntimeSettings
+
+    if RuntimeSettings().parakeet_onnx_dir is not None:
+        return True
+    return all((_cached() / name).is_file() for name in ONNX_FILES)
 
 
 def _download(name: str, staging: Path) -> Path:

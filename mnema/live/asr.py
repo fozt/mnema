@@ -1,141 +1,42 @@
-"""Adapter over WhisperLiveKit: a synchronous feed/poll/finish facade producing LiveChunk.
+"""Live text on Parakeet, phrase by phrase: PCM → silero (core/vad.py) → a phrase closes on a
+pause of 0.6 s or at 15 s → Parakeet Ultra on ONNX (core/parakeet.py) → committed.
 
-The contract, as observed on a real Mac:
-- TranscriptionEngine(model_size=..., backend="mlx-whisper", backend_policy="simulstreaming",
-  lan=...); AudioProcessor(transcription_engine=...); AlignAtt with mlx works.
-- create_tasks() returns an async generator of FrontData; process_audio(bytes | None) feeds it
-  (it expects a container, not raw PCM); FrontData.lines holds Segment(speaker=-1) and
-  SilentSegment(speaker=-2, skipped); AlignAtt commits append-only (text grows, no revisions);
-  buffer_transcription is the draft.
+A phrase is decoded together with the audio of its track before it (up to 10 s, less at the
+start): alone, a short phrase came out in the wrong language every third time. Only the words
+of the phrase are shown: the border is the middle of the pause between it and the previous one
+(a word started before it belongs to the previous phrase).
 
-The recording comes first: the model warms up in the background (start_warmup) and feed never
-waits for it; until then PCM collects in a bounded prebuffer (PcmPrebuffer) and is pumped into ASR
-once it is ready.
-
-The mapping (_extract/_to_chunk) is pure and unit tested. The async facade (background event loop
-plus a WAV wrapper around PCM) is checked with a real microphone.
+One session is one process (live/worker.py runs PhraseTranscriber); StreamingTranscriber is its
+facade in the parent: the recording comes first, PCM waits in a bounded prebuffer until the
+model is loaded, and finish/close give all the memory back to the OS.
 """
 
 from __future__ import annotations
 
 import contextvars
-import struct
 import threading
 from collections import deque
 from typing import Any
 
+from ..core.asr_engine import REPLY_GAP_S, group_speech
 from ..core.base import MediaError
 from ..core.models import Segment
 from ..core.settings import ASRThreads, RuntimeSettings
 from ..i18n import _
 from .models import LiveChunk
 
-_SILENCE_SPEAKER = -2  # WLK marks SilentSegment.speaker = -2
-
-
-def _extract(front: Any) -> tuple[str, float, str]:
-    """FrontData -> (committed text of the real segments, end of the last one, draft tail)."""
-    parts: list[str] = []
-    end = 0.0
-    for ln in getattr(front, "lines", None) or []:
-        if getattr(ln, "speaker", None) == _SILENCE_SPEAKER:
-            continue
-        text = getattr(ln, "text", "") or ""
-        if text.strip():
-            parts.append(text)
-            end = float(getattr(ln, "end", 0.0) or 0.0)
-    draft = getattr(front, "buffer_transcription", "") or ""
-    return "".join(parts), end, draft
-
-
-# live deltas are words or phrases (a couple of sentences at most on the final flush); a larger
-# "delta" is not speech but history rewritten by WLK
-_MAX_DELTA = 2000
-
-
-def _overlap(tail: str, head: str) -> int:
-    """Largest k such that head[:k] is a suffix of tail (KMP prefix function, O(n))."""
-    s = head + "\x00" + tail
-    pi = [0] * len(s)
-    for i in range(1, len(s)):
-        k = pi[i - 1]
-        while k and s[i] != s[k]:
-            k = pi[k - 1]
-        if s[i] == s[k]:
-            k += 1
-        pi[i] = k
-    return pi[-1]
-
-
-def _delta_text(emitted: str, full: str) -> str | None:
-    """The new suffix of `full` after the already emitted text; None when out of sync.
-
-    WLK text normally grows append-only. When WLK trims its context ("Trimming context"), `full`
-    starts with the tail of `emitted` instead, so the longest overlap of that tail with the head
-    of `full` is found (KMP, unbounded: on a long session the kept tail can be thousands of
-    characters) and only the continuation is returned. No overlap, or a session-sized "delta",
-    means WLK rewrote its history; emitting it again would flood the output and the translation
-    on every poll, so None tells the caller to resync (emitted = full) without emitting.
-    """
-    if not full:
-        return ""  # an empty front (silence) is neither a resync nor new text
-    if full.startswith(emitted):
-        return full[len(emitted) :]
-    k = _overlap(emitted[-len(full) :], full)
-    if k and len(full) - k <= _MAX_DELTA:
-        return full[k:]
-    return None
-
-
-def _wav_stream_header(rate: int = 16000, ch: int = 1, bits: int = 16) -> bytes:
-    """Header of a streaming WAV (huge data size): ffmpeg reads the PCM stream until EOF."""
-    big = 0x7FFFFFFF
-    byte_rate = rate * ch * bits // 8
-    block = ch * bits // 8
-    return (
-        b"RIFF"
-        + struct.pack("<I", 36 + big)
-        + b"WAVEfmt "
-        + struct.pack("<IHHIIHH", 16, 1, ch, rate, byte_rate, block, bits)
-        + b"data"
-        + struct.pack("<I", big)
-    )
-
-
-# WLK decoding is not thread safe across sessions: TranscriptionEngine is a process singleton
-# (shared torch model) and upstream recommends one connection per process
-# (thread_safety.RECOMMENDED_CONNECTIONS_PER_WORKER = 1). With two sources (--system) decoding is
-# serialized by a shared lock: concurrent calls broke decoding (RuntimeError in qkv_attention)
-# and WLK swallowed the error, so the source just went silent. The lock is reentrant because
-# process_iter calls model.infer itself.
-_DECODE_LOCK = threading.RLock()
-# Engine initialization lock (model loading): concurrent mic and system warmup raced inside tqdm
-# (see _pipeline). Only creation is serialized, not inference.
-_ENGINE_INIT_LOCK = threading.Lock()
-
-
-def _serialize_decode(online: Any) -> None:
-    """Wrap the decode entry points of the WLK online processor in the cross-session lock.
-
-    process_iter is the main entry (transcription_processor); model.infer is the final flush of
-    audio_processor on stop, which bypasses process_iter and needs the lock too.
-    """
-
-    def locked(fn: Any) -> Any:
-        def wrapper(*args: Any, **kwargs: Any) -> Any:
-            with _DECODE_LOCK:
-                return fn(*args, **kwargs)
-
-        return wrapper
-
-    online.process_iter = locked(online.process_iter)
-    model = getattr(online, "model", None)
-    if model is not None and hasattr(model, "infer"):
-        model.infer = locked(model.infer)
-
+SR = 16000
+PHRASE_MAX_S = 15.0  # as the recognition window of a track: shorter is no better
+CUT_SEARCH_S = 2.0  # a phrase at its limit is cut at the quietest point of its last seconds
+TAIL_S = 10.0  # the track's audio before a phrase, decoded with it
+DRAFT = "…"  # while speech is heard and not yet recognized
+NOT_DOWNLOADED = (
+    "The recognition model isn't on the server yet. Process any recording on the server, "
+    "then try again"
+)
 
 # PCM16 mono 16 kHz (the AudioSource contract): 32000 bytes per second of audio
-_PCM_BYTERATE = 16000 * 2
+_PCM_BYTERATE = SR * 2
 
 
 class PcmPrebuffer:
@@ -172,230 +73,187 @@ class PcmPrebuffer:
         return chunks
 
 
-class _InProcessTranscriber:
-    """The engine inside the child process. The parent uses StreamingTranscriber below."""
+class PhraseTranscriber:
+    """One track's live text inside the session process: feed PCM, poll the phrases.
+
+    Sample positions count from the first fed PCM. The region is what silero looks at for the
+    next phrase: from the end of the previous one; the audio is kept from TAIL_S before it.
+    """
 
     def __init__(
-        self,
-        *,
-        lang: str | None = None,
-        backend: str = "mlx-whisper",
-        policy: str = "simulstreaming",
-        model: str = "large-v3-turbo",
-        label: str = "mic",
-        threads: ASRThreads | None = None,
+        self, *, lang: str | None = None, label: str = "mic", threads: ASRThreads | None = None
     ) -> None:
         self._lang = lang
-        self._backend = backend
-        self._policy = policy
-        self._model = model
         self._label = label
         self._threads = RuntimeSettings().asr_threads if threads is None else threads
-        self._loop: Any = None
-        self._thread: threading.Thread | None = None
-        self._ap: Any = None
-        self._latest: Any = None
+        self._model: Any = None
+        self._vad: Any = None
+        self._audio: Any = None  # float32 samples from self._base on
+        self._base = 0
+        self._fed = 0  # samples fed so far
+        self._region = 0  # the first window of the region
+        self._probs: list[float] = []  # speech probabilities of the region's windows
+        self._prev_end: int | None = None  # where the previous phrase ended
+        self._committed: list[Segment] = []
+        self._draft = ""
+
+    def warmup(self) -> None:
+        """Load the model; the first download is the batch jobs' business, not a live wait."""
+        import numpy as np
+
+        from ..core import parakeet, vad
+        from ..core.settings import asr_thread_budget
+
+        if not parakeet.downloaded():
+            raise MediaError(_(NOT_DOWNLOADED))
+        with asr_thread_budget(self._threads):
+            self._model = parakeet.model()
+        self._vad = vad.Stream()
+        self._audio = np.zeros(0, np.float32)
+
+    def feed(self, pcm: bytes) -> None:
+        import numpy as np
+
+        from ..core import vad
+
+        samples = np.frombuffer(pcm, dtype="<i2").astype(np.float32) / 32768
+        self._audio = np.concatenate([self._audio, samples])
+        self._fed += len(samples)
+        while self._vad_at() + vad.WINDOW <= self._fed:
+            self._listen(vad.WINDOW)
+        self._phrases(final=False)
+
+    def poll(self) -> LiveChunk:
+        chunk = LiveChunk(committed=self._committed, draft=self._draft)
+        self._committed = []
+        return chunk
+
+    def finish(self) -> LiveChunk:
+        """The end of the stream: the open phrase is recognized too."""
+        if self._vad_at() < self._fed:
+            self._listen(self._fed - self._vad_at())
+        self._phrases(final=True)
+        self._draft = ""
+        return self.poll()
+
+    # ── phrases ──
+
+    def _vad_at(self) -> int:
+        from ..core import vad
+
+        return (self._region + len(self._probs)) * vad.WINDOW
+
+    def _listen(self, size: int) -> None:
+        start = self._vad_at() - self._base
+        self._probs.append(self._vad.window(self._audio[start : start + size]))
+
+    def _phrases(self, *, final: bool) -> None:
+        from ..core import vad
+
+        while (phrase := self._next(final=final)) is not None:
+            start, end = phrase
+            if end > start:
+                self._recognize(start, end)
+                self._prev_end = end
+            self._move(max(end // vad.WINDOW, self._region + 1))
+        heard = bool(self._spans(final=final))
+        if not heard:
+            # silence: the region keeps a second, enough for speech that is only beginning
+            self._move(self._region + len(self._probs) - SR // vad.WINDOW)
+        self._draft = DRAFT if heard else ""
+
+    def _spans(self, *, final: bool) -> list[tuple[int, int]]:
+        """Speech of the region (samples from its start), as silero's get_speech_timestamps."""
+        from ..core import vad
+
+        samples = self._fed - self._region * vad.WINDOW if final else len(self._probs) * vad.WINDOW
+        return [(x["start"], x["end"]) for x in vad.timestamps(self._probs, samples)]
+
+    def _next(self, *, final: bool) -> tuple[int, int] | None:
+        """The next closed phrase (stream samples): speech joined across pauses up to 0.6 s,
+        closed by a longer pause, the end of the stream or the limit."""
+        from ..core import vad
+
+        spans = self._spans(final=final)
+        if not spans:
+            return None
+        gap, limit = int(REPLY_GAP_S * SR), int(PHRASE_MAX_S * SR)
+        groups = group_speech(spans, limit, gap)
+        start, end = groups[0]
+        base = self._region * vad.WINDOW
+        heard = len(self._probs) * vad.WINDOW
+        if end - start > limit:  # one speech span past the limit, maybe still going
+            end = self._quietest(start + limit - int(CUT_SEARCH_S * SR), start + limit)
+        elif not (final or len(groups) > 1 or heard - end > gap + vad.WINDOW):
+            return None  # the speech may still go on after a short pause
+        return max(base + start, self._prev_end or 0), base + end
+
+    def _quietest(self, lo: int, hi: int) -> int:
+        """The start of the window with the lowest speech probability in [lo, hi) (region)."""
+        from ..core import vad
+
+        first, last = -(-lo // vad.WINDOW), min(hi // vad.WINDOW, len(self._probs))
+        window = min(range(first, last), key=lambda i: self._probs[i], default=last)
+        return window * vad.WINDOW
+
+    def _recognize(self, start: int, end: int) -> None:
+        from ..core import parakeet
+
+        tail = max(self._base, start - int(TAIL_S * SR))
+        border = tail
+        if self._prev_end is not None:
+            border = start - min((start - self._prev_end) // 2, start - tail)
+        audio = self._audio[tail - self._base : end - self._base]
+        words = [
+            w for w in self._model.words(audio, offset=tail / SR) if w.start >= border / SR - 1e-6
+        ]
+        if not words:
+            return
+        text = " ".join(w.text for w in words)
+        phrase = Segment(start=words[0].start, end=words[-1].end, text=text, speaker=self._label)
+        for seg in parakeet.tidy([phrase], self._lang):
+            # a leading space: the session joins the pieces as is
+            self._committed.append(seg.model_copy(update={"text": " " + seg.text}))
+
+    def _move(self, window: int) -> None:
+        """Start the region at this window; the audio is kept from TAIL_S before it."""
+        from ..core import vad
+
+        if window > self._region:
+            del self._probs[: window - self._region]
+            self._region = window
+        keep = max(self._base, self._region * vad.WINDOW - int(TAIL_S * SR))
+        if keep > self._base:
+            self._audio = self._audio[keep - self._base :]
+            self._base = keep
+
+
+class StreamingTranscriber:
+    """The parent side of one live session process (live/worker.py).
+
+    The parent keeps only the bounded PCM prebuffer and segments not yet returned; the model,
+    onnxruntime and numpy live in the child.
+    """
+
+    def __init__(
+        self, *, lang: str | None = None, label: str = "mic", threads: ASRThreads | None = None
+    ) -> None:
+        self._lang = lang
+        self._label = label
+        self._threads = RuntimeSettings().asr_threads if threads is None else threads
+        self._prebuf = PcmPrebuffer()  # PCM during warmup: feed does not wait for the model
         self._lock = threading.Lock()
         self._ready = threading.Event()
         self._error: Exception | None = None
-        self._wav_sent = False
-        self._prebuf = PcmPrebuffer()  # PCM during warmup: feed does not wait for the model
-        # state of the append-only mapping
-        self._emitted_text = ""
-        self._emitted_end = 0.0
-
-    # ── pure mapping (unit tested) ─────────────────────────────────────────────
-
-    def _to_chunk(self, front: Any) -> LiveChunk:
-        full, end, draft = _extract(front)
-        delta = _delta_text(self._emitted_text, full)
-        if delta is None:  # out of sync: resync without emitting again
-            self._emitted_text = full
-            self._emitted_end = end
-            return LiveChunk(draft=draft.strip())
-        committed: list[Segment] = []
-        if delta.strip():
-            # keep WLK's raw text with its own leading spaces; the session joins pieces as is,
-            # otherwise a word split between commits gets an extra space inside it
-            committed = [Segment(start=self._emitted_end, end=end, text=delta, speaker=self._label)]
-            self._emitted_text += delta  # whole session; the overlap is searched in its tail
-            self._emitted_end = end
-        return LiveChunk(committed=committed, draft=draft.strip())
-
-    # ── async facade (checked with a real microphone) ─────────────────────────
-
-    def start_warmup(self) -> None:
-        """Start the pipeline in the background without blocking; see the `ready` property.
-
-        Until it is ready, feed collects PCM in the prebuffer, so neither the recording nor the
-        session waits for the model.
-        """
-        if self._thread is not None:
-            return
-        import asyncio
-
-        try:
-            import whisperlivekit as wlk  # ty: ignore[unresolved-import]
-        except Exception as e:  # noqa: BLE001
-            raise MediaError(
-                _(
-                    "WhisperLiveKit is missing. Reinstall Mnema (./install.sh client or "
-                    "./install.sh server)"
-                )
-            ) from e
-        # WLK loggers spam INFO/WARNING to stderr (where rich.Live draws); setLevel on the parent
-        # does not silence children with their own handlers, so disable globally up to WARNING
-        import logging
-
-        logging.disable(logging.WARNING)
-        self._loop = asyncio.new_event_loop()
-        self._thread = threading.Thread(target=self._run, args=(wlk,), daemon=True)
-        self._thread.start()
-
-    @property
-    def ready(self) -> bool:
-        """The model is warm and the pipeline alive: feed goes to ASR, not to the prebuffer."""
-        return self._ready.is_set() and self._error is None
-
-    @property
-    def fed_offset_seconds(self) -> float:
-        """Offset of ASR time against the source's stream: when the warmup prebuffer dropped old
-        PCM, t=0 of the fed stream is later than the start of the source's chronicle."""
-        return self._prebuf.dropped_seconds
-
-    def warmup(self) -> None:
-        """Blocking warmup, for when readiness is needed before speech starts (scripts, runner)."""
-        self.start_warmup()
-        if not self._ready.wait(timeout=120):
-            raise MediaError(_("WhisperLiveKit did not start: the model warmup timed out."))
-        if self._error is not None:  # initialization failed: fail fast with the real cause
-            raise MediaError(
-                _("WhisperLiveKit did not start: {error}", error=self._error)
-            ) from self._error
-
-    def _run(self, wlk: Any) -> None:
-        import asyncio
-
-        asyncio.set_event_loop(self._loop)
-        try:
-            self._loop.run_until_complete(self._pipeline(wlk))
-        except Exception as e:  # noqa: BLE001 - reported to the main thread
-            self._error = e
-        finally:
-            self._ready.set()  # unblocks warmup on error (success sets it in _pipeline)
-            # cancel WLK background tasks (watchdog etc.) before close, or asyncio warns
-            # "Task was destroyed but it is pending!" on exit
-            try:
-                pending = [t for t in asyncio.all_tasks(self._loop) if not t.done()]
-                for t in pending:
-                    t.cancel()
-                if pending:
-                    self._loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
-            except Exception:  # noqa: BLE001 - teardown must not break the session
-                pass
-            self._loop.close()
-
-    async def _pipeline(self, wlk: Any) -> None:
-        import torch
-
-        from ..core.backends import _asr_cpu_threads
-        from ..core.settings import asr_thread_budget
-
-        with asr_thread_budget(self._threads):
-            budget = _asr_cpu_threads()
-        torch.set_num_threads(budget)
-        # engine initialization is serialized (_ENGINE_INIT_LOCK): mic and system warm up on
-        # their own threads, and concurrent model loading raced on tqdm's class lock
-        # ("type object 'tqdm' has no attribute '_lock'"). The second load comes from the
-        # cache, so waiting costs no time.
-        with _ENGINE_INIT_LOCK:
-            engine = wlk.TranscriptionEngine(
-                model_size=self._model,
-                backend=self._backend,
-                backend_policy=self._policy,
-                lan=self._lang or "auto",  # None -> auto (otherwise WLK may assume English)
-                # the simulstreaming audio buffer stays at its default (30 s): an A/B test with
-                # continuous speech showed a 15 s window does not smooth decode peaks (the max
-                # pause got worse) and loses letters; buffer_trimming* only affects
-                # localagreement
-            )
-            self._ap = wlk.AudioProcessor(transcription_engine=engine)
-        _serialize_decode(self._ap.transcription)
-        results = await self._ap.create_tasks()  # coroutine -> async generator of FrontData
-        self._ready.set()
-        async for front in results:
-            # empty status fronts do not overwrite the last meaningful one, otherwise the final
-            # flush text would be lost when WLK sends an empty status after it
-            if getattr(front, "lines", None) or getattr(front, "buffer_transcription", ""):
-                with self._lock:
-                    self._latest = front
-        await self._ap.cleanup()  # stops WLK's watchdog and ffmpeg
-
-    def feed(self, pcm: bytes) -> None:
-        if self._error is not None:  # the pipeline died or warmup failed
-            raise MediaError(_("Recognition stream failed: {error}", error=self._error)) from (
-                self._error
-            )
-        self.start_warmup()
-        if not self.ready:  # still warming up: buffer, pump once ready
-            self._prebuf.push(pcm)
-            return
-        for chunk in [*self._prebuf.drain(), pcm]:
-            self._send(chunk)
-
-    def _send(self, pcm: bytes) -> None:
-        import asyncio
-
-        data = pcm
-        if not self._wav_sent:  # the first piece carries a WAV header so ffmpeg sees a container
-            data = _wav_stream_header() + pcm
-            self._wav_sent = True
-        try:
-            asyncio.run_coroutine_threadsafe(self._ap.process_audio(data), self._loop)
-        except RuntimeError:  # the loop has stopped; the _error check above reports why
-            pass
-
-    def poll(self) -> LiveChunk:
-        with self._lock:
-            front = self._latest
-        return LiveChunk() if front is None else self._to_chunk(front)
-
-    def finish(self) -> LiveChunk:
-        import asyncio
-
-        if self._ap is not None and self._loop is not None and self._error is None:
-            # the model warmed up just before stop: the prebuffer tail still goes to ASR before EOF
-            for chunk in self._prebuf.drain():
-                self._send(chunk)
-            try:
-                fut = asyncio.run_coroutine_threadsafe(self._ap.process_audio(None), self._loop)
-                fut.result(timeout=10)
-            except Exception:  # noqa: BLE001
-                pass
-            if self._thread is not None:
-                # after EOF WLK flushes the buffer tail into committed text asynchronously and ends
-                # the generator; wait for the pipeline, or the last words are lost
-                self._thread.join(timeout=30)
-        with self._lock:
-            front = self._latest
-        return LiveChunk() if front is None else self._to_chunk(front)
-
-
-class StreamingTranscriber(_InProcessTranscriber):
-    """One live session is one process; finish/close give all its memory back to the OS.
-
-    The parent keeps only the bounded PCM prebuffer and segments not yet returned.
-    Initialization, WLK, torch/MLX and ffmpeg live in the child process.
-    """
-
-    def __init__(self, **kwargs: Any) -> None:
-        super().__init__(**kwargs)
+        self._loaded = False  # the model answered ready: later errors are a broken stream
         self._abort = threading.Event()
         self._finish = threading.Event()
         self._pending = LiveChunk()
         self._worker: Any = None
+        self._thread: threading.Thread | None = None
 
     def start_warmup(self) -> None:
+        """Start the process in the background without blocking; see the ready property."""
         if self._thread is not None or self._abort.is_set():
             return
         # the worker process inherits the language of the caller (a /api/live request)
@@ -404,6 +262,17 @@ class StreamingTranscriber(_InProcessTranscriber):
             target=context.run, args=(self._process,), name="mnema-live-process", daemon=True
         )
         self._thread.start()
+
+    @property
+    def ready(self) -> bool:
+        """The model is loaded and the process alive: feed goes to recognition."""
+        return self._ready.is_set() and self._error is None
+
+    @property
+    def fed_offset_seconds(self) -> float:
+        """Offset of ASR time against the source's stream: when the warmup prebuffer dropped old
+        PCM, t=0 of the fed stream is later than the start of the source's chronicle."""
+        return self._prebuf.dropped_seconds
 
     def _process(self) -> None:
         import base64
@@ -415,16 +284,7 @@ class StreamingTranscriber(_InProcessTranscriber):
                 self._worker = worker
                 if self._abort.is_set():
                     return
-                worker.send(
-                    {
-                        "lang": self._lang,
-                        "backend": self._backend,
-                        "policy": self._policy,
-                        "model": self._model,
-                        "label": self._label,
-                        "threads": self._threads,
-                    }
-                )
+                worker.send({"lang": self._lang, "label": self._label, "threads": self._threads})
                 ending = waiting = False
                 while not self._abort.is_set():
                     if self.ready and not ending and not waiting:
@@ -441,6 +301,7 @@ class StreamingTranscriber(_InProcessTranscriber):
                         continue
                     kind = event.get("type")
                     if kind == "ready":
+                        self._loaded = True
                         self._ready.set()
                     elif kind in ("chunk", "done"):
                         chunk = LiveChunk.model_validate(event["value"])
@@ -460,18 +321,32 @@ class StreamingTranscriber(_InProcessTranscriber):
         finally:
             self._ready.set()
 
-    def warmup(self) -> None:
+    def _raise(self) -> None:
+        error = self._error
+        if error is None:
+            return
+        if not self._loaded:  # the model did not load: its reason as is
+            raise MediaError(str(error)) from error
+        raise MediaError(_("Recognition stream failed: {error}", error=error)) from error
+
+    def warmup(self, timeout: float = 120.0) -> None:
+        """Blocking warmup, for when readiness is needed before speech starts (scripts, tests)."""
         try:
-            super().warmup()
+            self.start_warmup()
+            if not self._ready.wait(timeout=timeout):
+                raise MediaError(
+                    _(
+                        "The recognition model did not start in {minutes} min. Try again later",
+                        minutes=f"{timeout / 60:.0f}",
+                    )
+                )
+            self._raise()
         except BaseException:
             self.close()
             raise
 
     def feed(self, pcm: bytes) -> None:
-        if self._error is not None:
-            raise MediaError(_("Recognition stream failed: {error}", error=self._error)) from (
-                self._error
-            )
+        self._raise()
         if self._finish.is_set() or self._abort.is_set():
             return
         self.start_warmup()
@@ -479,10 +354,7 @@ class StreamingTranscriber(_InProcessTranscriber):
             self._prebuf.push(pcm)
 
     def poll(self) -> LiveChunk:
-        if self._error is not None:
-            raise MediaError(_("Recognition stream failed: {error}", error=self._error)) from (
-                self._error
-            )
+        self._raise()
         with self._lock:
             chunk = self._pending
             self._pending = LiveChunk(draft=chunk.draft)

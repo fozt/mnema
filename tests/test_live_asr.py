@@ -1,201 +1,210 @@
-"""The ASR adapter: pure FrontData -> LiveChunk mapping (no whisperlivekit)."""
+"""Live text phrase by phrase: silero closes a phrase, Parakeet decodes it with the tail of the
+track before it. Boundaries: the ONNX sessions (in this process) and the live process."""
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 import pytest
 
-from mnema.live.asr import StreamingTranscriber
+from mnema.core.base import MediaError
+from mnema.live.asr import PhraseTranscriber, StreamingTranscriber
+from tests import onnx_stubs
+
+SR = 16000
+PIECES = ["▁раз", "▁два", "▁три", "▁эхо", "▁Mm", "-", "hmm", ".", "<blk>"]
+RAZ, DVA, TRI, EHO = 0, 1, 2, 3
 
 
-def test_streaming_process_returns_tail_and_exits(wlk_process, monkeypatch):
+def _models(monkeypatch, tmp_path, probs, script, seen=None):
+    """Parakeet files of the test and the sessions: silero gives probs window after window,
+    the encoder gives the tokens of script[i] on the i-th decoded phrase."""
+    from mnema.core import parakeet
+
+    folder = tmp_path / "onnx"
+    folder.mkdir(exist_ok=True)
+    for name in parakeet.ONNX_FILES:
+        (folder / name).write_bytes(b"graph")
+    (folder / parakeet.VOCAB).write_text("".join(f"{p} {i}\n" for i, p in enumerate(PIECES)))
+    monkeypatch.setenv("MNEMA_PARAKEET_ONNX_DIR", str(folder))
+    onnx_stubs.install(
+        monkeypatch,
+        silero_vad=onnx_stubs.silero(probs),
+        encoder=onnx_stubs.encoder(script, seen),
+        decoder=onnx_stubs.decoder(len(PIECES)),
+    )
+
+
+_speech = onnx_stubs.speech_probs
+
+
+def _pcm(seconds: float) -> bytes:
+    return b"\x00\x00" * int(seconds * SR)
+
+
+def _texts(chunk) -> list[str]:
+    return [s.text for s in chunk.committed]
+
+
+def _session(lang=None, label="mic") -> PhraseTranscriber:
+    tr = PhraseTranscriber(lang=lang, label=label)
+    tr.warmup()
+    return tr
+
+
+def test_a_phrase_shows_only_its_words_cut_at_the_middle_of_the_pause(monkeypatch, tmp_path):
+    """The second phrase is decoded with the first one as its tail; the words of the tail and
+    of the first half of the pause are not shown again."""
+    seen: list[dict] = []
+    script = [{15: RAZ}, {15: RAZ, 37: EHO, 39: DVA, 55: TRI}]
+    _models(monkeypatch, tmp_path, _speech([(1.0, 2.0), (4.0, 5.0)], 8), script, seen)
+    tr = _session(label="system")
+
+    tr.feed(_pcm(8))
+    chunk = tr.poll()
+
+    assert _texts(chunk) == [" раз", " два три"]  # a leading space: the session joins as is
+    assert {s.speaker for s in chunk.committed} == {"system"}
+    second = chunk.committed[1]
+    assert second.start == pytest.approx(39 * 0.08) and second.end == pytest.approx(56 * 0.08)
+    assert seen[1]["length"] > 4.9 * 100  # decoded from the start of the track, with the tail
+    assert tr.poll().committed == [] and chunk.draft == ""
+
+
+def test_the_tail_is_at_most_ten_seconds_and_times_count_from_the_stream(monkeypatch, tmp_path):
+    seen: list[dict] = []
+    speech = _speech([(1.0, 2.0), (20.0, 21.0)], 24)
+    _models(monkeypatch, tmp_path, speech, [{15: RAZ}, {130: DVA}], seen)
+    tr = _session()
+
+    for _second in range(24):  # fed in pieces, as the process gets them
+        tr.feed(_pcm(1))
+    chunk = tr.poll()
+
+    assert _texts(chunk) == [" раз", " два"]
+    start = 20.0 - 0.03 - 10  # the speech start padded by silero, minus the tail
+    assert seen[1]["length"] / 100 == pytest.approx(10 + 1.08, abs=0.05)
+    assert chunk.committed[1].start == pytest.approx(start + 130 * 0.08)
+
+
+def test_long_speech_is_cut_at_its_quietest_point_before_fifteen_seconds(monkeypatch, tmp_path):
+    from mnema.core import vad
+
+    seen: list[dict] = []
+    probs = _speech([(0.5, 20.0)], 22)
+    dip = 437  # 13.98 s: quieter, still speech
+    probs[dip] = 0.6
+    _models(monkeypatch, tmp_path, probs, [{100: RAZ}, {50: RAZ, 120: DVA, 130: TRI}], seen)
+    tr = _session()
+
+    tr.feed(_pcm(22))
+    chunk = tr.poll()
+
+    cut = dip * vad.WINDOW / SR
+    assert seen[0]["length"] / 100 == pytest.approx(cut, abs=0.02)
+    assert _texts(chunk) == [" раз", " три"]
+    assert chunk.committed[1].start == pytest.approx(cut - 10 + 130 * 0.08)
+
+
+def test_speech_shows_a_draft_and_finish_recognizes_the_open_phrase(monkeypatch, tmp_path):
+    _models(monkeypatch, tmp_path, _speech([(1.0, 3.0)], 2.5), [{20: RAZ}])
+    tr = _session()
+
+    tr.feed(_pcm(0.5))
+    assert tr.poll().draft == ""
+    tr.feed(_pcm(1.5))
+    assert tr.poll().draft == "…"
+    tr.feed(_pcm(0.5))
+    middle = tr.poll()
+    assert middle.committed == [] and middle.draft == "…"
+
+    tail = tr.finish()
+
+    assert _texts(tail) == [" раз"] and tail.draft == ""
+
+
+@pytest.mark.parametrize(("lang", "text"), [("ru", " Угу."), (None, " Mm-hmm.")])
+def test_a_phrase_is_cleaned_by_the_given_language(monkeypatch, tmp_path, lang, text):
+    _models(monkeypatch, tmp_path, _speech([(1.0, 2.0)], 3), [{15: 4, 16: 5, 17: 6, 18: 7}])
+    tr = _session(lang=lang)
+
+    tr.feed(_pcm(3))
+
+    assert _texts(tr.poll()) == [text]
+
+
+def test_live_refuses_until_the_model_is_downloaded(monkeypatch):
+    monkeypatch.delenv("MNEMA_PARAKEET_ONNX_DIR", raising=False)
+
+    with pytest.raises(MediaError, match="ещё не скачана"):
+        PhraseTranscriber().warmup()
+
+
+# ── the live process ──
+
+
+def _tone(seconds: float) -> bytes:
+    import numpy as np
+
+    t = np.arange(int(seconds * SR)) / SR
+    return (np.sin(2 * np.pi * 220 * t) * 0.3 * 32767).astype("<i2").tobytes()
+
+
+def test_streaming_process_returns_the_phrase_and_exits(live_process, monkeypatch):
     import builtins
 
     original = builtins.__import__
 
     def guarded(name, *args, **kwargs):
-        assert name.split(".")[0] not in {"torch", "whisperlivekit", "mlx"}
+        assert name.split(".")[0] not in {"onnxruntime", "numpy"}, name
         return original(name, *args, **kwargs)
 
+    tone = _tone(1) + _pcm(0.5)
     monkeypatch.setattr(builtins, "__import__", guarded)
     tr = StreamingTranscriber(label="system")
     try:
         tr.warmup()
-        tr.feed(b"audio")
+        tr.feed(tone)
         result = tr.finish()
     finally:
         tr.close()
-    assert [(s.text, s.speaker) for s in result.committed] == [("hello", "system")]
+    assert [(s.text, s.speaker) for s in result.committed] == [(" hello", "system")]
     assert tr.poll().committed == []
-    wlk_process[1]()
+    live_process.stopped()
 
 
-def test_streaming_process_close_interrupts_warmup(wlk_process):
-    tr = StreamingTranscriber(model="wait")
+def test_streaming_process_close_interrupts_warmup(live_process, monkeypatch):
+    monkeypatch.setenv("MNEMA_TEST_LIVE_MODE", "wait")
+    tr = StreamingTranscriber()
     tr.start_warmup()
     try:
-        wlk_process[0]()
+        live_process.started()
     finally:
         tr.close()
-    wlk_process[1]()
+    live_process.stopped()
 
 
-def test_streaming_process_error_redacts_secrets(wlk_process):
-    import pytest
-
-    from mnema.core.base import MediaError
-
-    tr = StreamingTranscriber(model="fail-secret")
+def test_streaming_process_error_redacts_secrets(live_process, monkeypatch):
+    monkeypatch.setenv("MNEMA_TEST_LIVE_MODE", "fail-secret")
+    tr = StreamingTranscriber()
     with pytest.raises(MediaError, match="движок не собрался") as error:
         tr.warmup()
     assert "sk-private-test-secret" not in str(error.value)
     assert "…7890" in str(error.value)
-    wlk_process[1]()
+    live_process.stopped()
 
 
 @pytest.mark.parametrize("threads", [2, 6, "auto"])
-def test_faster_whisper_uses_child_cpu_budget(wlk_process, monkeypatch, threads):
-    import os
-
+def test_the_encoder_uses_the_cpu_budget_of_the_session(live_process, threads):
     from mnema.core.settings import available_cpu_threads
 
-    monkeypatch.setenv("OMP_NUM_THREADS", "17")
-    tr = StreamingTranscriber(backend="faster-whisper", threads=threads)
+    tr = StreamingTranscriber(threads=threads)
     try:
         tr.warmup()
-        row = wlk_process[0]()[0]
-        available = available_cpu_threads()
-        expected = available if threads == "auto" else min(threads, available)
-        assert row["threads"] == expected
-        assert row["omp_at_import"] == row["torch_omp_at_import"] == str(expected)
-        assert row["omp_at_engine"] == str(expected)
-        assert os.environ["OMP_NUM_THREADS"] == "17"
+        row = live_process.started()[0]
     finally:
         tr.close()
-    wlk_process[1]()
-
-
-def _seg(text, start, end, speaker=-1):
-    return SimpleNamespace(start=start, end=end, text=text, speaker=speaker)
-
-
-def _front(lines, buffer=""):
-    return SimpleNamespace(lines=lines, buffer_transcription=buffer)
-
-
-def test_to_chunk_appends_only_new_text() -> None:
-    tr = StreamingTranscriber(label="mic")
-    c1 = tr._to_chunk(_front([_seg(" It is working", 0.1, 0.96)]))
-    # the text is kept raw (with WLK's leading space), so compare after .strip()
-    assert [s.text.strip() for s in c1.committed] == ["It is working"]
-    assert c1.committed[0].speaker == "mic" and c1.committed[0].end == 0.96
-
-    # the same segment grew (AlignAtt is append-only): the delta is only the new suffix
-    c2 = tr._to_chunk(_front([_seg(" It is working correctly.", 0.1, 1.66)]))
-    assert [s.text.strip() for s in c2.committed] == ["correctly."]
-    assert c2.committed[0].start == 0.96 and c2.committed[0].end == 1.66
-    # the same front again: no new text
-    assert tr._to_chunk(_front([_seg(" It is working correctly.", 0.1, 1.66)])).committed == []
-
-
-def test_to_chunk_draft_from_buffer() -> None:
-    tr = StreamingTranscriber(label="mic")
-    c = tr._to_chunk(_front([_seg("", 0.0, 0.0, speaker=-2)], buffer=" черновик "))
-    assert c.committed == []
-    assert c.draft == "черновик"
-
-    front = _front(
-        [
-            _seg(" It is working", 0.1, 0.96, speaker=-1),
-            _seg("", 6.4, 6.976, speaker=-2),  # SilentSegment is skipped
-        ],
-        buffer="хвост",
-    )
-    c = StreamingTranscriber(label="mic")._to_chunk(front)
-    assert [s.text.strip() for s in c.committed] == ["It is working"]
-    assert c.committed[0].end == 0.96  # end of the last real segment, not the silent one
-    assert c.draft == "хвост"
-
-
-_SESSION = " ".join(f"предложение номер {i} про дейли." for i in range(300))
-
-
-@pytest.mark.parametrize(
-    ("emitted", "full", "delta"),
-    [
-        ("", " привет", " привет"),  # first delta
-        (" привет", " привет как дела", " как дела"),  # growth with a shared start
-        # WLK trimmed its context: full starts with the tail of emitted, return the continuation
-        ("Привет, как твои дела? Что ты делаешь", "Что ты делаешь сейчас?", " сейчас?"),
-        # regression: after trimming, the tail is longer than any window; the delta is still
-        # only the new words, not the whole session
-        (_SESSION, _SESSION[-4000:] + " и новые слова", " и новые слова"),
-    ],
-)
-def test_delta_text_survives_long_context_trim(emitted, full, delta) -> None:
-    from mnema.live.asr import _delta_text
-
-    assert _delta_text(emitted, full) == delta
-    # and it does not loop: after emitting, the same front gives an empty delta
-    assert _delta_text(emitted + delta, full) == ""
-
-
-def test_delta_text_desync_returns_none() -> None:
-    """No overlap (WLK rewrote its history) or a session-sized "delta" gives None, so the caller
-    resyncs instead of emitting the whole text again."""
-    from mnema.live.asr import _delta_text
-
-    assert _delta_text("абв", "где") is None  # no overlap at all
-    # a tiny accidental overlap plus a huge "tail" is out of sync too, not speech
-    assert _delta_text("xyz", "z" + "ш" * 3000) is None
-    assert _delta_text("что-то было", "") == ""  # an empty front (silence) is not out of sync
-
-
-def test_to_chunk_resyncs_without_reemitting_on_desync() -> None:
-    tr = StreamingTranscriber(label="mic")
-    tr._to_chunk(_front([_seg("Привет, как дела?", 0, 1)]))
-    # WLK rewrote its history (full is no continuation): nothing is emitted, resync
-    c = tr._to_chunk(_front([_seg("Совсем другой текст.", 0, 2)]))
-    assert c.committed == []
-    # after the resync, append-only works again
-    c2 = tr._to_chunk(_front([_seg("Совсем другой текст. И дальше.", 0, 3)]))
-    assert [s.text.strip() for s in c2.committed] == ["И дальше."]
-
-
-def test_serialize_decode_runs_one_at_a_time() -> None:
-    """The wrapped process_iter of two online processors never runs concurrently: decoding on
-    the shared WLK engine goes one source at a time (--system, two sessions)."""
-    import threading
-    import time
-
-    from mnema.live.asr import _serialize_decode
-
-    inside = {"count": 0, "max": 0}
-    gate = threading.Barrier(2, timeout=5)
-
-    class Online:
-        def process_iter(self, *a, **k):
-            inside["count"] += 1
-            inside["max"] = max(inside["max"], inside["count"])
-            time.sleep(0.05)  # a window for the second thread: without the lock it would enter too
-            inside["count"] -= 1
-            return [], 0.0
-
-    a, b = Online(), Online()
-    _serialize_decode(a)
-    _serialize_decode(b)
-
-    def worker(online) -> None:
-        gate.wait()  # start together
-        online.process_iter()
-
-    threads = [threading.Thread(target=worker, args=(o,)) for o in (a, b)]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join(timeout=10)
-    assert inside["max"] == 1  # never overlapped
+    available = available_cpu_threads()
+    assert row["threads"] == (available if threads == "auto" else min(threads, available))
+    live_process.stopped()
 
 
 # ── PcmPrebuffer: PCM during warmup ──
