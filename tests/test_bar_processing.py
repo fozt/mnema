@@ -345,7 +345,7 @@ def test_mac_on_the_server_processes_there(monkeypatch, home) -> None:
     jobs = [r for r in seen if r.url.path == "/api/jobs" and r.method == "POST"]
     assert run.settings["server"] == "100.64.0.9:8123"
     assert [json.loads(r.content)["op"] for r in jobs] == ["recording"]
-    assert remark.hint.startswith("Задайте модель на сервере «Дом».")
+    assert remark.hint.startswith("Задайте модель в настройках Mnema на Mac.")
 
 
 def test_mac_on_server_down_waits_for_it_and_does_not_fall_back(monkeypatch, home) -> None:

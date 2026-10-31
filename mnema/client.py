@@ -52,11 +52,13 @@ _CHUNK_RETRY = (408, 409, *_GATEWAY_ERRORS)
 
 
 class ServerError(MediaError):
-    """The server answered with an error: its detail or the code in words; status is the code."""
+    """The server answered with an error: its detail or the code in words; status is the code;
+    retry — which step of the model window to go back to ("key", "model"), when it says."""
 
-    def __init__(self, text: str, status: int) -> None:
+    def __init__(self, text: str, status: int, retry: str | None = None) -> None:
         super().__init__(text)
         self.status = status
+        self.retry = retry
 
 
 class UploadMissing(MediaError):
@@ -269,6 +271,39 @@ class MnemaClient:
         """Translate a live phrase with the node's model (POST /api/translate/phrase)."""
         body = {"text": text, "context": context, "target_lang": target_lang}
         return self._run(self._node_call("POST", "/api/translate/phrase", body))["text"]
+
+    def model(self) -> dict:
+        """This user's model and keys on the server, keys masked (GET /api/model)."""
+        return self._run(self._model_call("GET", "/api/model"))
+
+    def model_key(self, provider: str, key: str | None) -> dict:
+        """Check a model key on the server: {"models": [...], "recommended": ...}; None — the
+        key saved there for this provider."""
+        body = {"provider": provider, "key": key}
+        return self._run(self._model_call("POST", "/api/model/key", body))
+
+    def save_model(self, model: str, key: str | None) -> dict:
+        """Check the model with the key and save both for this user (None — the saved key);
+        a refusal is a ServerError with retry "key" or "model"."""
+        return self._run(self._model_call("PUT", "/api/model", {"model": model, "key": key}))
+
+    def remove_model(self) -> None:
+        """Remove this user's model from the server; the other keys stay."""
+        self._run(self._model_call("DELETE", "/api/model"))
+
+    def save_asr_key(self, key: str | None) -> dict:
+        """Check and save this user's OpenAI recognition key; None removes it."""
+        return self._run(self._model_call("PUT", "/api/model/asr-key", {"key": key}))
+
+    def save_deepl_key(self, key: str | None) -> dict:
+        """Check and save this user's DeepL key of live translation; None removes it."""
+        return self._run(self._model_call("PUT", "/api/model/deepl-key", {"key": key}))
+
+    async def _model_call(self, method: str, path: str, body: dict | None = None) -> dict:
+        async with self._make_async_client() as client:
+            resp = await client.request(method, path, json=body)
+        self._raise_for_status(resp)
+        return {} if resp.status_code == 204 else resp.json()
 
     def claim_invite(self, code: str, name: str) -> str:
         """Exchange the node's invitation for this device's token (POST /api/devices/claim).
@@ -608,8 +643,13 @@ class MnemaClient:
             if code in _GATEWAY_ERRORS:  # the gateway's answer while the server restarts
                 raise ServerError(_(GATEWAY_DOWN), code)
             try:
-                detail = resp.json().get("detail")
+                body = resp.json()
+                detail, retry = body.get("detail"), body.get("retry")
             except (ValueError, AttributeError):
-                detail = None
+                detail = retry = None
             text = detail.strip()[:300] if isinstance(detail, str) and detail.strip() else ""
-            raise ServerError(text or _("The server returned error {code}", code=code), code)
+            raise ServerError(
+                text or _("The server returned error {code}", code=code),
+                code,
+                retry if retry in ("key", "model") else None,
+            )

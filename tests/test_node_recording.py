@@ -200,7 +200,8 @@ def test_recording_without_model_and_recording_notices(tmp_path, monkeypatch):
         "микрофон" in text.lower() and "нет звука" in text.lower() for text in run["remarks"]
     )
     assert any(
-        text.startswith("Не настроена модель") and "Задайте модель на сервере «Мой узел»" in text
+        text.startswith("Не настроена модель")
+        and "Задайте модель в настройках Mnema на Mac" in text
         for text in run["remarks"]
     )
     _clean(tmp_path)
@@ -256,18 +257,13 @@ def test_both_silent_tracks_are_a_recording_without_speech(tmp_path, monkeypatch
     _clean(tmp_path)
 
 
-def test_default_server_name_is_not_repeated_in_remarks(tmp_path, monkeypatch):
+def test_the_history_names_an_unnamed_server_by_its_computer(tmp_path, monkeypatch):
     _no_model(monkeypatch)
     node_settings.node_file().unlink()
     monkeypatch.setattr("socket.gethostname", lambda: "studio.local")
     client = TestClient(create_app(tmp_path))
     result = _wait(client, _start(client, labels=("system",)))["result"]
     assert result["run"]["settings"]["node"] == "studio"
-    assert any(
-        "Задайте модель на сервере." in text and "«" not in text.split(".")[1]
-        for text in result["run"]["remarks"]
-        if text.startswith("Не настроена модель")
-    )
     _clean(tmp_path)
 
 

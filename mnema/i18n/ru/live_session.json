@@ -19,5 +19,8 @@
   "Couldn't connect to the server: {error}": "Не удалось подключиться к серверу: {error}",
   "the server closed the connection": "сервер закрыл соединение",
   "Lost connection to the server: {error}": "Связь с сервером потеряна: {error}",
-  "No connection to the server: the phrase was not translated": "Нет связи с сервером: фраза без перевода"
+  "No connection to the server: the phrase was not translated": "Нет связи с сервером: фраза без перевода",
+  "DeepL is not responding, try again later": "DeepL не отвечает, попробуйте позже",
+  "DeepL did not accept the key": "DeepL не принял ключ",
+  "DeepL answered with error {code}": "DeepL ответил ошибкой {code}"
 }

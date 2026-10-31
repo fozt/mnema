@@ -799,7 +799,7 @@ def test_model_from_unsupported_country_is_asked_once_per_step(monkeypatch, tmp_
         "Модель claude-sonnet-5 не ответила: сервис модели не принимает запросы из вашей страны "
         "или сети"
     )
-    assert remark.hint.startswith("Выберите другого провайдера на сервере")
+    assert remark.hint.startswith("Выберите другого провайдера в настройках Mnema на Mac")
     assert "Запись названа по времени" in remark.effect
     assert menu_lines(result.remarks)[0] == "Модель недоступна в вашей стране"
 
