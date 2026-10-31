@@ -80,10 +80,10 @@ needs a connection and room on the disk; the model lives in
 `~/Library/Application Support/Mnema/models`.
 
 Opened straight from the disk image, Mnema asks to be moved to *Applications* first. On its first
-start it turns on *Open at login*. The `mnema` command is not part of the app any more: install it
-separately (see [Command line](#command-line)). Updates come from GitHub Releases: *⋯ →
-Settings… → General → Check for updates* downloads the new app and replaces this one in place, so
-Mnema has to stay in a folder you can write to, such as *Applications*. When only Mnema's own code
+start it turns on *Open at login*. The `mnema` command and `mnema-mcp` are installed separately
+(see [Command line](#command-line)). Updates come from GitHub Releases: *⋯ → Settings… → General
+→ Check for updates* downloads the new app and replaces this one in place, so Mnema has to stay in
+a folder you can write to, such as *Applications*. When only Mnema's own code
 changed, the update is about 4 MB instead of the whole app. To remove Mnema, turn off *Open at
 login* (*Settings → General*), quit it and move it to the Trash; settings stay in
 `~/.config/mnema`, recordings in `~/mnema`, the speech model in `~/Library/Application
@@ -92,11 +92,6 @@ Support/Mnema`. The licenses of everything inside the app are in
 `third-party-sources-X.Y.Z.tar.gz` on the same release page, except the ones that
 `licenses/SOURCE-OFFER.txt` lists as on request. The speech models have their own licenses, see
 [Speech models](#speech-models).
-
-**Coming from 0.4?** The app now recognizes with Parakeet Ultra only: Whisper and GigaAM are
-gone, and the old model files are removed on the first start. The `mnema` command and `mnema-mcp`
-left the app: install them as described in [Command line](#command-line), and point an MCP
-configuration that started the app's `mnema-mcp` at the new one.
 
 ### Server (Linux)
 
@@ -113,10 +108,10 @@ git clone https://github.com/fozt/mnema.git && cd mnema
 
 The installer starts the `mnema` container from the published image. Speech is recognized by
 Parakeet Ultra on ONNX Runtime, on the CPU; the model (about 910 MB) is downloaded into
-`data/cache` on the first job, and the files left by an earlier version are removed. The
-installer prints an invite: a link like `http://host:port#invite=…` that connects one device of
-the owner and expires in 6 hours. The server has no model of its own: each person sets theirs in
-the Mac app (see [Choosing a model](#choosing-a-model)).
+`data/cache` on the first job. The installer prints an invite: a link like
+`http://host:port#invite=…` that connects one device of the owner and expires in 6 hours. The
+server has no model of its own: each person sets theirs in the Mac app (see
+[Choosing a model](#choosing-a-model)).
 
 The invite carries the server's address, which the installer finds on its own (Tailscale, a public
 IP or the home network). If devices reach the server another way, for example by a domain name or
@@ -148,15 +143,6 @@ cd ~/mnema && ./mnema.sh invite
 
 The server speaks plain HTTP and requires a token from every device. If the network between your
 devices and the server is not trusted, put a TLS proxy in front of it.
-
-**A server installed with Mnema 0.3.0** ran as a systemd service. It does not update itself to the
-Docker server, and the apps since 0.3.1 do not sync with it. Stop it with
-`sudo systemctl disable --now mnema`, install the server as above and connect the devices with new
-invites. Its data stays in place: recordings in `~/mnema-server/library`, settings in
-`~/.config/mnema`.
-
-**A server installed with Mnema 0.3.1** had a `mnema` command in `~/.local/bin`. Running
-`./install.sh server` again removes that link; the commands are `./mnema.sh` now.
 
 #### Several people on one server
 
@@ -194,9 +180,8 @@ and `MNEMA_ASR_THREADS=8` (CPU threads of one job, or `auto` for all of them) to
 after the server restarts (`./mnema.sh update` restarts it). Cloud recognition does not wait
 on local jobs and uses no engine memory.
 
-A server of 0.3 kept its model in that same `.env` (`MNEMA_MODEL`, `MNEMA_API_KEY`). Those lines
-no longer work: set the model again from the app. Until a person does, their recordings come
-back with a transcript and no summary.
+Until a person sets a model in the app, their recordings come back with a transcript and no
+summary.
 
 ### Linux desktop
 
