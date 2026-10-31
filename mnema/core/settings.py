@@ -223,6 +223,14 @@ def _mem_available(meminfo: str) -> int | None:
     return None
 
 
+def _stat(memory_stat: str, name: str) -> int:
+    for line in memory_stat.splitlines():
+        key, _, value = line.partition(" ")
+        if key == name:
+            return _number(value.strip()) or 0
+    return 0
+
+
 def _memory_dirs() -> set[Path]:
     """The memory cgroups of the process and their parents, v2 and v1, in or out of a container."""
     base = Path("/sys/fs/cgroup")
@@ -244,8 +252,8 @@ def _memory_dirs() -> set[Path]:
 
 
 def available_memory() -> int | None:
-    """MemAvailable capped by the free part of the cgroup v2/v1 memory limits; None when
-    unknown (no /proc, the Mac)."""
+    """MemAvailable capped by the free part of the cgroup v2/v1 memory limits, page cache the
+    kernel can reclaim (inactive_file) counted as free like Docker does; None when unknown."""
     try:
         free = _mem_available(Path("/proc/meminfo").read_text())
     except (OSError, ValueError):
@@ -253,11 +261,13 @@ def available_memory() -> int | None:
     if free is None:
         return None
     for folder in _memory_dirs():
-        for limit_name, usage_name in (
-            ("memory.max", "memory.current"),
-            ("memory.limit_in_bytes", "memory.usage_in_bytes"),
+        for limit_name, usage_name, cache_name in (
+            ("memory.max", "memory.current", "inactive_file"),
+            ("memory.limit_in_bytes", "memory.usage_in_bytes", "total_inactive_file"),
         ):
             limit = _number(_read(folder / limit_name))
             if limit is not None:
-                free = min(free, max(0, limit - (_number(_read(folder / usage_name)) or 0)))
+                usage = _number(_read(folder / usage_name)) or 0
+                usage = max(0, usage - _stat(_read(folder / "memory.stat"), cache_name))
+                free = min(free, max(0, limit - usage))
     return free

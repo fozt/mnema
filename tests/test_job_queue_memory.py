@@ -191,5 +191,35 @@ def test_available_memory_is_capped_by_cgroup_v1_limit_in_a_container(memory_fil
     assert available_memory() == 5 * GIB
 
 
+def test_reclaimable_page_cache_of_a_cgroup_counts_as_free(memory_files):
+    memory_files.update(
+        {
+            "/proc/meminfo": MEMINFO,
+            "/proc/self/cgroup": "0::/\n",
+            "/sys/fs/cgroup/memory.max": str(8 * GIB),
+            "/sys/fs/cgroup/memory.current": str(8 * GIB),
+            "/sys/fs/cgroup/memory.stat": (
+                f"anon {3 * GIB}\nfile {5 * GIB}\ninactive_file {4 * GIB}\n"
+            ),
+        }
+    )
+    assert available_memory() == 4 * GIB
+
+
+def test_reclaimable_page_cache_counts_as_free_under_a_cgroup_v1_limit(memory_files):
+    memory_files.update(
+        {
+            "/proc/meminfo": MEMINFO,
+            "/proc/self/cgroup": "5:memory:/\n",
+            "/sys/fs/cgroup/memory/memory.limit_in_bytes": str(6 * GIB),
+            "/sys/fs/cgroup/memory/memory.usage_in_bytes": str(6 * GIB),
+            "/sys/fs/cgroup/memory/memory.stat": (
+                f"inactive_file {GIB}\ntotal_inactive_file {2 * GIB}\n"
+            ),
+        }
+    )
+    assert available_memory() == 2 * GIB
+
+
 def test_available_memory_is_unknown_without_proc(memory_files):
     assert available_memory() is None
