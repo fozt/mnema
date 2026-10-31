@@ -70,6 +70,7 @@ port it prints with `./mnema.sh` and the same folder:
 export MNEMA_SERVER_DIR=$(mktemp -d)/mnema-server
 MNEMA_IMAGE=mnema-server:dev MNEMA_NAME=mnema-try ./install.sh server
 ./mnema.sh invite --url http://127.0.0.1:PORT
+./mnema.sh users add anna --url http://127.0.0.1:PORT   # a second person on the same server
 ```
 
 ## How the code is organized
@@ -80,10 +81,12 @@ recordings to a server.
 
 | Path | What is there |
 |---|---|
-| `mnema/core/` | Media and speech recognition without UI: probing, audio extraction, recognition engines (Parakeet, GigaAM, Whisper). Each recognition runs in a short-lived worker process, so model memory is freed when it ends |
-| `mnema/llm/` | The cloud model through LiteLLM: titles, summaries, translation, providers, limits, hiding keys from logs |
+| `mnema/core/` | Media and speech recognition without UI: probing, audio extraction, recognition engines (Parakeet, GigaAM, Whisper and the cloud OpenAI engine). Each recognition runs in a short-lived worker process, so model memory is freed when it ends |
+| `mnema/llm/` | The cloud model through LiteLLM: titles, summaries, translation, providers, limits, hiding keys from logs; `config.py` reads the model and keys of the asking user |
 | `mnema/ops.py` | The operation registry (`@op`): one definition serves the command line and the server |
-| `mnema/server.py`, `mnema/api/` | The server: FastAPI, job queue, uploads, devices and invites, library sync |
+| `mnema/server.py`, `mnema/api/` | The server: FastAPI, job queue, uploads, devices and invites, library sync, the model API (`api/model.py`) |
+| `mnema/users.py`, `mnema/devices.py` | People of the server and their devices (`devices.db`), the user of the current request or job, where a user's files lie |
+| `mnema/job_queue.py` | The server's queue: lanes, fairness between users, the memory check |
 | `mnema/live/` | Recording sessions, recording folders and their naming, processing a recording |
 | `mnema/sync/`, `mnema/library/` | Syncing recording texts between devices and the server |
 | `mnema/bar/` | The desktop app logic: state, panel model, settings, processing queue. The macOS UI is SwiftUI in `mnema/bar/macos` and talks to the Python engine over a JSON line protocol (`protocol.py`); Linux uses AppIndicator and GTK |
@@ -92,14 +95,47 @@ recordings to a server.
 | `android/` | The Android app (Kotlin, Compose) and its call recording helper |
 | `tests/` | Python tests; `tests/fixtures/` holds cases shared with the Kotlin and Swift tests |
 
-Settings live in `~/.config/mnema/.env` (one file for the command line, the app and the server);
-the recording library is `~/mnema`.
+Settings live in `~/.config/mnema/.env` (one file for the command line and the app; the server's
+copy is `data/config/mnema/.env` in its Docker volume); the recording library is `~/mnema`.
+
+### Several people on one server
+
+A user is a row in `devices.db`; every device and invite belongs to one (the owner, `owner`, is
+the one that existed before users). The auth middleware puts the user of the token on the request,
+and `users.as_user` carries it into job threads. Everything that belongs to a person is looked up
+by that user:
+
+- Jobs, uploads (`.mnema-owner`), results and `/api/live` are visible only to their user.
+- The library of the owner stays `<data>/library`; others use `<data>/users/<name>/library`
+  (`users.user_library`). The manifest carries a library number, and a client whose last sync was
+  with another number asks before sending its recordings (`SyncEngine.send_to_library`).
+- The model and keys of a user are one file, `config/mnema/users/<name>.env` (`MNEMA_MODEL`,
+  `MNEMA_API_KEY`, `MNEMA_API_BASE`, `MNEMA_ASR_API_KEY` for the OpenAI recognition key,
+  `DEEPL_API_KEY`). The server runs in strict mode (`users.set_strict`): `LLMSettings()` there
+  reads only the file of the current user, never the process environment or the shared `.env`,
+  and without a user it raises. The server has no model of its own and no command that sets one;
+  the app writes the file through `/api/model` (`MnemaClient.model_*`). Outside the server (the
+  Mac without a server, the command line, MCP) the settings come from the machine's `.env`.
+  Keys are hidden in logs from both kinds of files (`llm/redact.py`).
+- The queue serves users in turn. A local recognition job starts when `MemAvailable` (within the
+  cgroup limit) is at least 5 GiB or no local job runs. Slots are `MNEMA_JOB_WORKERS`, by default
+  a third of the cores; threads per job are `MNEMA_ASR_THREADS`, by default all cores but one
+  split between the running local jobs. Short jobs, text jobs (summaries) and cloud recognition
+  have lanes of their own.
+
+Tests that touch any of this run with `users.set_strict(True)` and a user, so a place that forgets
+the user fails a test instead of reading someone else's model.
 
 ## Adding a recognition engine
 
 Local engines live in one registry, `ENGINES` in `mnema/core/backends.py`. The command line
 (`--backend`), automatic choice, the Mac app's Recognition list and the server's
-list all follow it.
+list all follow it. The cloud engine is in the registry too: its choices are
+`CLOUD_MODELS` (`openai/gpt-4o-transcribe`, `openai/gpt-4o-mini-transcribe`), told by `is_cloud`,
+and it recognizes every utterance of the track in one request with the previous text as the
+prompt. It needs the user's recognition key, which travels to the worker process with the job.
+The Mac app's Recognition setting (`BarPrefs.recognition`: this Mac, the server or the cloud) and
+`node.selected_processing` decide where a recording is processed.
 
 1. Write a subclass of `Engine` in `mnema/core/backends.py` with `id` (stored in settings and
    history), `title`, `extra`, `langs` (`None` for any language) and `names_lang` (it works
@@ -121,7 +157,8 @@ list all follow it.
 - **Models are pydantic v2**, closed sets are `StrEnum`, heavy and platform-specific imports
   (torch, mlx, whisperx, litellm, fastapi) are lazy so every module imports on any OS.
 - **A new server feature** is a core function plus an `@op` registration; the HTTP routing stays
-  as is.
+  as is. Anything it reads for a person (a model, a key, a library) comes from the current user,
+  never from a global.
 - **Code, comments and source strings are in English.** The interface is English or Russian by the
   system language: texts go through `_()`/`_n()` from `mnema.i18n`, Russian lives in
   `mnema/i18n/ru/*.json`. Commit messages follow
