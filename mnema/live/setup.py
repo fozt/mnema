@@ -857,7 +857,7 @@ def _finalize_live(
     about = ""
     refused: LightNote | None = None  # no summary from the model: no title from it either
     here = cloud_ready
-    if here and prepared.config.summary:
+    if here and prepared.config.summary and full:
         # Any text gets the title and summary in one pass; without a summary, only the title.
         p_title(None, _step(STEP_MESSAGES["summary"]))
         summary = summarize_text(full, run, warnings, p_title, lang=prepared.config.summary_lang)
