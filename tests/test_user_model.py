@@ -148,6 +148,35 @@ def test_save_and_remove_touch_only_the_user_file() -> None:
     assert not users.user_env_file("bob").exists()
 
 
+def test_two_saves_of_one_user_at_the_same_moment_keep_both(monkeypatch) -> None:
+    """Two devices of anna save at once: the model and the recognition key both stay, the
+    second write is based on the first one."""
+    import threading
+
+    import dotenv
+
+    real, entered = dotenv.set_key, threading.Event()
+
+    def slow_set_key(path, name, value, **kw):
+        if name == "MNEMA_MODEL":
+            entered.set()
+            time.sleep(0.3)  # the other save comes in meanwhile
+        return real(path, name, value, **kw)
+
+    monkeypatch.setattr(dotenv, "set_key", slow_set_key)
+    users.set_strict(True)
+    model = threading.Thread(
+        target=lambda: save_model("deepseek/deepseek-chat", ANNA_KEY, user="anna")
+    )
+    model.start()
+    assert entered.wait(5)
+    save_key("MNEMA_ASR_API_KEY", "sk-proj-" + "a" * 30 + "Asr1", user="anna")
+    model.join(5)
+    settings = _as("anna")
+    assert settings.model == "deepseek/deepseek-chat"
+    assert settings.asr_api_key == "sk-proj-" + "a" * 30 + "Asr1"
+
+
 def test_keys_of_every_user_file_are_hidden() -> None:
     redact.redact("warm up the cache")
     _anna(

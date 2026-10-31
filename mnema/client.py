@@ -49,6 +49,7 @@ _GATEWAY_ERRORS = (502, 503, 504)
 GATEWAY_DOWN = "The server is restarting or unavailable"
 _RESTART_GRACE = 90.0  # how long to wait for the runner to come back, s
 _CHUNK_RETRY = (408, 409, *_GATEWAY_ERRORS)
+_MODEL_READ_S = 120.0  # the server's model check is bounded at 45 s, its key checks less
 
 
 class ServerError(MediaError):
@@ -132,6 +133,12 @@ class MnemaClient:
         self._timeout = httpx.Timeout(
             connect=s.http_connect_timeout,
             read=s.http_read_timeout,
+            write=s.http_write_timeout,
+            pool=s.http_pool_timeout,
+        )
+        self._model_timeout = httpx.Timeout(
+            connect=s.http_connect_timeout,
+            read=_MODEL_READ_S,
             write=s.http_write_timeout,
             pool=s.http_pool_timeout,
         )
@@ -301,7 +308,7 @@ class MnemaClient:
 
     async def _model_call(self, method: str, path: str, body: dict | None = None) -> dict:
         async with self._make_async_client() as client:
-            resp = await client.request(method, path, json=body)
+            resp = await client.request(method, path, json=body, timeout=self._model_timeout)
         self._raise_for_status(resp)
         return {} if resp.status_code == 204 else resp.json()
 

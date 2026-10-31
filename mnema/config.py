@@ -94,7 +94,10 @@ def set_env(values: dict[str, str | None], *, path: Path | None = None) -> list[
     """The only writer of ~/.config/mnema/.env (and of a user's own model file `path`): set the
     given lines (None removes one) in one atomic replace, other lines intact, file 600, directory
     700. For .env everything except the model lines (LLMSettings reads those from the file) also
-    goes into the process environment; a user's file never does. Returns the removed names."""
+    goes into the process environment; a user's file never does. Writers of one file (two
+    devices, the server and the CLI) take turns on a lock file next to it. Returns the removed
+    names."""
+    import fcntl
     import os
     import shutil
     import tempfile
@@ -105,10 +108,12 @@ def set_env(values: dict[str, str | None], *, path: Path | None = None) -> list[
     path = path or user_env_file()
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     path.parent.chmod(0o700)
+    lock = os.open(path.with_name(f".{path.name.lstrip('.')}.lock"), os.O_RDWR | os.O_CREAT, 0o600)
     fd, temporary = tempfile.mkstemp(prefix=".env.", dir=path.parent)
     os.close(fd)
     draft = Path(temporary)
     try:
+        fcntl.flock(lock, fcntl.LOCK_EX)
         if path.is_file():
             shutil.copyfile(path, draft)
         present = dotenv_values(draft, interpolate=False)
@@ -122,6 +127,7 @@ def set_env(values: dict[str, str | None], *, path: Path | None = None) -> list[
         os.replace(draft, path)
     finally:
         draft.unlink(missing_ok=True)
+        os.close(lock)  # releases the flock
     if own:
         return removed
     for name, value in values.items():

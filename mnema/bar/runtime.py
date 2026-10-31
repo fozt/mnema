@@ -389,7 +389,7 @@ class BarRuntime:
         self.server_llm = False  # the server node writes titles and summaries itself
         self.server_version: str | None = None  # the server's Mnema version from capabilities
         self.server_model: str | None = None  # the user's model on it, without the key (Mac)
-        self.server_asr_key = False  # the user's cloud recognition key is on it (Mac)
+        self.server_asr_key: str | None = None  # the user's recognition key on it, masked (Mac)
         self.server_deepl = False  # the user's DeepL key is on it (Mac)
         self.hotkey_error = ""  # the shortcut did not fit or could not be registered
         self.env_rev = 0  # grows when the menu environment changes (models, server, token)
@@ -564,9 +564,8 @@ class BarRuntime:
         return thread
 
     def menu_env(self) -> MenuEnv:
-        """Connection, the models and the recognition list, without keys."""
+        """Connection, the models and the recognition list; keys only masked."""
         from .. import node_settings
-        from ..llm.config import LLMSettings
 
         server = self.server
         here = _base.STANDALONE and server is None
@@ -583,7 +582,7 @@ class BarRuntime:
             model=node_settings.model() if here else None,
             mac=_base.STANDALONE,
             asr_choices=self._asr_choices,
-            asr_key=self.server_asr_key if server else here and bool(LLMSettings().asr_api_key),
+            asr_key=self.server_asr_key if server else self._here_asr_key() if here else None,
             update=self._update,
             update_error=self._update_error,
             update_step=self._update_step,
@@ -591,6 +590,15 @@ class BarRuntime:
             update_checking=self._update_checking,
             update_checked=self._update_checked,
         )
+
+    @staticmethod
+    def _here_asr_key() -> str | None:
+        """This Mac's cloud recognition key, masked."""
+        from ..llm.config import LLMSettings
+        from ..llm.redact import mask
+
+        key = LLMSettings().asr_api_key
+        return mask(key) if key else None
 
     def _server_records(self) -> int | None:
         """Records in the last sync (sync.json) if it was with the connected server."""
@@ -640,7 +648,7 @@ class BarRuntime:
             self.server_ok, self.server_auth = False, True
             self.server_name, self.server_llm, self.server_model = None, False, None
             self.server_version = None
-            self.server_asr_key = self.server_deepl = False
+            self.server_asr_key, self.server_deepl = None, False
             return
 
         def ping() -> None:
@@ -697,8 +705,8 @@ class BarRuntime:
 
     @staticmethod
     def _server_model_of(url: str) -> dict[str, Any] | None:
-        """The user's model on the server and whether its keys are there (GET /api/model);
-        unknown — None."""
+        """The user's model on the server, her recognition key masked and whether her DeepL key
+        is there (GET /api/model); unknown — None."""
         from ..client import MnemaClient
         from ..config import Settings
 
@@ -712,7 +720,7 @@ class BarRuntime:
         model = found.get("model")
         return {
             "model": (model.strip()[:80] or None) if isinstance(model, str) else None,
-            "asr_key": isinstance(found.get("asr_key"), str),
+            "asr_key": asr[:16] if isinstance(asr := found.get("asr_key"), str) else None,
             "deepl": isinstance(found.get("deepl_key"), str),
         }
 
@@ -1486,10 +1494,13 @@ class BarRuntime:
                 result = current[0].model_copy(update=update)
             with lock:
                 submitting[0] = False
-                if flow.closed:
-                    return
-                if result is not None:
+                closed = flow.closed
+                if not closed and result is not None:
                     current[0] = result
+            if closed:
+                if isinstance(flow, (ModelFlow, KeyFlow)) and flow.saved:
+                    self._form_saved(flow)  # the server kept it although the window closed
+                return
             if result is None:
                 send(None)
                 self._form_saved(flow)
@@ -1530,7 +1541,7 @@ class BarRuntime:
             self.server_ok, self.server_auth = flow.result
             self.server_name, self.server_llm, self.server_model = None, False, None
             self.server_version = None
-            self.server_asr_key = self.server_deepl = False
+            self.server_asr_key, self.server_deepl = None, False
         self._env_changed()
         self._check_server_async(status=False)
         self._load_asr_choices()
@@ -1600,7 +1611,7 @@ class BarRuntime:
         self.server_ok, self.server_auth = False, True
         self.server_name, self.server_llm, self.server_model = None, False, None
         self.server_version = None
-        self.server_asr_key = self.server_deepl = False
+        self.server_asr_key, self.server_deepl = None, False
         self.state.sync_missing, self.state.sync_errors = [], []
         self.state.sync_other_library, self.state.sync_foreign = None, ""
         self._library_changed()

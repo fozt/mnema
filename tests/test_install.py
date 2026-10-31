@@ -993,7 +993,7 @@ def test_client_env_write_failure_preserves_original_and_cleans_temporary(monkey
     with pytest.raises(OSError, match="disk failure"):
         configure_client("http://other:43117")
     assert (config / ".env").read_text() == original
-    assert list(config.iterdir()) == [config / ".env"]
+    assert sorted(p.name for p in config.iterdir()) == [".env", ".env.lock"]  # no draft left
 
 
 def test_swap_installs_once_preserves_fstab_and_uses_private_permissions(system):

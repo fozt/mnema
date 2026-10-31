@@ -82,5 +82,6 @@
   "The server chooses the recognition model": "Модель распознавания выбирает сервер",
   "The user was removed": "Пользователь удалён",
   "DeepL did not answer": "DeepL не ответил",
-  "Choose a model from the list": "Выберите модель из списка"
+  "Choose a model from the list": "Выберите модель из списка",
+  "The model did not answer in time. Try again": "Модель не ответила вовремя. Попробуйте ещё раз"
 }

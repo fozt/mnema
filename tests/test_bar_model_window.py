@@ -305,6 +305,7 @@ class _UserServer:
         }
         self.requests: list[tuple[str, str, dict | None]] = []
         self.refuse: dict[str, tuple[int, dict]] = {}  # path → the next answer instead
+        self.before_answer: Callable[[str, str], None] = lambda method, path: None
         import mnema.client as client_mod
 
         real, transport = client_mod.MnemaClient, httpx.MockTransport(self._handle)
@@ -327,6 +328,7 @@ class _UserServer:
         if path == "/api/node/asr":
             return httpx.Response(200, json={"choices": [{"id": "auto", "title": "Auto"}]})
         self.requests.append((request.method, path, body))
+        self.before_answer(request.method, path)
         if path in self.refuse:
             code, answer = self.refuse.pop(path)
             return httpx.Response(code, json=answer)
@@ -350,8 +352,10 @@ def _settings_rows(rt: BarRuntime) -> dict[str, Any]:
 
 
 def _settled() -> None:
-    for t in threading.enumerate():
-        if t.name in ("mnema-bar-ping", "mnema-bar-asr-choices", "mnema-bar-form"):
+    """The form, ping and list threads have ended, including those one of them started."""
+    names = ("mnema-bar-ping", "mnema-bar-asr-choices", "mnema-bar-form")
+    while running := [t for t in threading.enumerate() if t.name in names]:
+        for t in running:
             t.join(timeout=10)
 
 
@@ -436,8 +440,14 @@ def test_cloud_without_a_key_asks_for_the_openai_key_on_the_server(connected, mo
     assert platform.submit(key=OPENAI) is None
     _settled()
     assert server.requests.count(("PUT", "/api/model/asr-key", {"key": OPENAI})) == 1
-    assert "Задать ключ OpenAI…" not in _settings_rows(rt)
+    rows = _settings_rows(rt)
+    assert "Задать ключ OpenAI…" not in rows and rows["Ключ OpenAI"].value == "…Good"
     assert "MNEMA_ASR_API_KEY" not in dotenv_values(user_env_file())
+    rt.handle(rows["Сменить ключ OpenAI…"].key)  # a revoked key is replaced the same way
+    platform.next()
+    assert platform.submit(key=OPENAI[:-4] + "New1") is None
+    _settled()
+    assert _settings_rows(rt)["Ключ OpenAI"].value == "…New1"
 
 
 def test_cloud_on_a_mac_without_a_server_keeps_the_key_here(monkeypatch, tmp_path) -> None:
@@ -463,7 +473,40 @@ def test_cloud_on_a_mac_without_a_server_keeps_the_key_here(monkeypatch, tmp_pat
     _settled()
     assert asked == [f"Bearer {OPENAI}"]
     assert dotenv_values(user_env_file())["MNEMA_ASR_API_KEY"] == OPENAI
-    assert "Задать ключ OpenAI…" not in _settings_rows(rt)
+    rows = _settings_rows(rt)
+    assert "Задать ключ OpenAI…" not in rows and rows["Ключ OpenAI"].value == "…Good"
+    assert rows["Сменить ключ OpenAI…"].key == "asr_key_setup"
+
+
+@pytest.mark.parametrize("window", ["model", "asr_key"])
+def test_closing_the_window_while_the_server_saves_shows_what_it_saved(connected, window):
+    """The server request cannot be taken back: closed during it, the window shows nothing more,
+    and the settings show what the server kept."""
+    rt, platform, server = connected
+    rt.handle("recognition:cloud")
+    _settled()
+    saving = "/api/model" if window == "model" else "/api/model/asr-key"
+    server.before_answer = lambda method, path: (
+        platform.on_event(None) if (method, path) == ("PUT", saving) else None
+    )
+    rt.handle(f"{window}_setup")
+    platform.next()
+    if window == "model":
+        platform.submit(provider="gemini")
+        platform.submit(key=GOOD)
+        values = {"model": "gemini-flash-latest"}
+    else:
+        values = {"key": OPENAI}
+    platform.rev += 1
+    platform.on_event(FormEvent(op=FormOp.SUBMIT, values=values, rev=platform.rev))
+    assert platform.next() is not None  # "Checking…"
+    _settled()
+    assert platform.shown.empty()
+    rows = _settings_rows(rt)
+    if window == "model":
+        assert rows["Модель"].value == FLASH
+    else:
+        assert rows["Ключ OpenAI"].value == "…Good"
 
 
 def test_deepl_key_is_set_on_the_server_tab(connected) -> None:

@@ -551,3 +551,26 @@ def test_missing_job_and_upload_have_structured_results():
     with pytest.raises(UploadMissing) as missing:
         client.submit("recording", key="one", tracks={"system": "/gone"})
     assert missing.value.track == "system"
+
+
+def test_model_calls_wait_for_the_servers_check():
+    """A model or key check on the server can take up to the server's limit plus the save: the
+    app waits two minutes for it, not the usual read timeout, so it never says "server not
+    responding" while the server saves."""
+    from mnema.api.model import MODEL_CHECK_SECONDS
+    from mnema.client import MnemaClient
+
+    waited: list[float] = []
+
+    def server(request: httpx.Request) -> httpx.Response:
+        waited.append(request.extensions["timeout"]["read"])
+        return httpx.Response(204 if request.method == "DELETE" else 200, json={})
+
+    client = MnemaClient("http://test", transport=httpx.MockTransport(server))
+    client.model()
+    client.model_key("gemini", None)
+    client.save_model("gemini/gemini-flash-latest", None)
+    client.remove_model()
+    client.save_asr_key(None)
+    client.save_deepl_key(None)
+    assert waited == [120.0] * 6 and waited[0] > MODEL_CHECK_SECONDS

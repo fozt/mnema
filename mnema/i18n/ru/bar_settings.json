@@ -104,5 +104,7 @@
   "Set the DeepL key…": "Задать ключ DeepL…",
   "Current: {model}": "Сейчас: {model}",
   "OpenAI key for recognition": "Ключ OpenAI для распознавания",
-  "DeepL key": "Ключ DeepL"
+  "DeepL key": "Ключ DeepL",
+  "OpenAI key": "Ключ OpenAI",
+  "Change the OpenAI key…": "Сменить ключ OpenAI…"
 }
