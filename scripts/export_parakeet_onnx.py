@@ -28,6 +28,14 @@ ULTRA_REPO = "moondream/parakeet-ultra"
 ULTRA_REVISION = "73175eb7aeb0d82f1e2a6b53b3aabc10a90bcd0b"
 BASE_REPO = "nvidia/parakeet-tdt-0.6b-v3"
 BASE_REVISION = "541d1f99c6b0c3cd0b11a95167540bb8edefd82b"
+OUTPUTS = (
+    "encoder-model.onnx",
+    "encoder-model.onnx.data",
+    "encoder-model.int8.onnx",
+    "decoder_joint-model.onnx",
+    "vocab.txt",
+    "config.json",
+)
 BASE_FILE = "parakeet-tdt-0.6b-v3.nemo"
 
 # NeMo name → transformers name (as transformers' convert_nemo_to_hf.py), applied in order.
@@ -155,6 +163,9 @@ def main() -> None:
 
     out = args.out
     out.mkdir(parents=True, exist_ok=True)
+    # save_model appends to an existing .data file: a rerun would double it
+    for name in OUTPUTS:
+        (out / name).unlink(missing_ok=True)
     with tempfile.TemporaryDirectory(dir=out) as tmp, torch.inference_mode():
         model.export(str(Path(tmp) / "model.onnx"))
         # the exporter spills the >2 GB encoder into a file per tensor: one .data file instead
@@ -202,8 +213,9 @@ def main() -> None:
     print(f"encoder fp32 ONNX vs NeMo torch: max |diff| {diff:.2e}")
     if diff > ENCODER_TOLERANCE:
         raise SystemExit(f"the encoder ONNX differs from torch by {diff:.2e}")
-    for path in sorted(p for p in out.iterdir() if p.is_file()):
-        print(f"{path.name}\t{path.stat().st_size}\t{sha256(path)}")
+    for name in OUTPUTS:
+        path = out / name
+        print(f"{name}\t{path.stat().st_size}\t{sha256(path)}")
 
 
 if __name__ == "__main__":
