@@ -729,7 +729,6 @@ def _home_server(monkeypatch, handler: Callable[[httpx.Request], httpx.Response]
     transport = httpx.MockTransport(
         handler or (lambda r: httpx.Response(200, json=answers[r.url.path]))
     )
-    monkeypatch.setattr(providers, "TRANSPORT", transport)
     monkeypatch.setattr(
         client_mod,
         "MnemaClient",
@@ -820,6 +819,16 @@ def test_old_where_on_the_server_reads_as_recognition_on_the_server(tmp_path) ->
     assert "where" not in json.loads(path.read_text(encoding="utf-8"))
     path.write_text(json.dumps({"where": "mac"}), encoding="utf-8")
     assert load_prefs(path).recognition == Recognition.SERVER  # Linux has no "On this Mac"
+
+
+@pytest.mark.parametrize("old", ["groq/whisper-large-v3", "openai/whisper-1"])
+def test_old_cloud_recognition_reads_as_automatic_or_the_cloud_model(tmp_path, old) -> None:
+    """A cloud model of an earlier version is no engine any more: on the server it is automatic,
+    in the cloud the first cloud model."""
+    path = tmp_path / "bar.json"
+    for place, asr in [("server", "auto"), ("cloud", "openai/gpt-4o-transcribe")]:
+        path.write_text(json.dumps({"recognition": place, "asr": old}), encoding="utf-8")
+        assert load_prefs(path).asr == asr
 
 
 def test_linux_recognizes_on_the_server_or_in_the_cloud(monkeypatch, tmp_path) -> None:

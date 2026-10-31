@@ -8,7 +8,7 @@ open with a red line and keeps what was typed. The window state never holds secr
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import httpx
 from pydantic import BaseModel, Field
@@ -19,12 +19,21 @@ from ..i18n import _
 from ..llm import providers
 from ..llm.providers import KEY_PAGES, TITLES, ModelInfo, Provider
 from .protocol import Choice, FormAsk, FormField, FormFieldKind, FormOp
-from .server_model import ModelRefused, ServerModel
+
+if TYPE_CHECKING:
+    from ..client import MnemaClient
 
 _OPENAI_KEYS = KEY_PAGES[Provider.OPENAI]
 _DEEPL_KEYS = "deepl.com/your-account/keys"
 
 _CHECKING = "Checking…"
+
+
+def _user_server(server: Connection | None) -> MnemaClient | None:
+    """The connected server as this device's user: its /api/model* keep the user's model."""
+    from ..client import MnemaClient
+
+    return MnemaClient(server.url, token=server.token) if server is not None else None
 
 
 def checking() -> str:
@@ -182,7 +191,7 @@ class ModelFlow:
         from ..llm.config import LLMSettings
 
         self.closed = False
-        self._server = ServerModel(server) if server is not None else None
+        self._server = _user_server(server)
         self._current = current if server is not None else LLMSettings().model
         found = providers.provider_of(self._current or "")
         self._provider = found[0] if found else Provider.GEMINI
@@ -316,6 +325,7 @@ class ModelFlow:
     def _save(self, name: str) -> FormAsk | None:
         """Check the model and save it, here or on the server; a refusal returns to the step
         the check names."""
+        from ..client import ServerError
         from ..llm.claude import check_model
         from ..llm.config import credentials_for, save_model
 
@@ -323,7 +333,7 @@ class ModelFlow:
         if self._server is not None:
             try:
                 self._server.save_model(name, self._key or None)
-            except ModelRefused as e:
+            except ServerError as e:
                 if self.closed:
                     return None
                 return (
@@ -386,7 +396,7 @@ class KeyFlow:
     def __init__(self, kind: Literal["asr", "deepl"], server: Connection | None) -> None:
         self.closed = False
         self._kind = kind
-        self._server = ServerModel(server) if server is not None else None
+        self._server = _user_server(server)
 
     def _form(self, error: str = "") -> FormAsk:
         if self._kind == "asr":

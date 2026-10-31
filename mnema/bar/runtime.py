@@ -25,6 +25,7 @@ from pydantic import BaseModel
 
 from ..config import library_root
 from ..core import base as _base
+from ..core.backends import is_cloud
 from ..core.base import MediaError
 from ..i18n import _, _n
 from ..library.models import FileName
@@ -56,7 +57,6 @@ from .state import (
     asr_options,
     can_relang,
     cloud_models,
-    is_cloud,
     load_prefs,
     result_name,
     save_prefs,
@@ -546,9 +546,7 @@ class BarRuntime:
 
             found = MnemaClient(connection.url, token=connection.token).asr_choices()
             listed = [(c["id"], c["title"]) for c in found]
-            if place == Recognition.CLOUD:
-                return [(k, t) for k, t in listed if k.startswith("openai/")]
-            return [(k, t) for k, t in listed if not is_cloud(k)]
+            return [(k, t) for k, t in listed if is_cloud(k) == (place == Recognition.CLOUD)]
 
         def load() -> None:
             try:
@@ -701,12 +699,11 @@ class BarRuntime:
     def _server_model_of(url: str) -> dict[str, Any] | None:
         """The user's model on the server and whether its keys are there (GET /api/model);
         unknown — None."""
+        from ..client import MnemaClient
         from ..config import Settings
-        from ..connection import Connection
-        from .server_model import ServerModel
 
         try:
-            found = ServerModel(Connection(url=url, token=Settings().token or None)).model()
+            found = MnemaClient(url, token=Settings().token or None).model()
         except Exception:  # noqa: BLE001 - the "Model" row stays without a name
             logger.info("the model on the server is unknown")
             return None

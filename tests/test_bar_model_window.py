@@ -1,7 +1,8 @@
 """The "Summary model" window on the Mac (bar/forms.ModelFlow through BarRuntime.handle and window
 events): the steps and texts of `mnema model`; the key lives only in the window field.
 
-Mocked boundaries: the provider network (providers.TRANSPORT) and litellm.completion.
+Mocked boundaries: the provider network (providers.TRANSPORT), the server (MnemaClient's
+transport) and litellm.completion.
 """
 
 from __future__ import annotations
@@ -292,8 +293,8 @@ DEEPL = "d" * 32 + ":fx"
 
 
 class _UserServer:
-    """The connected server's /api/model* for the device's user (MockTransport on
-    providers.TRANSPORT); it checks keys and models itself and keeps them in its state."""
+    """The connected server's /api/model* for the device's user (MockTransport of MnemaClient);
+    it checks keys and models itself and keeps them in its state."""
 
     def __init__(self, monkeypatch) -> None:
         self.state: dict[str, Any] = {
@@ -304,9 +305,13 @@ class _UserServer:
         }
         self.requests: list[tuple[str, str, dict | None]] = []
         self.refuse: dict[str, tuple[int, dict]] = {}  # path → the next answer instead
-        monkeypatch.setattr(providers, "TRANSPORT", httpx.MockTransport(self._handle))
+        import mnema.client as client_mod
+
+        real, transport = client_mod.MnemaClient, httpx.MockTransport(self._handle)
         monkeypatch.setattr(
-            "mnema.client.MnemaClient.health", lambda *a, **kw: {"ok": True, "llm": True}
+            client_mod,
+            "MnemaClient",
+            lambda url, *, token=None: real(url, token=token, transport=transport),
         )
         monkeypatch.setenv("MNEMA_RUNNER", SERVER)
         monkeypatch.setenv("MNEMA_TOKEN", "device-token")
@@ -317,6 +322,10 @@ class _UserServer:
         assert request.headers["authorization"] == "Bearer device-token"
         body = json.loads(request.content) if request.content else None
         path = request.url.path
+        if path == "/api/capabilities":
+            return httpx.Response(200, json={"ok": True, "llm": True})
+        if path == "/api/node/asr":
+            return httpx.Response(200, json={"choices": [{"id": "auto", "title": "Auto"}]})
         self.requests.append((request.method, path, body))
         if path in self.refuse:
             code, answer = self.refuse.pop(path)

@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .. import i18n
 from ..core import base
+from ..core.backends import CLOUD_MODELS, backend_choices, is_cloud
 from ..i18n import _, fmt_bar_panel
 from ..live.models import FINALIZE_STEPS, STEP_MESSAGES, TITLE_MESSAGE
 from ..live.naming import display_title, recording_start
@@ -66,21 +67,12 @@ class Recognition(StrEnum):
     CLOUD = "cloud"
 
 
-# the cloud engine's models (core.backends.CLOUD_MODELS)
-_CLOUD_MODELS = ("openai/gpt-4o-transcribe", "openai/gpt-4o-mini-transcribe")
-
-
-def is_cloud(choice: str) -> bool:
-    """A cloud model "provider/model" rather than an engine of a machine."""
-    return "/" in choice
-
-
 def cloud_models() -> list[tuple[str, str]]:
     """The cloud engine's models with their titles, for a Mac without a server."""
     from ..llm.providers import TITLES, provider_of
 
     out = []
-    for model in _CLOUD_MODELS:
+    for model in CLOUD_MODELS:
         found = provider_of(model)
         out.append((model, f"{TITLES[found[0]]} · {found[1]}" if found else model))
     return out
@@ -91,8 +83,8 @@ def asr_at(choice: str, place: str) -> str:
     otherwise), a machine never a cloud one; this Mac lacks some engines (the app ships no
     GigaAM), and such a choice works as automatic here."""
     if place == Recognition.CLOUD:
-        return choice if is_cloud(choice) else _CLOUD_MODELS[0]
-    if is_cloud(choice):
+        return choice if is_cloud(choice) else CLOUD_MODELS[0]
+    if is_cloud(choice) or choice not in backend_choices():  # an old cloud choice: "groq/…"
         return "auto"
     if not base.STANDALONE or place != Recognition.MAC:
         return choice
