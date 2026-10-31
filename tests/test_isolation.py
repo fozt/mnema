@@ -39,6 +39,7 @@ def _device(store, user: str) -> dict[str, str]:
 def srv(tmp_path, monkeypatch):
     """A node with a token, a device of the owner and one of anna; `gate` holds the "wait" op."""
     monkeypatch.setenv("MNEMA_TOKEN", NODE)
+    monkeypatch.setenv("MNEMA_JOB_WORKERS", "1")  # one local slot whatever the cores
     probed: list[Path] = []
     duration = SimpleNamespace(value=10.0)
 

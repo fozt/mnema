@@ -24,6 +24,7 @@ class TrackParams(BaseModel):
 
 @pytest.fixture
 def node(tmp_path, monkeypatch):
+    monkeypatch.setenv("MNEMA_JOB_WORKERS", "1")  # one local slot whatever the cores
     monkeypatch.setattr(core, "probe", lambda path: SimpleNamespace(duration=400.0))
     app = create_app(tmp_path)
     app.state.operations["tracks"] = ops.OpSpec(

@@ -25,7 +25,6 @@ _THREADS_TYPE = TypeAdapter(ASRThreads)
 _REQUEST_THREADS: ContextVar[ASRThreads | None] = ContextVar("asr_threads", default=None)
 
 
-DEFAULT_ASR_THREADS = 4
 # Settings file lines read on every RuntimeSettings() rather than copied into the environment
 # at startup, so an edit is seen by a running server.
 FILE_SETTINGS = ("MNEMA_ASR_THREADS",)
@@ -61,9 +60,8 @@ class _SettingsFile(PydanticBaseSettingsSource):
 class RuntimeSettings(BaseSettings):
     model_config = SettingsConfigDict(extra="ignore")
 
-    asr_threads: ASRThreads = Field(
-        default=DEFAULT_ASR_THREADS, validation_alias="MNEMA_ASR_THREADS"
-    )
+    # None: the cores are split between the running local jobs (job_threads)
+    asr_threads: ASRThreads | None = Field(default=None, validation_alias="MNEMA_ASR_THREADS")
     # Log level of mnema.* (runner and its worker processes); independent of uvicorn's level.
     log_level: str = Field(default="INFO", validation_alias="MNEMA_LOG_LEVEL")
 
@@ -86,9 +84,11 @@ class RuntimeSettings(BaseSettings):
 
     @field_validator("asr_threads", mode="wrap")
     @classmethod
-    def _tolerant_threads(cls, value: object, handler: ValidatorFunctionWrapHandler) -> ASRThreads:
+    def _tolerant_threads(
+        cls, value: object, handler: ValidatorFunctionWrapHandler
+    ) -> ASRThreads | None:
         """A typo in .env ("0", "abc") must not break the app and every command: fall back to
-        the default and log a warning."""
+        the default rule and log a warning."""
         if isinstance(value, str):
             value = value.strip().lower()
         try:
@@ -97,11 +97,9 @@ class RuntimeSettings(BaseSettings):
             import logging
 
             logging.getLogger("mnema").warning(
-                "MNEMA_ASR_THREADS=%r is neither a number nor auto, using %d",
-                value,
-                DEFAULT_ASR_THREADS,
+                "MNEMA_ASR_THREADS=%r is neither a number nor auto, splitting the cores", value
             )
-            return DEFAULT_ASR_THREADS
+            return None
 
 
 @contextmanager
@@ -118,8 +116,25 @@ def asr_thread_budget(threads: ASRThreads | None) -> Iterator[None]:
 
 
 def requested_asr_threads() -> ASRThreads:
+    """The budget of this call; without one the job is the only running one (CLI, the Mac)."""
     value = _REQUEST_THREADS.get()
-    return RuntimeSettings().asr_threads if value is None else value
+    return job_threads(1) if value is None else value
+
+
+def job_threads(running_local: int) -> int:
+    """Threads of a local job at its start: MNEMA_ASR_THREADS, otherwise all cores but one
+    split between the running local jobs."""
+    setting = RuntimeSettings().asr_threads
+    if setting == "auto":
+        return available_cpu_threads()
+    if setting is not None:
+        return setting
+    return max(1, (available_cpu_threads() - 1) // max(1, running_local))
+
+
+def default_workers() -> int:
+    """Local job slots without MNEMA_JOB_WORKERS: a third of the cores."""
+    return max(1, available_cpu_threads() // 3)
 
 
 def _read(path: Path) -> str:
@@ -191,3 +206,58 @@ def available_cpu_threads() -> int:
         except ValueError:  # v2 "max", v1 -1, or no controller
             continue
     return max(1, min([len(affinity), *quotas]))
+
+
+def _number(value: str) -> int | None:
+    try:
+        return int(value)
+    except ValueError:  # v2 "max" or no controller
+        return None
+
+
+def _mem_available(meminfo: str) -> int | None:
+    for line in meminfo.splitlines():
+        name, _, value = line.partition(":")
+        if name == "MemAvailable" and (fields := value.split()):
+            return int(fields[0]) * 1024
+    return None
+
+
+def _memory_dirs() -> set[Path]:
+    """The memory cgroups of the process and their parents, v2 and v1, in or out of a container."""
+    base = Path("/sys/fs/cgroup")
+    dirs = set()
+    for line in _read(Path("/proc/self/cgroup")).splitlines():
+        parts = line.split(":", 2)
+        if len(parts) != 3:
+            continue
+        _, controllers, member = parts
+        if controllers and "memory" not in controllers.split(","):
+            continue
+        root = base / "memory" if controllers else base
+        dirs.add(root)
+        current = root / member.lstrip("/")
+        while current != root and current.is_relative_to(root):
+            dirs.add(current)
+            current = current.parent
+    return dirs
+
+
+def available_memory() -> int | None:
+    """MemAvailable capped by the free part of the cgroup v2/v1 memory limits; None when
+    unknown (no /proc, the Mac)."""
+    try:
+        free = _mem_available(Path("/proc/meminfo").read_text())
+    except (OSError, ValueError):
+        return None
+    if free is None:
+        return None
+    for folder in _memory_dirs():
+        for limit_name, usage_name in (
+            ("memory.max", "memory.current"),
+            ("memory.limit_in_bytes", "memory.usage_in_bytes"),
+        ):
+            limit = _number(_read(folder / limit_name))
+            if limit is not None:
+                free = min(free, max(0, limit - (_number(_read(folder / usage_name)) or 0)))
+    return free

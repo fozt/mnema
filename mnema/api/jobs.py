@@ -12,6 +12,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from .. import core as mc
+from ..core.settings import asr_thread_budget, job_threads
 from ..i18n import _, current, using
 from ..jobs import (
     CANCEL_MESSAGE,
@@ -121,6 +122,12 @@ def _is_short(root: Path, path: str | None) -> bool:
     return 0.0 < (duration or 0.0) <= SHORT_JOB_MAX_S
 
 
+def _cloud(params: dict) -> bool:
+    """The job recognizes in the cloud: its own queue lane, no engine in memory."""
+    choice = params.get("asr") or params.get("backend") or ""
+    return isinstance(choice, str) and choice.startswith("openai/")
+
+
 def _remove_outputs(app: FastAPI, job_id: str) -> None:
     outputs = app.state.root / "outputs"
     folder = outputs / job_id
@@ -194,12 +201,17 @@ def register_job_routes(app: FastAPI) -> None:
         # ready text gets its own queue lane, without ffprobe
         text = spec.input_kind == InputKind.TEXT and Path(req.path).suffix.lower() in TEXT_SUFFIXES
         inputs = tracks or {None: req.path}
-        short = not text and all(_is_short(app.state.root, path) for path in inputs.values())
+        cloud = not text and _cloud(params)
+        short = (
+            not text
+            and not cloud
+            and all(_is_short(app.state.root, path) for path in inputs.values())
+        )
         # One lock: no other request takes the slot between the room check and the submit.
         with app.state.job_queue.lock:
             if req.key is not None and (previous := app.state.store.find_by_key(req.key)):
                 return _same_key(owner, previous)
-            if not app.state.job_queue.has_room(text=text, user=request.state.user):
+            if not app.state.job_queue.has_room(text=text, cloud=cloud, user=request.state.user):
                 raise HTTPException(
                     429, _("The server is busy: the queue is full. Try again later")
                 )
@@ -224,6 +236,7 @@ def register_job_routes(app: FastAPI) -> None:
                     tracks=tracks,
                     short=short,
                     text=text,
+                    cloud=cloud,
                     owner=owner,
                     user=request.state.user,
                 )
@@ -237,7 +250,7 @@ def register_job_routes(app: FastAPI) -> None:
                 raise
 
     def _enqueue_job(
-        req, spec, params, *, tracks, short: bool, text: bool, owner: str, user: str
+        req, spec, params, *, tracks, short: bool, text: bool, cloud: bool, owner: str, user: str
     ) -> dict:
         job = app.state.store.create(
             op=req.op,
@@ -338,7 +351,9 @@ def register_job_routes(app: FastAPI) -> None:
             _log.info("job %s ended before start: %s user=%s", job.id, error, job.user)
 
         def _execute() -> None:
-            with using(job.lang), as_user(job.user):
+            # a local job gets its share of the cores as it starts
+            threads = None if text or cloud else job_threads(app.state.job_queue.running_local)
+            with using(job.lang), as_user(job.user), asr_thread_budget(threads):
                 _execute_job()
 
         def _cancel_pending() -> None:
@@ -367,6 +382,7 @@ def register_job_routes(app: FastAPI) -> None:
                 _cancel_pending,
                 short=short,
                 text=text,
+                cloud=cloud,
                 user=job.user,
             )
         except Exception as exc:
