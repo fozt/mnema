@@ -479,7 +479,7 @@ def package(app: Path, version: str) -> tuple[Path, Path]:
         run(["ditto", app, Path(staging) / "Mnema.app"])
         (Path(staging) / "Applications").symlink_to("/Applications")
         create = ["hdiutil", "create", "-volname", "Mnema", "-srcfolder", staging, "-ov"]
-        create += ["-format", "ULFO", "-quiet", image]  # lzfse: mounts faster than lzma
+        create += ["-format", "ULMO", "-quiet", image]  # lzma: half the size of lzfse
         for attempt in range(3):  # CI runners sometimes answer "Resource busy"
             if subprocess.run(create, check=False).returncode == 0:
                 break
