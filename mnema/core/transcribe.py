@@ -13,6 +13,7 @@ from .backends import (
     ParakeetBackend,
     engine,
     is_cloud,
+    not_installed,
     select_backend,
 )
 from .base import MediaError, Progress, noop
@@ -50,7 +51,7 @@ def transcribe(
     if backend != AUTO and not select_backend(backend, model=model).available():
         found = engine(backend)
         title = found.title if found is not None else backend
-        raise MediaError(_("{name} recognition is not installed on this computer", name=title))
+        raise MediaError(not_installed(title))
     if base.STANDALONE and isinstance(
         select_backend(backend, model=model, lang=lang), ParakeetBackend
     ):

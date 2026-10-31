@@ -957,6 +957,10 @@ def test_finish_processes_recording_folder(tmp_path, monkeypatch, standalone):
 
     connect(monkeypatch)
     monkeypatch.setattr(core_base, "STANDALONE", standalone)
+    if standalone:  # Mnema.app with its mnema-asr
+        from tests.mac_helper_stub import install
+
+        install(monkeypatch, tmp_path / "Mnema.app")
     monkeypatch.setenv("MNEMA_RUNNER", NODE)
     import argparse
     import array

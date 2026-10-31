@@ -332,10 +332,26 @@ def retired(choice: str) -> str:
 
 
 def _no_engine() -> str:
+    if base.STANDALONE:  # the Mac recognizes only with mnema-asr of Mnema.app, not with extras
+        from .mac_helper import problem
+
+        if found := problem():
+            return found
     return _(
         "No transcription engine is installed: install the full extra (uv sync --extra full) "
         "or set a runner (--runner/MNEMA_RUNNER)."
     )
+
+
+def not_installed(title: str) -> str:
+    """The refusal of an engine chosen by name that cannot run here; on the Mac without
+    Mnema.app it is the same as without any engine."""
+    if base.STANDALONE:
+        from .mac_helper import problem
+
+        if found := problem():
+            return found
+    return _("{name} recognition is not installed on this computer", name=title)
 
 
 def engine(choice: str) -> type[Engine] | None:

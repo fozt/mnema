@@ -18,6 +18,7 @@ from mnema.core import base
 from mnema.i18n import set_language
 from mnema.sync.engine import SyncStatus
 from mnema.sync.state import checkpoint_path
+from tests.mac_helper_stub import install
 
 
 class Controller:
@@ -111,6 +112,7 @@ def test_explicit_gui_lifecycle_does_not_recreate_missing_root_and_sync_is_indep
         url="http://chosen-library", token="library-token"
     )
     monkeypatch.setattr(base, "STANDALONE", True)  # the Mac recognizes itself, the server syncs
+    install(monkeypatch, root.parent / "Mnema.app")
     rt.prefs = BarPrefs()
     assert rt.processing_connection() is None
     assert controller.callbacks["selected"]() == "http://chosen-library#token=library-token"

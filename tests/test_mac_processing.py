@@ -289,15 +289,18 @@ def test_folder_in_processing_is_not_processed_again(monkeypatch, tmp_path, sour
     assert [run["status"] for run in runs] == ["ok"]
 
 
-def test_mac_refuses_unavailable_recognition_before_work(monkeypatch, tmp_path, sources, engines):
-    """The chosen recognition is not installed: refused before work, the recording as it was."""
+@pytest.mark.parametrize("asr", ["parakeet", "auto", "openai/gpt-4o-transcribe"])
+def test_mac_without_mnema_asr_refuses_before_work(monkeypatch, tmp_path, sources, engines, asr):
+    """No mnema-asr of Mnema.app and no server: refused before work with what to do, the
+    recording as it was; the cloud needs the helper's speech search too."""
     engines.remove()
+    monkeypatch.setenv("MNEMA_ASR_API_KEY", "sk-asr")
     _asr(monkeypatch)
     folder = _recording(tmp_path / "notes")
     before = _files(folder)
     with pytest.raises(MediaError) as refused:
-        recording_client.recover_on_node(folder, LiveConfig(asr="parakeet", mix_audio=False), None)
-    assert str(refused.value) == "Выбранное распознавание недоступно. Выберите другое"
+        recording_client.recover_on_node(folder, LiveConfig(asr=asr, mix_audio=False), None)
+    assert str(refused.value) == "Установите Mnema или подключите сервер"
     assert not (folder / PROCESSING_MARK).exists() and meta.last(folder) is None
     assert set(_files(folder)) <= {*before, meta.META_FILE}
     assert sources == []
@@ -407,7 +410,13 @@ def test_refused_part_leaves_only_the_original_recording(
         recording_client.recover_on_node(
             folder, LiveConfig(asr="parakeet", mix_audio=False), connection, start=0.2, end=0.8
         )
-    assert str(refused.value) == "Выбранное распознавание недоступно. Выберите другое"
+    assert (
+        str(refused.value)
+        == {
+            "mac": "Установите Mnema или подключите сервер",
+            "server": "Выбранное распознавание недоступно. Выберите другое",
+        }[where]
+    )
     assert [p.name for p in root.iterdir()] == [NAME] and _files(folder) == before
 
 

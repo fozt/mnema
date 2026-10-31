@@ -110,9 +110,16 @@ def _cloud_key() -> str | None:
 
 def asr_problem(choice: str, lang: str | None = None) -> str | None:
     """The check before work (before the server claims uploads): only packages and saved keys,
-    no network. A choice of an earlier version is checked as automatic."""
+    no network. A choice of an earlier version is checked as automatic. A Mac recognizes, and
+    finds speech for the cloud, only with mnema-asr of Mnema.app."""
+    from .core import base
     from .core.backends import NO_CLOUD_KEY, ONLY_CLOUD, installed_engines, is_cloud, retired
 
+    if base.STANDALONE:
+        from .core.mac_helper import problem
+
+        if found := problem():
+            return found
     choice = retired(choice)
     if is_cloud(choice):
         return None if _cloud_key() else _(NO_CLOUD_KEY)

@@ -782,8 +782,9 @@ def test_mac_switches_where_recognition_runs(monkeypatch, tmp_path) -> None:
     ]
     assert (rows["Модель"].value, rows["Модель"].tone) == ("deepseek/deepseek-chat", Tone.OK)
     assert "Выбрать модель…" in rows and "Задать ключ OpenAI…" not in rows
-    assert "asr:parakeet" not in [c.key for c in rows["Движок"].choices]  # the server's engine
-    assert rt.processing_connection() is None and rt.summary_connection() is not None
+    # without Mnema.app the connected server processes whatever is chosen, with its engines
+    assert [c.key for c in rows["Движок"].choices] == ["asr:auto", "asr:parakeet"]
+    assert rt.processing_connection() is not None and rt.summary_connection() is not None
 
     rt.state.phase = Phase.RECORDING
     rt.handle("recognition:server")
@@ -814,7 +815,7 @@ def test_mac_switches_where_recognition_runs(monkeypatch, tmp_path) -> None:
     rows = _processing(rt)
     assert rows["Распознавание"].value == "на этом Mac" and "Выбрать модель…" in rows
     assert rt.prefs.asr == "auto"  # a cloud model is not an engine of this Mac
-    assert rt.processing_connection() is None
+    assert rt.processing_connection() is not None  # still no Mnema.app here
 
 
 def test_old_where_on_the_server_reads_as_recognition_on_the_server(tmp_path) -> None:

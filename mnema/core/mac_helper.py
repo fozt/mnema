@@ -133,6 +133,16 @@ def _apple_silicon() -> bool:
     return platform.machine() == "arm64"
 
 
+def problem() -> str | None:
+    """Why this Mac cannot recognize, in the user's words, or None: no Mnema.app with its
+    mnema-asr, or a Mac without Apple silicon. Runs no process."""
+    if helper_path() is None:
+        return _(NO_HELPER)
+    if not _apple_silicon():
+        return _(_ERRORS["unsupported_mac"])
+    return None
+
+
 def _call(
     operation: str, payload: dict[str, Any], on: Progress, *, timeout: float | None = None
 ) -> Any:
@@ -215,7 +225,7 @@ class MacHelper:
 
     def available(self) -> bool:
         """The helper is there and can run here; the model may still have to be downloaded."""
-        return helper_path() is not None and _apple_silicon()
+        return problem() is None
 
     def words(self, wav: Path, *, on: Progress = noop) -> list[Word]:
         return self.tracks([wav], on=on)[0]

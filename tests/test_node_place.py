@@ -213,3 +213,63 @@ def test_cloud_recognition_without_a_key_says_so_in_the_remark(monkeypatch, tmp_
     assert notice.cause == f"Не удалось распознать дорожку «Микрофон»: {no_key}"
     saved = meta.last(tmp_path)
     assert saved is not None and saved.tracks["mic"].error == no_key
+
+
+@pytest.mark.parametrize("saved", [None, {"recognition": "mac"}])
+def test_a_mac_without_mnema_app_processes_on_the_connected_server(tmp_path, monkeypatch, saved):
+    """No mnema-asr of Mnema.app (the command alone): the app, the CLI, MCP and dispatch send
+    the recording to the connected server whatever recognition is saved; --local stays here."""
+    from mnema.bar.runtime import BarRuntime
+    from mnema.client import MnemaClient
+    from mnema.config import bar_prefs_file
+    from mnema.dispatch import resolve_runner
+    from mnema.mcp import tools
+
+    monkeypatch.setattr(base, "STANDALONE", True)
+    monkeypatch.setenv("MNEMA_LIVE_DIR", str(tmp_path / "notes"))
+    monkeypatch.setenv("MNEMA_RUNNER", "http://vps:8000")
+    monkeypatch.setenv("MNEMA_TOKEN", "vps-token")
+    monkeypatch.setattr(MnemaClient, "health", lambda self, timeout=2.0: {"ok": True})
+    monkeypatch.setattr(MnemaClient, "asr_choices", lambda self: [])
+    if saved is not None:
+        bar_prefs_file().parent.mkdir(parents=True, exist_ok=True)
+        bar_prefs_file().write_text(json.dumps(saved), encoding="utf-8")
+    runners = []
+    monkeypatch.setattr(
+        tools,
+        "dispatch",
+        lambda op, src, params, *, runner, local, **k: runners.append(runner) or {},
+    )
+    tools.transcribe_recording("/x/a.mp3")
+    app = BarRuntime(prefs_file=bar_prefs_file()).processing_connection()
+    assert {(c.url, c.token) for c in (app, *runners)} == {("http://vps:8000", "vps-token")}
+    assert resolve_runner(None) == "http://vps:8000"
+    assert resolve_runner(None, local=True) is None
+
+
+@pytest.mark.parametrize("backend", ["auto", "parakeet", "openai/gpt-4o-transcribe"])
+def test_a_mac_without_mnema_app_or_a_server_asks_for_one(tmp_path, monkeypatch, backend):
+    """Neither the app's mnema-asr nor a server: the command and the check before work say what
+    to do, not which Python extra to install."""
+    from mnema import node_settings
+    from mnema.core import transcribe
+    from mnema.core.base import MediaError
+
+    monkeypatch.setattr(base, "STANDALONE", True)
+    monkeypatch.setenv("MNEMA_ASR_API_KEY", "sk-asr")
+    with pytest.raises(MediaError, match="^Установите Mnema или подключите сервер$"):
+        transcribe(tmp_path / "call.m4a", backend=backend)
+    assert node_settings.asr_problem(backend) == "Установите Mnema или подключите сервер"
+
+
+def test_an_intel_mac_with_the_app_is_told_it_needs_apple_silicon(tmp_path, monkeypatch):
+    from mnema import node_settings
+    from mnema.core import mac_helper
+    from tests.mac_helper_stub import install
+
+    monkeypatch.setattr(base, "STANDALONE", True)
+    install(monkeypatch, tmp_path / "Mnema.app")
+    monkeypatch.setattr(mac_helper.platform, "machine", lambda: "x86_64")
+    assert node_settings.asr_problem("auto") == (
+        "Распознавать на этом Mac можно только с процессором Apple"
+    )

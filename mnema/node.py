@@ -51,7 +51,9 @@ def selected_processing(
     """Where to process, one rule for the app, the CLI and MCP; None is this computer.
     CLI flags win: --local is here, --runner the given server. "On the server" and "In the
     cloud" (recognition; None reads bar.json) go to the connected MNEMA_RUNNER server, "On this
-    Mac" and no server stay here. Only a Mac recognizes itself: other systems use the server."""
+    Mac" and no server stay here. Only a Mac recognizes itself, and only with mnema-asr of
+    Mnema.app: without it a connected server processes whatever is chosen. Other systems use
+    the server."""
     from .config import Settings
     from .core import base
 
@@ -65,9 +67,16 @@ def selected_processing(
     if not settings.runner:
         return None
     place = saved_recognition() if recognition is None else recognition
-    if base.STANDALONE and place not in (SERVER, CLOUD):
+    if base.STANDALONE and place not in (SERVER, CLOUD) and _mac_recognizes():
         return None
     return Connection(url=settings.runner, token=settings.token or None)
+
+
+def _mac_recognizes() -> bool:
+    """mnema-asr of Mnema.app can run on this Mac (no process is started)."""
+    from .core.mac_helper import problem
+
+    return problem() is None
 
 
 def summary_server() -> Connection | None:
