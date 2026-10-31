@@ -1,43 +1,26 @@
-"""Transcription engines: Parakeet, GigaAM, Whisper (mlx-whisper on Apple Silicon, whisperX
-elsewhere) and OpenAI in the cloud.
+"""Transcription engines: Parakeet Ultra on this machine and OpenAI in the cloud.
 
-Heavy imports (mlx_whisper, whisperx, torch) are lazy, inside methods, so the module imports
-on any platform. ENGINES is the registry: automatic choice, CLI --backend, the app's and the
-server's Recognition list all follow it.
+Heavy imports are lazy, inside methods, so the module imports on any platform. ENGINES is the
+registry: automatic choice, CLI --backend, the app's and the server's Recognition list all
+follow it.
 """
 
 from __future__ import annotations
 
-import contextlib
 import logging
-import os
-import platform
-import re
-import sys
 import tempfile
 import threading
-import warnings
 from pathlib import Path
 from typing import Any, ClassVar, Protocol, runtime_checkable
 
 from ..i18n import _
 from . import asr_engine, parakeet, vad
-from .asr_engine import group_speech, read_wav
+from .asr_engine import REPLY_GAP_S, SR, group_speech
 from .audio import extract_audio
-from .base import (
-    DEFAULT_LOCAL_MODEL,
-    DEFAULT_WHISPERX_MODEL,
-    MediaError,
-    Progress,
-    noop,
-    ts_to_sec,
-    vram_status,
-)
+from .base import MediaError, Progress, noop
 from .models import Segment, Transcript
 
 logger = logging.getLogger(__name__)
-# torch C++ warnings bypass Python and print to stderr over the UI; keep errors only.
-os.environ.setdefault("TORCH_CPP_LOG_LEVEL", "ERROR")
 
 
 AUTO = "auto"
@@ -107,264 +90,6 @@ class Engine:
         raise NotImplementedError
 
 
-def _hf_cache_dir() -> Path:
-    base = os.environ.get("HF_HOME")
-    return (Path(base) / "hub") if base else (Path.home() / ".cache" / "huggingface" / "hub")
-
-
-def local_snapshot_dir(repo: str) -> Path | None:
-    """The local snapshot folder with weights, or None. File checks only, no network."""
-    folder = _hf_cache_dir() / ("models--" + repo.replace("/", "--"))
-    candidates: list[Path] = []
-    ref = folder / "refs" / "main"
-    if ref.is_file():
-        candidates.append(folder / "snapshots" / ref.read_text().strip())
-    snaps = folder / "snapshots"
-    if snaps.is_dir():
-        candidates.extend(snaps.iterdir())
-    for snap in candidates:
-        w = snap / "weights.safetensors"
-        if w.exists() and w.stat().st_size > 0:
-            return snap
-    return None
-
-
-def resolve_model_path(repo: str, on: Progress = noop) -> str:
-    """The local model path for mlx, downloading it if needed.
-
-    Passing a folder instead of a repo id avoids HF's network check on every call, which
-    could hang transcription.
-    """
-    p = Path(repo)
-    if p.is_dir() and (p / "weights.safetensors").exists():
-        return str(p)
-    snap = local_snapshot_dir(repo)
-    if snap is not None:
-        return str(snap)
-    on(None, _("Downloading the recognition model, only the first time…"))
-    try:
-        from huggingface_hub import snapshot_download
-    except ImportError as e:
-        raise MediaError(_("huggingface_hub is missing — reinstall mlx-whisper.")) from e
-    snapshot_download(repo_id=repo)
-    snap = local_snapshot_dir(repo)
-    if snap is None:
-        raise MediaError(
-            _(
-                "The model {repo} did not finish downloading — check the network and try again.",
-                repo=repo,
-            )
-        )
-    return str(snap)
-
-
-class _SegmentParser:
-    """Parses mlx_whisper verbose output line by line and reports progress."""
-
-    _SEG = re.compile(r"^\[([\d:.]+)\s*-->\s*([\d:.]+)\]\s?(.*)$")
-
-    def __init__(self, total: float, on: Progress):
-        self.total, self.on = total, on
-        self.buf = ""
-        self.segments: list[Segment] = []
-        self.language: str | None = None
-
-    def write(self, s: str) -> int:
-        self.buf += s
-        while "\n" in self.buf:
-            line, self.buf = self.buf.split("\n", 1)
-            self._handle(line.strip())
-        return len(s)
-
-    def _handle(self, line: str) -> None:
-        if not line:
-            return
-        if line.startswith("Detected language:"):
-            self.language = line.split(":", 1)[1].strip()
-            return
-        m = self._SEG.match(line)
-        if m:
-            start, end = ts_to_sec(m.group(1)), ts_to_sec(m.group(2))
-            text = m.group(3).strip()
-            self.segments.append(Segment(start=start, end=end, text=text))
-            self.on(min(end / self.total, 1.0) if self.total else None, _("Recognizing…"))
-
-    def flush(self) -> None:
-        pass
-
-
-class MlxBackend:
-    name = "mlx"
-
-    def __init__(self, model: str = DEFAULT_LOCAL_MODEL):
-        self.model = model
-
-    def available(self) -> bool:
-        import importlib.util
-
-        return (
-            sys.platform == "darwin"
-            and platform.machine() == "arm64"
-            and importlib.util.find_spec("mlx_whisper") is not None
-        )
-
-    def run(
-        self,
-        src: Path,
-        *,
-        lang: str | None = None,
-        total_duration: float = 0.0,
-        on: Progress = noop,
-    ) -> Transcript:
-        model_path = resolve_model_path(self.model, on)
-        import mlx_whisper
-
-        with tempfile.TemporaryDirectory() as tmp:
-            # 0.3 s of leading silence protects the first word, as on the whisperx path
-            wav = extract_audio(src, Path(tmp) / "audio.wav", pad_start_ms=300, on=on)
-            # Weights load inside transcribe() before the first segment; name the phase so 0%
-            # does not look stuck.
-            on(None, _("Loading the recognition model…"))
-            parser = _SegmentParser(total_duration, on)
-            with contextlib.redirect_stdout(parser):
-                # condition_on_previous_text=False: otherwise Whisper loops in repeats
-                # ("Hello ×3") and drags mixed speech towards the first language it heard.
-                # word_timestamps: segments are cut at pauses, so the two tracks' replies
-                # interleave in exact time order (see _split_by_pauses).
-                result: dict[str, Any] = mlx_whisper.transcribe(
-                    str(wav),
-                    path_or_hf_repo=model_path,
-                    language=lang,
-                    verbose=True,
-                    condition_on_previous_text=False,
-                    word_timestamps=True,
-                )
-            text = str(result["text"]).strip()
-            # result["language"] is a code ("ru"); the verbose line gives a name ("Russian"),
-            # used only as a fallback
-            language = lang or result.get("language") or parser.language
-            raw_segments = result.get("segments", [])
-            if any(s.get("words") for s in raw_segments):
-                segments = _split_by_pauses(raw_segments)
-            else:
-                segments = parser.segments or [
-                    Segment(
-                        start=float(s["start"]), end=float(s["end"]), text=str(s["text"]).strip()
-                    )
-                    for s in raw_segments
-                ]
-            tr = Transcript(text=text, segments=segments, language=language)
-        return tr
-
-
-def _split_by_pauses(raw_segments: list[dict], max_gap: float = 0.6) -> list[Segment]:
-    """Whisper segments with word times → replies, a new reply at a pause > max_gap.
-
-    Whisper glues continuous speech into windows of up to 30 s with one start time, so in a
-    two-track dialogue the other side's reply landed after the whole window. Words without a
-    time join the current reply.
-    """
-    out: list[Segment] = []
-    cur: list[dict] = []
-
-    def flush() -> None:
-        text = "".join(str(w.get("word", "")) for w in cur).strip()
-        if text:
-            out.append(Segment(start=float(cur[0]["start"]), end=float(cur[-1]["end"]), text=text))
-        cur.clear()
-
-    for seg in raw_segments:
-        words = seg.get("words") or []
-        if not words:
-            if cur:
-                flush()
-            text = str(seg.get("text", "")).strip()
-            if text:
-                out.append(Segment(start=float(seg["start"]), end=float(seg["end"]), text=text))
-            continue
-        for w in words:
-            if "start" not in w or "end" not in w:
-                if cur:
-                    cur.append({**w, "start": cur[-1]["end"], "end": cur[-1]["end"]})
-                continue
-            if cur and float(w["start"]) - float(cur[-1]["end"]) > max_gap:
-                flush()
-            cur.append(w)
-    if cur:
-        flush()
-    return out
-
-
-# One lock for LOADING models on CUDA (gigaam/torch, ct2 large-v3, whisperx): initializing two
-# CUDA stacks concurrently can poison the process's CUDA context ("out of memory" with free
-# VRAM, cured only by a restart). Inference does not take it. RLock: _whisperx_model →
-# shared_whisper_model takes it twice on one thread.
-_CUDA_LOAD_LOCK = threading.RLock()
-
-# GigaAM (Conformer) is strong on conversational Russian; v3_e2e_rnnt adds punctuation and
-# casing itself. Russian only. One lock for the model: calls are short, no shared state.
-_GIGAAM_LOCK = threading.Lock()
-_GIGAAM_MODEL: Any = None
-# The package's short-inference limit (LONGFORM_THRESHOLD) is 25.0; ours keeps 1 s of margin,
-# since the package's behaviour right at the limit is not guaranteed.
-_GIGAAM_MODEL_NAME = "v3_e2e_rnnt"
-_GIGAAM_SHORT_MAX_S = 24.0
-
-
-@contextlib.contextmanager
-def _quiet_third_party():
-    """Silence library noise during the call: gigaam and torch warn into the root logger and
-    tqdm prints weight-download progress (~450 MB) to stderr over the terminal UI. Errors are
-    kept; our on() shows the phase."""
-    import io
-    import warnings as _warnings
-
-    with _warnings.catch_warnings(), contextlib.redirect_stderr(io.StringIO()):
-        _warnings.simplefilter("ignore")
-        logging.disable(logging.WARNING)
-        try:
-            yield
-        finally:
-            logging.disable(logging.NOTSET)
-
-
-def _gigaam_model() -> Any:
-    """Lazy GigaAM (v3_e2e_rnnt), cached per process; the package downloads the weights
-    (~450 MB) and tokenizer and verifies the checksum."""
-    global _GIGAAM_MODEL
-    if _GIGAAM_MODEL is None:
-        import gigaam
-
-        # weights go to the Mnema XDG cache, not ~/.cache/gigaam
-        cache = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "mnema"
-        with _CUDA_LOAD_LOCK, _quiet_third_party():
-            if _GIGAAM_MODEL is None:  # re-check: another thread may have loaded it
-                _GIGAAM_MODEL = gigaam.load_model(
-                    _GIGAAM_MODEL_NAME, download_root=str(cache / "gigaam")
-                )
-    return _GIGAAM_MODEL
-
-
-_GIGAAM_SR = 16000
-# Windows ≤ 22 s (margin below the 25 s short-inference limit).
-_GIGAAM_WINDOW_S = 22.0
-
-
-@contextlib.contextmanager
-def _torch_threads(count: int) -> Any:
-    """A temporary torch thread budget; the previous one is restored after errors."""
-    import torch
-
-    before = torch.get_num_threads()
-    try:
-        if before != count:
-            torch.set_num_threads(count)
-        yield
-    finally:
-        if torch.get_num_threads() != before:
-            torch.set_num_threads(before)
-
-
 def _asr_cpu_threads() -> int:
     """auto uses every available CPU; MNEMA_ASR_THREADS sets a manual limit."""
     from .settings import available_cpu_threads, requested_asr_threads
@@ -374,137 +99,14 @@ def _asr_cpu_threads() -> int:
     return available if requested == "auto" else min(requested, available)
 
 
-_GIGAAM_MAX_GAP_S = 0.6  # a longer pause starts a new reply
+ONLY_CLOUD = "This language is recognized only in the cloud"
 
 
-def _gigaam_infer(model: Any, chunk: Any) -> str:
-    """Direct tensor inference: windows are slices of the loaded recording, no file per window."""
-    import numpy as np
-    import torch
+class OnlyCloud(MediaError):
+    """A language no local engine has: the remark says so; the audio never goes out by itself."""
 
-    chunk = torch.from_numpy(np.ascontiguousarray(chunk))
-    chunk = chunk.to(model._device).unsqueeze(0).to(model._dtype)
-    length = torch.tensor([chunk.shape[-1]], device=model._device)
-    with torch.inference_mode():
-        encoded, encoded_len = model.forward(chunk, length)
-        text = model.decoding.decode(model.head, encoded, encoded_len)[0][0]  # (text, ids, frames)
-    return text.strip()
-
-
-class _Windowed:
-    """A windowed engine (GigaAM): silero cuts the recording into windows that are recognized
-    independently."""
-
-    name = ""
-    title = ""
-    window_s = 0.0
-    max_gap_s: float | None = None  # max pause when joining VAD chunks; None — any
-
-    def load(self, on: Progress) -> Any:
-        raise NotImplementedError
-
-    def infer(self, model: Any, chunk: Any, lang: str | None) -> list[Segment]:
-        """A window → replies timed from the window start."""
-        raise NotImplementedError
-
-
-class _GigaAmWindows(_Windowed):
-    name, title, window_s, max_gap_s = "gigaam", "GigaAM", _GIGAAM_WINDOW_S, _GIGAAM_MAX_GAP_S
-
-    def load(self, on: Progress) -> Any:
-        return _gigaam_model()
-
-    def infer(self, model: Any, chunk: Any, lang: str | None) -> list[Segment]:
-        text = _gigaam_infer(model, chunk)
-        return [Segment(start=0.0, end=len(chunk) / _GIGAAM_SR, text=text)] if text else []
-
-
-WINDOWED: dict[str, _Windowed] = {e.name: e for e in (_GigaAmWindows(),)}
-
-
-def _group_window_speech(engine: _Windowed, speech: list[dict]) -> list[tuple[int, int]]:
-    window = int(engine.window_s * _GIGAAM_SR)
-    gap = window if engine.max_gap_s is None else int(engine.max_gap_s * _GIGAAM_SR)
-    return group_speech([(int(x["start"]), int(x["end"])) for x in speech], window, gap)
-
-
-def _infer_windows(
-    engine: _Windowed,
-    model: Any,
-    audio: Any,
-    windows: list[tuple[int, int]],
-    *,
-    base: int,
-    lang: str | None,
-    on: Progress,
-) -> list[Segment]:
-    """Windows (samples from base) → replies with absolute times."""
-    segments: list[Segment] = []
-    for i, (s, e) in enumerate(windows, 1):
-        offset = (base + s) / _GIGAAM_SR
-        segments += [
-            x.model_copy(update={"start": x.start + offset, "end": x.end + offset})
-            for x in engine.infer(model, audio[s:e], lang)
-        ]
-        on(i / len(windows), _("Recognizing…"))
-    return segments
-
-
-def _windowed_longform(
-    engine: _Windowed, model: Any, wav: Path, lang: str | None, on: Progress
-) -> list[Segment]:
-    """A long recording: silero → windows → direct tensor inference.
-
-    Instead of gigaam.transcribe_longform, which needs pyannote VAD (a gated model, HF_TOKEN);
-    silero works offline and gives real per-window progress.
-    """
-    audio = read_wav(wav)
-    on(None, _("Looking for speech…"))
-    speech = vad.speech_timestamps(audio, max_speech_duration_s=engine.window_s)
-    windows = _group_window_speech(engine, speech)
-    return _infer_windows(engine, model, audio, windows, base=0, lang=lang, on=on)
-
-
-class GigaAmBackend(Engine):
-    id = name = "gigaam"
-    title, extra, langs, names_lang = "GigaAM", "gigaam", frozenset({"ru"}), False
-    model = _GIGAAM_MODEL_NAME  # a single model: --model does not apply to GigaAM
-
-    def available(self) -> bool:
-        import importlib.util
-
-        return importlib.util.find_spec("gigaam") is not None
-
-    def run(
-        self,
-        src: Path,
-        *,
-        lang: str | None = None,
-        total_duration: float = 0.0,
-        on: Progress = noop,
-    ) -> Transcript:
-        if lang not in (None, "ru"):
-            raise MediaError(_("GigaAM recognizes only Russian ({lang} requested).", lang=lang))
-        with tempfile.TemporaryDirectory() as tmp:
-            # 0.3 s of leading silence protects the first word, as on the whisper paths
-            wav = extract_audio(src, Path(tmp) / "audio.wav", pad_start_ms=300, on=on)
-            # Short vs long form by the ACTUAL extracted WAV length (PCM16 mono 16 kHz →
-            # bytes / 32000), not the source's probed duration: probe plus padding pushed a
-            # borderline 24 s voice message past the package limit ("Too long wav file").
-            wav_secs = wav.stat().st_size / 32000.0
-            if total_duration <= 0:  # input without a probe (a bare wav)
-                total_duration = wav_secs
-            on(None, _("Loading the recognition model…"))
-            with _GIGAAM_LOCK, _torch_threads(_asr_cpu_threads()):
-                model = _gigaam_model()
-                if wav_secs > _GIGAAM_SHORT_MAX_S:
-                    segments = _windowed_longform(WINDOWED["gigaam"], model, wav, "ru", on)
-                else:
-                    on(None, _("Recognizing…"))
-                    text = _gigaam_infer(model, read_wav(wav))
-                    segments = [Segment(start=0.0, end=total_duration, text=text)] if text else []
-        text = " ".join(s.text for s in segments).strip()
-        return Transcript(text=text, segments=segments, language="ru")
+    def __init__(self) -> None:
+        super().__init__(_(ONLY_CLOUD))
 
 
 class ParakeetBackend(Engine):
@@ -528,10 +130,8 @@ class ParakeetBackend(Engine):
     ) -> Transcript:
         """A given language only checks the choice and cleans the replies: the model recognizes
         without a hint; without one the language is named from the recognized text."""
-        if lang is not None and lang not in parakeet.LANGS:
-            raise MediaError(
-                _("Parakeet does not support the language {lang} — choose Whisper.", lang=lang)
-            )
+        if not self.supports(lang):
+            raise OnlyCloud
         with tempfile.TemporaryDirectory() as tmp:
             wav = extract_audio(src, Path(tmp) / "audio.wav", pad_start_ms=300, on=on)
             words = asr_engine.local_recognizer().words(wav, on=on)
@@ -541,220 +141,6 @@ class ParakeetBackend(Engine):
         segments = parakeet.tidy(segments, lang)
         text = " ".join(s.text for s in segments).strip()
         return Transcript(text=text, segments=segments, language=lang)
-
-
-# whisperX pipelines built in this job process (tracks of one recording), under their own lock.
-_WHISPERX_CACHE_LOCK = threading.RLock()
-_WHISPERX_ASR: dict[tuple[str, str, str, int], Any] = {}
-
-# ONE large-v3 (CT2, fp16) per process for batch whisperX. Live does not share it: mixing the
-# torch and ct2 CUDA allocators in one session caused "out of memory" with gigabytes free and
-# poisoned the process's CUDA context. A copy of the weights is cheaper than that.
-_SHARED_WHISPER_LOCK = threading.Lock()
-_SHARED_WHISPER: Any = None
-_SHARED_WHISPER_THREADS: int | None = None
-
-# The torch caching allocator's share of VRAM (live engine + batch VAD). torch caches what it
-# takes, so without a cap it eats the memory ctranslate2 allocates from directly. 0.6 of 22 GB
-# ≈ 13 GB fits live large-v3 (0.5 was too tight) and leaves ~9 GB for the ct2 batch.
-_TORCH_VRAM_FRACTION = 0.6
-_torch_capped = False
-
-
-def cap_torch_vram(fraction: float = _TORCH_VRAM_FRACTION) -> None:
-    """Cap the torch caching allocator at a share of VRAM (idempotent, before heavy allocations).
-
-    torch and ctranslate2 do not see each other; the cap keeps memory for the ct2 batch. Hitting
-    it gives a recoverable torch OOM in one live session instead of a poisoned CUDA context.
-    Each live session is its own process with a share of the budget (live/worker.py)."""
-    global _torch_capped
-    if _torch_capped:
-        return
-    _torch_capped = True
-    try:
-        import torch
-
-        if torch.cuda.is_available():
-            torch.cuda.set_per_process_memory_fraction(fraction)
-            logger.info("torch: VRAM cap %.0f%% of the device", fraction * 100)
-    except Exception:  # noqa: BLE001 - no torch/CUDA (Mac, thin client): nothing to cap
-        pass
-
-
-def shared_whisper_model() -> Any:
-    """One large-v3 (fp16, CUDA) with the current request's CPU budget."""
-    global _SHARED_WHISPER, _SHARED_WHISPER_THREADS
-    threads = _asr_cpu_threads()
-    with _SHARED_WHISPER_LOCK:
-        if _SHARED_WHISPER is None or _SHARED_WHISPER_THREADS != threads:
-            import torch
-            from whisperx.asr import WhisperModel  # ty: ignore[unresolved-import]
-
-            torch.set_num_threads(threads)
-            logger.info(
-                "shared whisper: loading %s (fp16); %s", DEFAULT_WHISPERX_MODEL, vram_status()
-            )
-            with _CUDA_LOAD_LOCK:  # ct2 init does not race torch loads
-                _SHARED_WHISPER = WhisperModel(
-                    DEFAULT_WHISPERX_MODEL,
-                    device="cuda",
-                    compute_type="float16",
-                    cpu_threads=threads,
-                )
-                _SHARED_WHISPER_THREADS = threads
-            logger.info("shared whisper: ready; %s", vram_status())
-        return _SHARED_WHISPER
-
-
-def _whisperx_model(whisperx: Any, model: str, device: str, compute_type: str) -> Any:
-    """A cached whisperX pipeline; ASR weights are the process-wide shared_whisper_model.
-
-    load_model(model=<instance>) skips loading its own weights, so VRAM holds one large-v3. A
-    non-default model loads its own weights (the shared instance is fixed to large-v3).
-    """
-    threads = _asr_cpu_threads()
-    key = (model, device, compute_type, threads)
-    with _WHISPERX_CACHE_LOCK:
-        cached = _WHISPERX_ASR.get(key)
-        if cached is not None:
-            return cached
-        # CT2 sizes its CPU pool at load time: a new budget means a new engine, and old ones are
-        # dropped from the cache (a running request keeps its own reference).
-        for previous in [k for k in _WHISPERX_ASR if k[:3] == key[:3]]:
-            del _WHISPERX_ASR[previous]
-        logger.info(
-            "batch whisperx: building pipeline %s (%s); %s", model, compute_type, vram_status()
-        )
-        # the shared CUDA instance is a server optimization; on CPU each pipeline loads its own
-        # weights (a CPU client runs one call at a time)
-        preloaded = (
-            shared_whisper_model() if model == DEFAULT_WHISPERX_MODEL and device == "cuda" else None
-        )
-        # threads matters for a non-default model (load_model builds its own WhisperModel); the
-        # preloaded default already has cpu_threads.
-        with _CUDA_LOAD_LOCK:  # the pipeline's VAD model is torch on CUDA
-            if device == "cuda":
-                cap_torch_vram()  # before the VAD loads
-            cached = whisperx.load_model(
-                model, device, compute_type=compute_type, model=preloaded, threads=threads
-            )
-        logger.info("batch whisperx: pipeline %s ready; %s", model, vram_status())
-        _WHISPERX_ASR[key] = cached
-        return cached
-
-
-def _torch_device() -> str:
-    """cuda when CUDA works, else cpu: the default whisperX device."""
-    try:
-        import torch
-
-        return "cuda" if torch.cuda.is_available() else "cpu"
-    except Exception:  # noqa: BLE001 - no torch: run() is never reached (available=False)
-        return "cpu"
-
-
-class WhisperXBackend:
-    name = "whisperx"
-
-    def __init__(self, model: str = DEFAULT_WHISPERX_MODEL, device: str | None = None):
-        self.model = model
-        # None: CUDA if present, else CPU (ct2 int8, an order of magnitude slower but working on
-        # a Linux laptop without NVIDIA)
-        self._device = device
-
-    @property
-    def device(self) -> str:
-        if self._device is None:
-            self._device = _torch_device()
-        return self._device
-
-    def available(self) -> bool:
-        import importlib.util
-
-        # the package, NOT CUDA: whisperx works on CPU (int8), just slower
-        return importlib.util.find_spec("whisperx") is not None
-
-    def run(
-        self,
-        src: Path,
-        *,
-        lang: str | None = None,
-        total_duration: float = 0.0,
-        on: Progress = noop,
-    ) -> Transcript:
-        import whisperx  # ty: ignore[unresolved-import]
-
-        # ctranslate2 has no fp16 on CPU; int8 is the fastest CPU option without losing
-        # recognition quality (weights are quantized, not activations)
-        compute_type = "float16" if self.device == "cuda" else "int8"
-        # pyannote is noisy with warnings.
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            # ffmpeg decoding is long and reports no fraction, so name the phase.
-            on(None, _("Extracting audio…"))
-            audio = whisperx.load_audio(str(src))
-            # 0.3 s of leading silence: voice messages start with speech, and VAD swallowed the
-            # first fraction of a second. Segment times shift by 0.3 s, which is negligible.
-            # Best effort: audio of an unusual type (not an ndarray) is left unpadded.
-            try:
-                import numpy as _np
-
-                audio = _np.concatenate([_np.zeros(int(0.3 * 16000), dtype=audio.dtype), audio])
-            except Exception:  # noqa: BLE001
-                pass
-            on(None, _("Loading the recognition model…"))
-            model = _whisperx_model(whisperx, self.model, self.device, compute_type)
-            result = model.transcribe(
-                audio,
-                language=lang,
-                progress_callback=lambda pct: on(pct / 100, _("Recognizing…")),
-            )
-            language = result.get("language", lang)
-
-        segments: list[Segment] = []
-        for s in result["segments"]:
-            segments.append(
-                Segment(
-                    start=float(s["start"]),
-                    end=float(s["end"]),
-                    text=str(s["text"]).strip(),
-                )
-            )
-        text = " ".join(s.text for s in segments)
-        return Transcript(text=text, segments=segments, language=language)
-
-
-class WhisperBackend(Engine):
-    """This platform's whisper, any language: mlx-whisper on Apple Silicon, else whisperX. The
-    variant runs and is recorded in history (mlx, whisperx)."""
-
-    id = name = "whisper"
-    title, extra = "Whisper", "whisper"
-    model = DEFAULT_LOCAL_MODEL
-
-    @staticmethod
-    def variants(model: str | None = None) -> list[TranscriptionBackend]:
-        return [_variant(name, model) for name in _VARIANTS]
-
-    @classmethod
-    def create(cls, model: str | None = None) -> TranscriptionBackend:
-        for variant in cls.variants(model):
-            if variant.available():
-                return variant
-        raise MediaError(_no_engine())
-
-    def available(self) -> bool:
-        return any(variant.available() for variant in self.variants())
-
-    def run(
-        self,
-        src: Path,
-        *,
-        lang: str | None = None,
-        total_duration: float = 0.0,
-        on: Progress = noop,
-    ) -> Transcript:
-        return self.create().run(src, lang=lang, total_duration=total_duration, on=on)
 
 
 # OpenAI in the cloud: the user's choice is the model, the key is the user's recognition key
@@ -783,7 +169,7 @@ def _is_track(src: Path) -> bool:
 
     try:
         with wave.open(str(src)) as w:
-            return (w.getnchannels(), w.getsampwidth(), w.getframerate()) == (1, 2, _GIGAAM_SR)
+            return (w.getnchannels(), w.getsampwidth(), w.getframerate()) == (1, 2, SR)
     except (OSError, EOFError, wave.Error):
         return False
 
@@ -805,11 +191,11 @@ def _wav_bytes(wav: Path, start: int, end: int) -> bytes:
 
 
 def _utterances(speech: list[tuple[int, int]]) -> list[list[tuple[int, int]]]:
-    """VAD speech (samples) → utterances split at pauses as for GigaAM, each in parts of at most
+    """VAD speech (samples) → utterances split at pauses as replies are, each in parts of at most
     _CLOUD_PART_S; a part follows the previous one of its utterance without a pause."""
-    gap = int(_GIGAAM_MAX_GAP_S * _GIGAAM_SR)
+    gap = int(REPLY_GAP_S * SR)
     out: list[list[tuple[int, int]]] = []
-    for part in group_speech(speech, int(_CLOUD_PART_S * _GIGAAM_SR), gap):
+    for part in group_speech(speech, int(_CLOUD_PART_S * SR), gap):
         if out and part[0] - out[-1][-1][1] <= gap:
             out[-1].append(part)
         else:
@@ -891,7 +277,7 @@ class CloudBackend(Engine):
                 prompt = " ".join(words[-_CLOUD_PROMPT_WORDS:]) or None
                 text = self._ask(_wav_bytes(wav, s, e), lang, prompt, report)
                 if text:
-                    found.append(Segment(start=s / _GIGAAM_SR, end=e / _GIGAAM_SR, text=text))
+                    found.append(Segment(start=s / SR, end=e / SR, text=text))
             with lock:
                 done[index] = found
 
@@ -930,18 +316,17 @@ class CloudBackend(Engine):
             return _answer_text(answer)
 
 
-# The registry, in the order automatic choice tries them.
-ENGINES: tuple[type[Engine], ...] = (ParakeetBackend, GigaAmBackend, WhisperBackend, CloudBackend)
-# Whisper variants, also chosen by name (CLI --backend mlx | whisperx)
-_VARIANTS: dict[str, type[MlxBackend] | type[WhisperXBackend]] = {
-    "mlx": MlxBackend,
-    "whisperx": WhisperXBackend,
-}
+# The registry: the local engine first, then the cloud.
+ENGINES: tuple[type[Engine], ...] = (ParakeetBackend, CloudBackend)
+# Saved choices of earlier versions (bar.json, the phone, server jobs, an old CLI): exact ids.
+_RETIRED = frozenset(
+    {"whisper", "gigaam", "mlx", "whisperx", "groq/whisper-large-v3", "groq/whisper-large-v3-turbo"}
+)
 
 
-def _variant(name: str, model: str | None) -> TranscriptionBackend:
-    variant = _VARIANTS[name]
-    return variant(model) if model else variant()
+def retired(choice: str) -> str:
+    """The choice as it works now: an engine or a model of an earlier version is automatic."""
+    return AUTO if choice in _RETIRED else choice
 
 
 def _no_engine() -> str:
@@ -952,7 +337,7 @@ def _no_engine() -> str:
 
 
 def engine(choice: str) -> type[Engine] | None:
-    """The registered engine of this choice, or None (auto, a variant, unknown)."""
+    """The registered engine of this choice, or None (auto, unknown)."""
     if is_cloud(choice):
         return next((e for e in ENGINES if e.cloud), None)
     return next((e for e in ENGINES if not e.cloud and e.id == choice), None)
@@ -964,8 +349,8 @@ def installed_engines() -> list[type[Engine]]:
 
 
 def backend_choices() -> list[str]:
-    """CLI --backend: automatic, every local engine, the whisper variants and the cloud models."""
-    return [AUTO, *(e.id for e in ENGINES if not e.cloud), *_VARIANTS, *CLOUD_MODELS]
+    """CLI --backend: automatic, every local engine and the cloud models."""
+    return [AUTO, *(e.id for e in ENGINES if not e.cloud), *CLOUD_MODELS]
 
 
 def engines_available() -> bool:
@@ -981,21 +366,21 @@ def select_backend(
 ) -> TranscriptionBackend:
     """The backend by name, or by automatic choice.
 
-    An engine named explicitly is returned as is (the caller checks available()), except
-    whisper, which needs an installed variant. AUTO: the first installed engine of ENGINES that
-    takes the language (Engine.automatic_for): no language or a Parakeet language → Parakeet;
-    Russian without it → GigaAM; otherwise Whisper. --model applies to whisper models only.
+    An engine named explicitly is returned as is (the caller checks available()). AUTO: the
+    first installed local engine that takes the language; a language none of them has is
+    recognized only in the cloud, and the audio never goes there by itself.
     """
     name = str(name)
-    if name in _VARIANTS:
-        return _variant(name, model)
     found = engine(name)
     if found is not None:
         return found.create(name if found.cloud else model)
     if name != AUTO:
         allowed = ", ".join(backend_choices())
         raise MediaError(_("Unknown backend: {name} ({allowed})", name=name, allowed=allowed))
-    for candidate in ENGINES:
+    local = [e for e in ENGINES if not e.cloud]
+    if not any(e.supports(lang) for e in local):
+        raise OnlyCloud
+    for candidate in local:
         if candidate.automatic_for(lang) and candidate().available():
             return candidate.create(model)
     raise MediaError(_no_engine())

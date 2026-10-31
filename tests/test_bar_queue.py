@@ -331,12 +331,12 @@ def test_recognition_setting_applies_to_records_that_have_not_started(setup, tmp
     rt.recover(_folder(tmp_path / "notes", "2026-10-21_10-00"))
     gate.entered()
     _record(rt, captured)  # recorded with "Automatic"
-    rt.handle("asr:gigaam")
+    rt.handle("asr:parakeet")
     gate.release(0)
     gate.entered()
     gate.release(1)
     rt.join(timeout=10)
-    assert [c.get("backend") for c in gate.calls] == [None, "gigaam"]
+    assert [c.get("backend") for c in gate.calls] == [None, "parakeet"]
 
 
 def test_quit_with_queue_asks_and_keeps_records_unprocessed(setup, tmp_path) -> None:

@@ -1045,18 +1045,16 @@ def test_cloud_context_failure_still_names_folder(monkeypatch, tmp_path) -> None
     ("asr", "lang", "backend"),
     [
         ("auto", "ru", None),
-        ("whisper", "ru", "whisper"),
-        ("gigaam", "ru", "gigaam"),
-        ("gigaam", "en", "whisper"),
         ("parakeet", "ru", "parakeet"),
-        ("parakeet", "en", "parakeet"),
-        ("parakeet", "ja", "whisper"),
+        ("parakeet", None, "parakeet"),
+        ("gigaam", "ru", None),  # a choice of an earlier version: automatic
+        ("whisper", "en", None),
+        ("openai/gpt-4o-transcribe", "ja", "openai/gpt-4o-transcribe"),
     ],  # fmt: skip
 )
 def test_chosen_speech_model_goes_to_recognition(monkeypatch, tmp_path, asr, lang, backend) -> None:
-    """The chosen recognition model goes to the engine: Whisper for any language, GigaAM only
-    for Russian, Parakeet for its 25 languages (another language: Whisper), "Automatic" with
-    no choice (the core decides)."""
+    """The chosen recognition goes to the engine; "Automatic" and a retired engine go with no
+    choice (the core decides)."""
     _patch_build(monkeypatch, {})
     calls: list = []
     _fake_dispatch(monkeypatch, calls=calls)
@@ -1065,6 +1063,23 @@ def test_chosen_speech_model_goes_to_recognition(monkeypatch, tmp_path, asr, lan
     finalize_live(prepared, _live_tracks(), retitle=False)
     [call] = [c for c in calls if c["op"] == "transcribe"]
     assert call["params"].get("backend") == backend
+
+
+@pytest.mark.parametrize("asr", ["auto", "parakeet"])
+def test_a_language_parakeet_lacks_is_a_remark_not_a_recognition(monkeypatch, tmp_path, asr):
+    """A language outside Parakeet's 25 is recognized only in the cloud: the track gets the
+    remark, nothing is recognized and no audio goes out by itself."""
+    _patch_build(monkeypatch, {})
+    calls: list = []
+    _fake_dispatch(monkeypatch, calls=calls)
+    prepared = build_live(LiveConfig(asr=asr, lang="ja"), base=tmp_path / "x")
+    _write_wav(prepared)
+    result, _ = finalize_live(prepared, _live_tracks(), retitle=False)
+    assert not [c for c in calls if c["op"] == "transcribe"]
+    [remark] = [r for r in result.remarks if r.step == Step.ASR]
+    assert remark.cause == (
+        "Не удалось распознать дорожку «Микрофон»: Этот язык распознаёт только облако"
+    )
 
 
 def test_cloud_speech_model_without_key_is_a_remark(monkeypatch, tmp_path) -> None:

@@ -10,8 +10,12 @@ The module imports without numpy and onnxruntime: heavy work happens inside func
 
 from __future__ import annotations
 
+import errno
+import fcntl
 import hashlib
+import logging
 import re
+import shutil
 import threading
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -19,8 +23,10 @@ from typing import Any, NamedTuple
 from ..i18n import _
 from . import vad
 from .asr_engine import Word, group_speech, read_wav
-from .base import MediaError, Progress, noop
+from .base import MediaError, Progress, cache_home, noop
 from .models import Segment
+
+logger = logging.getLogger(__name__)
 
 MODEL = "parakeet-ultra"
 # Pinned public export of Ultra (CC-BY-4.0); the code does not depend on the file names.
@@ -228,9 +234,14 @@ def available() -> bool:
     )
 
 
+DOWNLOAD_FAILED = "Could not download the recognition model. Check the connection and try again"
+NO_SPACE = "Not enough disk space for the recognition model"
+
+
 def model_dir(on: Progress = noop) -> Path:
     """The folder with ONNX_FILES: MNEMA_PARAKEET_ONNX_DIR as is, otherwise the pinned revision
-    in the HF cache (downloaded once, ~860 MB, each file checked by sha256)."""
+    in the cache (downloaded once, ~860 MB). A file gets there only after its sha256 matched:
+    the download lands next to it first, so one cut short or never checked is not taken."""
     from .settings import RuntimeSettings
 
     given = RuntimeSettings().parakeet_onnx_dir
@@ -240,9 +251,34 @@ def model_dir(on: Progress = noop) -> Path:
             if not (folder / name).is_file():
                 raise MediaError(_("No {name} in {folder}", name=name, folder=folder))
         return folder
+    folder = cache_home() / "mnema" / ONNX_REPO.replace("/", "--") / ONNX_REVISION
+    if all((folder / name).is_file() for name in ONNX_FILES):
+        return folder
+    on(None, _("Downloading the recognition model, only the first time…"))
+    staging = folder.with_name(f".{folder.name}.partial")
+    staging.mkdir(parents=True, exist_ok=True)
+    with (staging.parent / f".{folder.name}.lock").open("w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)  # one download at a time: jobs of the server, the Mac
+        for name in ONNX_FILES:
+            if (folder / name).is_file():  # checked earlier, maybe by another job
+                continue
+            path = _download(name, staging)
+            if _sha256(path) != ONNX_FILES[name]:
+                path.unlink(missing_ok=True)
+                raise MediaError(_("The recognition model did not download correctly. Try again"))
+            folder.mkdir(parents=True, exist_ok=True)
+            path.replace(folder / name)
+        shutil.rmtree(staging, ignore_errors=True)
+    return folder
+
+
+def _download(name: str, staging: Path) -> Path:
+    """One file of the pinned revision into staging (huggingface_hub: proxy, token, resuming);
+    the network, HTTP and offline mode refuse in the user's words."""
     try:
+        import httpx
         import huggingface_hub
-        from huggingface_hub.errors import LocalEntryNotFoundError
+        from huggingface_hub.errors import EntryNotFoundError
     except ImportError as e:
         raise MediaError(
             _(
@@ -250,33 +286,16 @@ def model_dir(on: Progress = noop) -> Path:
                 "(./install.sh client or ./install.sh server)."
             )
         ) from e
-
-    def fetch(name: str, *, cached: bool) -> Path:
+    try:
         return Path(
             huggingface_hub.hf_hub_download(
-                ONNX_REPO, name, revision=ONNX_REVISION, local_files_only=cached
+                ONNX_REPO, name, revision=ONNX_REVISION, local_dir=staging
             )
         )
-
-    folders, told = set(), False
-    for name, sha256 in ONNX_FILES.items():
-        try:  # in the cache: checked when it was downloaded
-            path = fetch(name, cached=True)
-        except LocalEntryNotFoundError:
-            if not told:
-                on(None, _("Downloading the recognition model, only the first time…"))
-                told = True
-            path = fetch(name, cached=False)
-            if _sha256(path) != sha256:
-                blob = path.resolve()
-                path.unlink(missing_ok=True)
-                blob.unlink(missing_ok=True)
-                raise MediaError(
-                    _("The recognition model did not download correctly. Try again")
-                ) from None
-        folders.add(path.parent)
-    (folder,) = folders  # one snapshot of the revision
-    return folder
+    except (OSError, EntryNotFoundError, httpx.HTTPError) as e:
+        logger.warning("could not download %s of %s: %s", name, ONNX_REPO, e)
+        no_space = isinstance(e, OSError) and e.errno == errno.ENOSPC
+        raise MediaError(_(NO_SPACE) if no_space else _(DOWNLOAD_FAILED)) from e
 
 
 def _sha256(path: Path) -> str:

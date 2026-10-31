@@ -68,7 +68,7 @@ def dispatch(
 
         if spec is None:
             raise MediaError(_("Unknown operation: {op}", op=op))
-        validated = spec.params.model_validate(params).model_dump(exclude_none=True)
+        validated = ops.parsed(spec, params).model_dump(exclude_none=True)
         downloaded = isinstance(src, list) or mc.is_url(str(src))
         p_input, p_op = phased(on, 0.15, 0.85) if downloaded else (noop, on)
         with local_input(src, cookies=cookies, want_video=not spec.audio_only, on=p_input) as path:

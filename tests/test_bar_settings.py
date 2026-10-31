@@ -63,8 +63,7 @@ def rt(monkeypatch, tmp_path) -> BarRuntime:
     return BarRuntime(prefs_file=tmp_path / "bar.json")
 
 
-_ASR = [("auto", "Автоматически"), ("parakeet", "Parakeet"), ("gigaam", "GigaAM"),
-        ("whisper", "Whisper")]  # fmt: skip
+_ASR = [("auto", "Автоматически"), ("parakeet", "Parakeet")]
 HOME = MenuEnv(
     mac=True, server="http://srv:8123", server_ok=True, server_name="Дом", server_records=128,
     server_llm=True, server_model="gemini/gemini-flash-latest", asr_choices=_ASR,
@@ -649,17 +648,11 @@ def test_processing_tab_offers_local_and_cloud_speech_models() -> None:
     """Linux recognition: the list comes from the server; the saved choice shows while the server
     is unavailable too."""
     env = MenuEnv(
-        asr_choices=[
-            ("auto", "Автоматически"),
-            ("parakeet", "Parakeet"),
-            ("gigaam", "GigaAM"),
-            ("whisper", "Whisper"),
-        ],
+        asr_choices=[("auto", "Автоматически"), ("parakeet", "Parakeet")],
     )
     field = _field(settings_model(BarPrefs(), env), "Движок")
     assert [(c.key, c.title) for c in field.choices] == [
-        ("asr:auto", "Автоматически"), ("asr:parakeet", "Parakeet"), ("asr:gigaam", "GigaAM"),
-        ("asr:whisper", "Whisper"),
+        ("asr:auto", "Автоматически"), ("asr:parakeet", "Parakeet"),
     ]  # fmt: skip
     assert field.value == "Автоматически"
     cloud = BarPrefs(recognition="cloud", asr="openai/gpt-4o-mini-transcribe")
@@ -672,8 +665,8 @@ def test_speech_model_choice_is_remembered(tmp_path) -> None:
     from mnema.bar.runtime import BarRuntime
 
     rt = BarRuntime(prefs_file=tmp_path / "bar.json")
-    rt.handle("asr:whisper")
-    assert BarRuntime(prefs_file=tmp_path / "bar.json").prefs.asr == "whisper"
+    rt.handle("asr:parakeet")
+    assert BarRuntime(prefs_file=tmp_path / "bar.json").prefs.asr == "parakeet"
 
 
 @pytest.mark.parametrize(
@@ -721,10 +714,10 @@ def test_quit_keeps_settings_written_while_running(rt: BarRuntime, tmp_path) -> 
     not bring back the old ones from the app's memory."""
     path = tmp_path / "bar.json"
     outside = load_prefs(path)
-    outside.asr = "whisper"
+    outside.asr = "parakeet"
     save_prefs(outside, path)
     rt.handle("quit")
-    assert rt.quit_requested and load_prefs(path).asr == "whisper"
+    assert rt.quit_requested and load_prefs(path).asr == "parakeet"
 
 
 _MODEL = {"model": "deepseek/deepseek-chat", "key": "…a1B2", "asr_key": None, "deepl_key": None}

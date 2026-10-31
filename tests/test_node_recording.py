@@ -63,7 +63,7 @@ def boundaries(monkeypatch):
     monkeypatch.setattr(
         importlib.util,
         "find_spec",
-        lambda n, *a, **kw: object() if n == "whisperx" else find(n, *a, **kw),
+        lambda n, *a, **kw: object() if n == "onnxruntime" else find(n, *a, **kw),
     )
     monkeypatch.setattr(providers, "TRANSPORT", httpx.MockTransport(lambda r: httpx.Response(404)))
     monkeypatch.setattr(limits, "_FETCHED", {})
@@ -86,7 +86,7 @@ def boundaries(monkeypatch):
             "text": WORDS,
             "segments": [{"start": 0, "end": 1, "text": WORDS}],
             "language": "ru",
-            "engine": "whisperx",
+            "engine": "parakeet",
         }
 
     monkeypatch.setattr(audio, "extract_audio", extract)
@@ -309,18 +309,33 @@ def test_asr_failure_does_not_expose_node_paths(tmp_path, monkeypatch):
     _clean(tmp_path)
 
 
-def test_auto_with_only_gigaam_validates_language_before_claim(tmp_path, monkeypatch):
+@pytest.mark.parametrize("saved", ["gigaam", "whisper", "groq/whisper-large-v3-turbo"])
+def test_a_choice_of_an_earlier_version_is_processed_automatically(tmp_path, monkeypatch, saved):
+    """The phone and old clients keep sending a retired engine or model: the server recognizes
+    automatically and says so in the history."""
+    _model(monkeypatch)
+    seen: list[dict] = []
+    recognize = setup.dispatch
+
+    def dispatch(op, path, params, **kw):
+        seen.append(params)
+        return recognize(op, path, params, **kw)
+
+    monkeypatch.setattr(setup, "dispatch", dispatch)
+    client = TestClient(create_app(tmp_path))
+    job = _wait(client, _start(client, labels=("mic",), asr=saved))
+    assert job["status"] == "done", job
+    assert job["result"]["run"]["settings"]["asr"] == "auto"
+    assert seen and all("backend" not in params for params in seen)
+    _clean(tmp_path)
+
+
+def test_no_engine_refuses_before_the_uploads_are_claimed(tmp_path, monkeypatch):
     find = importlib.util.find_spec
     monkeypatch.setattr(
         importlib.util,
         "find_spec",
-        lambda n, *a, **kw: (
-            object()
-            if n == "gigaam"
-            else None
-            if n in ("whisperx", "mlx_whisper", "onnxruntime")
-            else find(n, *a, **kw)
-        ),
+        lambda n, *a, **kw: None if n == "onnxruntime" else find(n, *a, **kw),
     )
     _model(monkeypatch)
     app = create_app(tmp_path)
@@ -329,17 +344,14 @@ def test_auto_with_only_gigaam_validates_language_before_claim(tmp_path, monkeyp
     request = {
         "op": "recording",
         "tracks": {"mic": path},
-        "params": {"started": STARTED, "name": NAME, "asr": "auto"},
+        "params": {"started": STARTED, "name": NAME, "asr": "gigaam"},
     }
-    assert client.post("/api/jobs", json=request).status_code == 422
+    response = client.post("/api/jobs", json=request)
+    assert response.status_code == 422
+    assert response.json()["detail"] == "Выбранное распознавание недоступно. Выберите другое"
     app.state.uploads.claim(path)
     app.state.uploads.release(path, delete=False)
     assert Path(path).is_file()
-    assert node_settings.asr_problem("gigaam") is None
-    request["params"]["lang"] = "ru"
-    response = client.post("/api/jobs", json=request)
-    assert response.status_code == 200, response.text
-    assert _wait(client, response.json()["id"])["status"] == "done"
 
 
 def test_summary_without_model_refused_before_claim(tmp_path, monkeypatch):
@@ -729,7 +741,7 @@ def test_successful_asr_without_speech_is_not_a_failure(tmp_path, monkeypatch):
             "text": "",
             "segments": [],
             "language": "ru",
-            "engine": "whisperx",
+            "engine": "parakeet",
         },
     )
     client = TestClient(create_app(tmp_path))

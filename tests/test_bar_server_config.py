@@ -24,7 +24,7 @@ def _serve(monkeypatch, handler) -> None:
 
 _SERVER_ASR = [
     {"id": "auto", "title": "Автоматически"},
-    {"id": "gigaam", "title": "GigaAM"},
+    {"id": "parakeet", "title": "Parakeet"},
     {"id": "openai/gpt-4o-transcribe", "title": "OpenAI · gpt-4o-transcribe"},
 ]
 
@@ -38,8 +38,8 @@ def test_asr_options_come_from_the_server_or_this_mac(tmp_path, monkeypatch, sta
     monkeypatch.setenv("MNEMA_RUNNER", "http://remote-node:8765")
     monkeypatch.setenv("MNEMA_TOKEN", "remote-token")
     find = importlib.util.find_spec
-    engines = {"gigaam": object(), "onnxruntime": None, "whisperx": None, "mlx_whisper": None}
-    monkeypatch.setattr(  # only GigaAM is installed
+    engines = {"onnxruntime": object()}
+    monkeypatch.setattr(  # Parakeet is installed
         importlib.util,
         "find_spec",
         lambda n, *a, **kw: engines[n] if n in engines else find(n, *a, **kw),
@@ -64,11 +64,10 @@ def test_asr_options_come_from_the_server_or_this_mac(tmp_path, monkeypatch, sta
     assert rt.prefs.asr == "auto"
     if standalone:
         assert seen == []
-        assert options == [("auto", "Автоматически"), ("gigaam", "GigaAM")]
     else:
         assert seen and all(r.url.host == "remote-node" for r in seen)
         assert all(r.headers["authorization"] == "Bearer remote-token" for r in seen)
-        assert options == [("auto", "Автоматически"), ("gigaam", "GigaAM")]
+    assert options == [("auto", "Автоматически"), ("parakeet", "Parakeet")]
 
 
 @pytest.mark.parametrize("server", ["http://remote-node:8765", ""])
@@ -110,7 +109,7 @@ def test_linux_without_server_has_no_list(tmp_path, monkeypatch):
     _serve(monkeypatch, lambda request: pytest.fail("сервера нет — запросов нет"))
     rt = BarRuntime(prefs_file=tmp_path / "bar.json")
     assert rt._load_asr_choices() is None
-    assert asr_options(rt.menu_env(), "whisper") == [("whisper", "whisper")]
+    assert asr_options(rt.menu_env(), "parakeet") == [("parakeet", "parakeet")]
 
 
 def test_unavailable_server_keeps_asr_choice_without_provider_fallback(tmp_path, monkeypatch):
@@ -163,22 +162,21 @@ def test_late_asr_list_from_previous_server_cannot_replace_current_choices(tmp_p
     assert rt.menu_env().asr_choices == [("selected-node", "selected-node")]
 
 
-@pytest.mark.parametrize(("place", "kept"), [("mac", "auto"), ("server", "gigaam")])
-def test_mac_without_gigaam_works_a_saved_gigaam_as_automatic(tmp_path, monkeypatch, place, kept):
-    """The Mac app ships no GigaAM: a gigaam choice saved in bar.json works as Automatic on this
-    Mac, as a cloud one does, and is not offered; processing on the server keeps it."""
+@pytest.mark.parametrize("place", ["mac", "server"])
+def test_a_retired_engine_saved_in_bar_json_works_as_automatic(tmp_path, monkeypatch, place):
+    """GigaAM and Whisper are gone: a choice of theirs saved in bar.json works as Automatic on
+    this Mac and on the server, and is not offered."""
     monkeypatch.setattr(base, "STANDALONE", True)
     monkeypatch.setenv("MNEMA_RUNNER", "http://remote-node:8765")
     find = importlib.util.find_spec
-    engines = {"gigaam": None, "onnxruntime": None, "mlx_whisper": None, "whisperx": object()}
     monkeypatch.setattr(
         importlib.util,
         "find_spec",
-        lambda n, *a, **kw: engines[n] if n in engines else find(n, *a, **kw),
+        lambda n, *a, **kw: object() if n == "onnxruntime" else find(n, *a, **kw),
     )
     prefs = tmp_path / "bar.json"
     prefs.write_text(json.dumps({"asr": "gigaam", "recognition": place}), encoding="utf-8")
-    server = [{"id": "gigaam", "title": "GigaAM"}, {"id": "whisper", "title": "Whisper"}]
+    server = _SERVER_ASR[:2]
     _serve(
         monkeypatch,
         lambda request: (
@@ -191,6 +189,8 @@ def test_mac_without_gigaam_works_a_saved_gigaam_as_automatic(tmp_path, monkeypa
     thread = rt._load_asr_choices()
     assert thread is not None
     thread.join(3)
-    options = dict(asr_options(rt.menu_env(), rt.prefs.asr))
-    assert rt.prefs.asr == kept
-    assert ("gigaam" in options) is (place == "server")
+    assert rt.prefs.asr == "auto"
+    assert dict(asr_options(rt.menu_env(), rt.prefs.asr)) == {
+        "auto": "Автоматически",
+        "parakeet": "Parakeet",
+    }

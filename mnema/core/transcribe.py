@@ -55,9 +55,9 @@ def _transcribe(
 ) -> Transcript:
     """Worker body: pick the engine and recognize.
 
-    A given language is used as is, unchecked. Without one, nothing is detected up front:
-    Parakeet recognizes without a hint and names the language from the text, Whisper
-    detects it itself.
+    A given language only cleans Parakeet's replies and is told to the cloud. Without one,
+    nothing is detected up front: Parakeet names the language from the text, the cloud detects
+    it itself.
     """
     info = probe(src)
     if not info.has_audio:

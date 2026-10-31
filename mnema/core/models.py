@@ -18,7 +18,7 @@ class Transcript(BaseModel):
     text: str
     segments: list[Segment] = Field(default_factory=list)
     language: str | None = None
-    engine: str | None = None  # recognizing engine (gigaam/mlx/whisperx); None if unknown
+    engine: str | None = None  # recognizing engine (parakeet, a cloud model); None if unknown
 
     def as_text(self, *, paragraph_gap: float = 1.0) -> str:
         """Readable text: segments joined, a new paragraph at a pause ≥ `paragraph_gap` s.

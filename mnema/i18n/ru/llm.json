@@ -18,7 +18,6 @@
   "no model is selected in the settings": "модель не выбрана в настройках",
   "no model configured": "не настроена модель",
   "no model key set": "не задан ключ модели",
-  "Mnema is not fully installed, reinstall it": "Mnema установлена не полностью, переустановите её",
   "the model service did not answer in time": "сервис модели не ответил вовремя",
   "no connection to the model service": "нет связи с сервисом модели",
   "the model service answered with error {code}": "сервис модели ответил ошибкой {code}",

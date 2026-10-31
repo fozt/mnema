@@ -58,7 +58,7 @@ class Memory:
 
 
 def test_low_memory_holds_a_second_local_job_but_not_a_cloud_one_and_recovery_starts_it():
-    memory, probe = Memory(4 * GIB), Probe()
+    memory, probe = Memory(MEMORY_PER_JOB // 2), Probe()
     queue = JobQueue(workers=2, pending=8, memory=memory, recheck_s=0.01)
     try:
         probe.add(queue, "long")

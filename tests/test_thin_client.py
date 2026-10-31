@@ -12,8 +12,7 @@ import sys
 # Heavy and platform packages the thin client must never load: transcription engines, LLM
 # SDKs, the runner's web framework, yt-dlp and its cookies, diarization.
 _BLOCKED = {
-    "mlx_whisper",
-    "whisperx",
+    "onnxruntime",
     "torch",
     "litellm",
     "fastapi",
