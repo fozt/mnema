@@ -4,8 +4,8 @@ before work is the same on the Mac and the server: no work file with a request, 
 stays as it was.
 
 External boundaries: recognition (setup.dispatch), ffmpeg (audio.extract_audio, audio.mix),
-installed engines (importlib.util.find_spec), litellm, the provider network; the server is a
-real create_app over ASGI.
+installed engines (mnema-asr, importlib.util.find_spec), litellm, the provider network; the
+server is a real create_app over ASGI.
 """
 
 from __future__ import annotations
@@ -42,17 +42,31 @@ class Crash(BaseException):
     """The app crashed mid-processing (not an exception of the operation)."""
 
 
+class Engines:
+    """Parakeet is installed: mnema-asr of Mnema.app on the Mac, ONNX Runtime on the server."""
+
+    def __init__(self, monkeypatch, folder: Path) -> None:
+        from tests.mac_helper_stub import install
+
+        self._monkeypatch, self._missing = monkeypatch, folder / "no-mnema-asr"
+        self._found: dict = {"onnxruntime": object()}
+        find = importlib.util.find_spec
+        monkeypatch.setattr(
+            importlib.util,
+            "find_spec",
+            lambda n, *a, **kw: self._found[n] if n in self._found else find(n, *a, **kw),
+        )
+        install(monkeypatch, folder / "Mnema.app")
+
+    def remove(self) -> None:
+        """Neither the Mac nor the server can recognize locally."""
+        self._found["onnxruntime"] = None
+        self._monkeypatch.setenv("MNEMA_ASR", str(self._missing))
+
+
 @pytest.fixture
-def engines(monkeypatch) -> dict:
-    """Installed recognition engines: Parakeet is there, the rest as on the machine."""
-    installed: dict = {"onnxruntime": object()}
-    find = importlib.util.find_spec
-    monkeypatch.setattr(
-        importlib.util,
-        "find_spec",
-        lambda n, *a, **kw: installed[n] if n in installed else find(n, *a, **kw),
-    )
-    return installed
+def engines(monkeypatch, tmp_path) -> Engines:
+    return Engines(monkeypatch, tmp_path)
 
 
 @pytest.fixture
@@ -277,7 +291,7 @@ def test_folder_in_processing_is_not_processed_again(monkeypatch, tmp_path, sour
 
 def test_mac_refuses_unavailable_recognition_before_work(monkeypatch, tmp_path, sources, engines):
     """The chosen recognition is not installed: refused before work, the recording as it was."""
-    engines["onnxruntime"] = None
+    engines.remove()
     _asr(monkeypatch)
     folder = _recording(tmp_path / "notes")
     before = _files(folder)
@@ -364,7 +378,7 @@ def test_server_refusal_drops_the_request(monkeypatch, tmp_path, engines) -> Non
     """The server refused before work (422): the refusal has no commands, there is no work
     file with a request: the recording was not "interrupted", it stays as it was."""
     monkeypatch.setattr(audio, "extract_audio", lambda src, dst, **kw: shutil.copyfile(src, dst))
-    engines["onnxruntime"] = None
+    engines.remove()
     folder = _recording(tmp_path / "notes")
     with pytest.raises(MediaError) as refused:
         recording_client.recover_on_node(
@@ -380,7 +394,7 @@ def test_refused_part_leaves_only_the_original_recording(
 ) -> None:
     """A refusal before work for a part: no part folder is left, the library as it was."""
     monkeypatch.setattr(audio, "extract_audio", lambda src, dst, **kw: shutil.copyfile(src, dst))
-    engines["onnxruntime"] = None
+    engines.remove()
     root = tmp_path / "notes"
     folder = _recording(root)
     before = _files(folder)

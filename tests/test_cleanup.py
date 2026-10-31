@@ -7,10 +7,11 @@ import pytest
 
 from mnema import cleanup
 
-OLD_HUB = (
-    "models--moondream--parakeet-ultra",
-    "models--mlx-community--whisper-large-v3-turbo",
+OLD_HUB = ("models--moondream--parakeet-ultra", "models--mlx-community--whisper-large-v3-turbo")
+# whisperX models: Mnema downloaded them only on Linux
+WHISPERX_HUB = (
     "models--Systran--faster-whisper-large-v3",
+    "models--mobiuslabsgmbh--faster-whisper-large-v3-turbo",
 )
 KEPT_HUB = ("models--mlx-community--whisper-small", "models--someone--parakeet-ultra-onnx")
 
@@ -32,7 +33,7 @@ def _weights(folder: Path) -> Path:
 def test_old_weights_go_once_and_the_rest_stays(cache):
     hub = cache / "huggingface" / "hub"
     old = [_weights(hub / name) for name in OLD_HUB] + [_weights(cache / "mnema" / "gigaam")]
-    kept = [_weights(hub / name) for name in KEPT_HUB]
+    kept = [_weights(hub / name) for name in (*KEPT_HUB, *WHISPERX_HUB)]
     kept += [_weights(cache / "torch" / "hub"), _weights(cache / "mnema" / "other")]
     cleanup.remove_old_weights(server=False)
     assert [p for p in old if p.exists()] == []
@@ -42,9 +43,10 @@ def test_old_weights_go_once_and_the_rest_stays(cache):
     assert again.is_dir()
 
 
-def test_the_server_also_clears_its_torch_and_whisper_caches(cache, monkeypatch, tmp_path):
+def test_the_server_also_clears_whisperx_torch_and_whisper_caches(cache, monkeypatch, tmp_path):
     monkeypatch.setenv("HF_HOME", str(tmp_path / "data" / "hf"))
-    old = [_weights(tmp_path / "data" / "hf" / "hub" / OLD_HUB[0])]
+    hub = tmp_path / "data" / "hf" / "hub"
+    old = [_weights(hub / name) for name in (*OLD_HUB, *WHISPERX_HUB)]
     old += [_weights(cache / "torch"), _weights(cache / "whisper")]
     cleanup.remove_old_weights(server=True)
     assert [p for p in old if p.exists()] == []

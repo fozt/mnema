@@ -69,14 +69,9 @@ def _node_pipeline(monkeypatch, tmp_path):
     monkeypatch.setattr(MnemaClient, "health", lambda *a, **kw: {"ok": True, "llm": True})
     monkeypatch.setattr(base, "STANDALONE", True)
     monkeypatch.setattr(node_settings, "asr_problem", lambda *a, **kw: None)
-    import importlib.util
+    from tests.mac_helper_stub import install
 
-    find = importlib.util.find_spec
-    monkeypatch.setattr(  # this Mac has Parakeet; recognition itself is replaced
-        importlib.util,
-        "find_spec",
-        lambda n, *a, **kw: object() if n == "onnxruntime" else find(n, *a, **kw),
-    )
+    install(monkeypatch, tmp_path / "Mnema.app")  # this Mac recognizes; recognition is replaced
     monkeypatch.setattr(
         audio, "extract_audio", lambda src, dst, **kw: shutil.copyfile(src, dst) and dst
     )
@@ -2006,7 +2001,8 @@ def test_summarize_card_writes_summary_and_names_default_folder(monkeypatch, tmp
     title, the notification opens summary.txt; of the remarks of the previous processing
     (also after a stopped redo) only the one about the title and summary is removed, the
     others and "About the recording" stay; when the model refuses there is no summary, the
-    name stays and the notification gives the reason; outside idle nothing happens."""
+    name stays and the notification gives the reason. It is queued also while another
+    recording is being made."""
     import httpx
     import litellm
 
@@ -2036,15 +2032,13 @@ def test_summarize_card_writes_summary_and_names_default_folder(monkeypatch, tmp
     monkeypatch.setattr(litellm, "completion", lambda **kw: _stream(reply))
     platform = _Notes()
     rt = BarRuntime(platform=platform, prefs_file=tmp_path / "bar.json")
-    rt.state.phase = Phase.RECORDING
-    rt.handle(f"summarize:{folder}")
-    assert rt.state.phase == Phase.RECORDING and not platform.calls
-    rt.state.phase = Phase.IDLE
-
+    rt.state.phase = Phase.RECORDING  # another recording is being made
     rt.handle(f"summarize:{folder}")
     rt.join(timeout=10)
     named = root / "2026-10-02_Релиз"
     assert (named / "summary.txt").exists() and not folder.exists()
+    assert rt.state.phase == Phase.RECORDING
+    rt.state.phase = Phase.IDLE
     notes = _details(named)
     assert "Модель deepseek-chat не ответила" not in notes and asr in notes
     assert "Часть записи 0:10–1:35 из 3:00" in notes and "Полная запись перемещена" in notes

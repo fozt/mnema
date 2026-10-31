@@ -766,17 +766,9 @@ def test_mac_switches_where_recognition_runs(monkeypatch, tmp_path) -> None:
     engines, In the cloud the cloud models with "Set the OpenAI key…" while the user has no key;
     the choice goes to bar.json and does not change while recording. The Model row is the
     user's model on the connected server in every place."""
-    import importlib.util
-
     from mnema.core import base
 
-    found = importlib.util.find_spec  # this Mac has no ONNX Runtime, the server's engine
-    monkeypatch.setattr(
-        importlib.util,
-        "find_spec",
-        lambda name, *a: None if name == "onnxruntime" else found(name, *a),
-    )
-    monkeypatch.setattr(base, "STANDALONE", True)
+    monkeypatch.setattr(base, "STANDALONE", True)  # without Mnema.app: no engine of its own
     monkeypatch.setenv("MNEMA_LIVE_DIR", str(tmp_path / "notes"))
     monkeypatch.setenv("MNEMA_RUNNER", "http://srv:8123")
     _home_server(monkeypatch)

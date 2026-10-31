@@ -14,9 +14,9 @@ from .core.base import cache_home
 logger = logging.getLogger(__name__)
 
 # Hugging Face models of earlier versions: torch and MLX Parakeet, mlx-whisper, whisperX
-_HF_REPOS = (
-    "moondream/parakeet-ultra",
-    "mlx-community/whisper-large-v3-turbo",
+_HF_REPOS = ("moondream/parakeet-ultra", "mlx-community/whisper-large-v3-turbo")
+# whisperX was Linux only: on a Mac these are other programs' models
+_SERVER_HF_REPOS = (
     "Systran/faster-whisper-large-v3",
     "mobiuslabsgmbh/faster-whisper-large-v3-turbo",
 )
@@ -33,10 +33,12 @@ def _hub() -> Path:
 
 
 def old_weights(*, server: bool) -> list[Path]:
-    """The folders to remove. The torch and openai-whisper caches only on the server: there the
-    cache folder is Mnema's alone, on a Mac other programs keep their models in them."""
+    """The folders to remove. whisperX models and the torch and openai-whisper caches only on
+    the server: there the cache folder is Mnema's alone, on a Mac other programs keep their
+    models in them."""
     hub = _hub()
-    paths = [hub / ("models--" + repo.replace("/", "--")) for repo in _HF_REPOS]
+    repos = (*_HF_REPOS, *_SERVER_HF_REPOS) if server else _HF_REPOS
+    paths = [hub / ("models--" + repo.replace("/", "--")) for repo in repos]
     paths.append(cache_home() / "mnema" / "gigaam")
     if server:
         torch = os.environ.get("TORCH_HOME")

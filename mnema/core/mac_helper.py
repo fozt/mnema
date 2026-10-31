@@ -36,8 +36,8 @@ UPDATE_COMMAND = "Update the mnema command to recognize on this Mac"
 FAILED = "Could not recognize on this Mac. See the Mnema log for details"
 _ERRORS = {
     "no_model": "The recognition model is not downloaded",
-    "no_space": "Not enough disk space for the recognition model",
-    "download_failed": "Could not download the recognition model. Check the connection and try again",
+    "no_space": parakeet.NO_SPACE,  # the same texts as the server's model download
+    "download_failed": parakeet.DOWNLOAD_FAILED,
     "bad_audio": "Could not read the recording audio",
     "unsupported_mac": "Recognition on this Mac needs Apple silicon",
 }

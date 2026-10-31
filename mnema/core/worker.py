@@ -229,7 +229,8 @@ class Worker:
         return event
 
     def _signal(self, *, kill: bool = False) -> None:
-        with contextlib.suppress(ProcessLookupError):
+        # macOS answers EPERM for a group left with only zombies
+        with contextlib.suppress(ProcessLookupError, PermissionError):
             if os.name == "posix":
                 os.killpg(self.process.pid, signal.SIGKILL if kill else signal.SIGTERM)
             elif self.process.poll() is None:

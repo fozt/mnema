@@ -1,7 +1,6 @@
 """Recognition choices in the app: the Mac lists its own engines without network, Linux the
 connected server's list; the app never changes the server configuration."""
 
-import importlib.util
 import json
 import threading
 
@@ -11,6 +10,7 @@ import pytest
 from mnema.bar.runtime import BarRuntime
 from mnema.bar.state import BarPrefs, asr_options, save_prefs
 from mnema.core import base
+from tests.mac_helper_stub import install
 
 
 def _serve(monkeypatch, handler) -> None:
@@ -37,13 +37,7 @@ def test_asr_options_come_from_the_server_or_this_mac(tmp_path, monkeypatch, sta
     monkeypatch.setattr(base, "STANDALONE", standalone)
     monkeypatch.setenv("MNEMA_RUNNER", "http://remote-node:8765")
     monkeypatch.setenv("MNEMA_TOKEN", "remote-token")
-    find = importlib.util.find_spec
-    engines = {"onnxruntime": object()}
-    monkeypatch.setattr(  # Parakeet is installed
-        importlib.util,
-        "find_spec",
-        lambda n, *a, **kw: engines[n] if n in engines else find(n, *a, **kw),
-    )
+    install(monkeypatch, tmp_path / "Mnema.app")  # this Mac has its engine
     prefs = tmp_path / "bar.json"
     prefs.write_text(json.dumps({"asr": "openai/gpt-4o-transcribe"}), encoding="utf-8")
     seen = []
@@ -168,12 +162,7 @@ def test_a_retired_engine_saved_in_bar_json_works_as_automatic(tmp_path, monkeyp
     this Mac and on the server, and is not offered."""
     monkeypatch.setattr(base, "STANDALONE", True)
     monkeypatch.setenv("MNEMA_RUNNER", "http://remote-node:8765")
-    find = importlib.util.find_spec
-    monkeypatch.setattr(
-        importlib.util,
-        "find_spec",
-        lambda n, *a, **kw: object() if n == "onnxruntime" else find(n, *a, **kw),
-    )
+    install(monkeypatch, tmp_path / "Mnema.app")
     prefs = tmp_path / "bar.json"
     prefs.write_text(json.dumps({"asr": "gigaam", "recognition": place}), encoding="utf-8")
     server = _SERVER_ASR[:2]
