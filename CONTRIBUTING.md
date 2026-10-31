@@ -26,7 +26,7 @@ release (below), there is no install from the sources. The `mnema` command from 
 `uv tool install "mnema[cli] @ <wheel>"`.
 
 Recognition from the sources: on the server and Linux it is Parakeet Ultra on ONNX Runtime
-(`uv sync --extra parakeet`); the files (under 1 GB) are downloaded into
+(`uv sync --extra parakeet`); the files (about 910 MB) are downloaded into
 `$XDG_CACHE_HOME/mnema/<repository>/<revision>` on the first job, or give a folder that already
 has them in `MNEMA_PARAKEET_ONNX_DIR`. On a Mac recognition is `mnema-asr`, built below; point
 `MNEMA_ASR` at it and Python calls it exactly as the app does.
@@ -70,10 +70,10 @@ Command Line Tools, `curl` and uv:
 task mac:app   # dist/ffmpeg, then dist/mac/Mnema.app, Mnema-X.Y.Z-mac.zip and Mnema-X.Y.Z.dmg
 ```
 
-`scripts/build_ffmpeg.sh PREFIX` builds an LGPL ffmpeg and ffprobe from pinned sources (about two
-minutes). `scripts/build_mac_app.py --out DIR --ffmpeg PREFIX` puts the Swift panel and
-`mnema-asr`, a pinned Python 3.12 with the core and `menubar` packages, and ffmpeg into one bundle,
-signs it ad hoc, and writes the zip for updates and the DMG (lzma, about 84 MB). The app has no
+`scripts/build_ffmpeg.sh PREFIX` builds an LGPL ffmpeg and ffprobe from pinned sources.
+`scripts/build_mac_app.py --out DIR --ffmpeg PREFIX` puts the Swift panel and `mnema-asr`, a
+pinned Python 3.12 with the core and `menubar` packages, and ffmpeg into one bundle, signs it ad
+hoc, and writes the zip for updates and the DMG (lzma, about 84 MB). The app has no
 heavy Python: a list of packages that must not get in (torch, onnxruntime, yt-dlp, rich, mcp and
 the like) fails the build if one comes, the `mnema` command is a separate package, and only
 `Resources/bin/mnema-mcp` stays, a stub that tells an old MCP configuration how to install the
@@ -101,10 +101,11 @@ docker build -t mnema-server:dev .
 
 It installs the server's locked set from `uv.lock` (the extras in `mnema/extras.py`), for
 linux/amd64 and linux/arm64. There is no torch and no GPU: recognition is ONNX Runtime on the CPU,
-and the build checks the image by opening the bundled silero model and importing the server and the
-command. The Parakeet files are downloaded into `/data/cache` on the first job. To try the installer against that image without touching your own
-server, give it another server folder, image and container name, then make an invite for the
-port it prints with `./mnema.sh` and the same folder:
+and the build checks the image by opening the bundled silero model and importing the server and
+the command. The Parakeet files are downloaded into `/data/cache` on the first job. To try the
+installer against that image without touching your own server, give it another server folder,
+image and container name, then make an invite for the port it prints with `./mnema.sh` and the
+same folder:
 
 ```bash
 export MNEMA_SERVER_DIR=$(mktemp -d)/mnema-server
