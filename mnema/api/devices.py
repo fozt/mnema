@@ -9,11 +9,12 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
-from ..devices import device_name
+from ..devices import OutdatedClient, device_name
 from ..i18n import _
 from .auth import CLAIM_PATH
 
 REFUSED = "The invitation is not valid: ask the server for a new one"
+OUTDATED = "Update the app to connect with this invitation"
 # A request without a token: read no more of the body than this; the code and name are shorter.
 _BODY_LIMIT = 4096
 
@@ -34,7 +35,9 @@ async def _small_body(request: Request) -> bytes | None:
 def register_device_routes(app: FastAPI) -> None:
     @app.post(CLAIM_PATH)
     async def claim_invite(request: Request) -> JSONResponse:
-        """{"invite", "name"} → a device token; refusals are all alike and never echo the code."""
+        """{"invite", "name", "library"} → a device token; refusals are all alike and never echo
+        the code. The one exception: a user's invitation needs "library": true (an app that
+        knows library numbers), otherwise it is refused as outdated and stays unused."""
         body = await _small_body(request)
         try:
             data = json.loads(body) if body is not None else None
@@ -45,9 +48,16 @@ def register_device_routes(app: FastAPI) -> None:
         code, name = data.get("invite"), data.get("name", "")
         if not isinstance(code, str) or not isinstance(name, str):
             return _refused()
-        claimed = await run_in_threadpool(
-            request.app.state.devices.claim, code, name, now=time.time()
-        )
+        try:
+            claimed = await run_in_threadpool(
+                request.app.state.devices.claim,
+                code,
+                name,
+                now=time.time(),
+                library=data.get("library") is True,
+            )
+        except OutdatedClient:
+            return JSONResponse({"detail": _(OUTDATED)}, status_code=403)
         if claimed is None:
             return _refused()
         device_id, token = claimed

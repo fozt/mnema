@@ -222,5 +222,23 @@
   "input": "что обрабатываем",
   "Error: ": "Ошибка: ",
   "✓ done": "✓ готово",
-  "left": "ост."
+  "left": "ост.",
+  "The server has no token: users need one": "У сервера нет токена: он нужен пользователям",
+  "The server owner cannot be removed": "Владельца сервера удалить нельзя",
+  "User {name} removed, the recordings stay": "Пользователь {name} удалён, записи остались",
+  "User {name} already exists. Invitation: {command}": "Пользователь {name} уже есть. Приглашение: {command}",
+  "User {name} is back": "Пользователь {name} вернулся",
+  "User {name} is back with {n} recording": [
+    "Пользователь {name} вернулся с {n} записью",
+    "Пользователь {name} вернулся с {n} записями",
+    "Пользователь {name} вернулся с {n} записями"
+  ],
+  "Devices": "Устройства",
+  "User": "Пользователь",
+  "whose device: a user from mnema users, the owner by default": "чьё устройство: пользователь из mnema users, по умолчанию владелец",
+  "people of the server, each with own devices and library": "пользователи сервера, у каждого свои устройства и библиотека",
+  "add a user and print an invitation": "добавить пользователя и напечатать приглашение",
+  "user name, for example anna": "имя пользователя, например anna",
+  "revoke the user's devices and invitations, the recordings stay": "отозвать устройства и приглашения пользователя, записи останутся",
+  "user name": "имя пользователя"
 }

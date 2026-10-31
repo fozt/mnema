@@ -5,7 +5,7 @@ import os
 import pytest
 
 import mnema.config as _config_mod
-from mnema import i18n
+from mnema import i18n, users
 
 # Tests assert today's Russian texts: the interface language is ru, subprocesses included.
 os.environ[i18n.ENV] = "ru"
@@ -26,6 +26,16 @@ def _isolated_user_settings(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / ".config"))
     monkeypatch.setattr(_config_mod, "_FROM_FILE", {})
+
+
+@pytest.fixture(autouse=True)
+def _process_state(monkeypatch):
+    """The server mode `serve` turns on and the umask of the server commands stay in the test."""
+    monkeypatch.setattr(users, "_strict", False)
+    mask = os.umask(0o022)
+    os.umask(mask)
+    yield
+    os.umask(mask)
 
 
 @pytest.fixture(autouse=True)

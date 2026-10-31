@@ -28,7 +28,8 @@ async def caller(app: FastAPI, provided: str, node_token: str) -> str | None:
         return None
     if hmac.compare_digest(provided.encode(), node_token.encode()):
         return NODE_OWNER
-    return await run_in_threadpool(app.state.devices.verify, provided, now=time.time())
+    found = await run_in_threadpool(app.state.devices.verify, provided, now=time.time())
+    return found.device if found is not None else None
 
 
 async def authorized(app: FastAPI, provided: str, node_token: str) -> bool:

@@ -42,6 +42,7 @@ class Record(BaseModel):
 class Manifest(BaseModel):
     records: list[Record] = Field(default_factory=list)
     sections: list[str] = Field(default_factory=list)
+    library: str = ""  # the user's library number on the server; empty from a 0.3 server
 
 
 class FileBody(BaseModel):

@@ -106,7 +106,11 @@ def test_file_preconditions_and_move_delete_routes(node):
     assert client.delete(BASE, headers={"If-Match": moved.json()["tag"]}).status_code == 204
     assert client.delete("/api/library/sections", params={"path": "Другой"}).status_code == 204
     assert client.delete("/api/library/sections", params={"path": "Пусто"}).status_code == 204
-    assert client.get("/api/library").json() == {"records": [], "sections": ["Работа"]}
+    assert client.get("/api/library").json() == {
+        "records": [],
+        "sections": ["Работа"],
+        "library": "",
+    }
 
 
 @pytest.mark.parametrize("library", ["false", None])  # unset: the library is off

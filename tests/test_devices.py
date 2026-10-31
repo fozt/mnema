@@ -1,7 +1,9 @@
 """Invitations and device tokens: one-time exchange, hashes on disk, access to the node API."""
 
+import hashlib
 import json
 import logging
+import sqlite3
 import threading
 import time
 from pathlib import Path
@@ -13,8 +15,9 @@ from fastapi.testclient import TestClient
 
 from mnema.connection import parse_connection
 from mnema.core.base import MediaError
-from mnema.devices import DeviceStore
+from mnema.devices import DeviceStore, OutdatedClient, User
 from mnema.server import create_app
+from mnema.users import Caller
 
 NOW = 1_800_000_000.0
 NODE = "node-token"
@@ -141,7 +144,7 @@ def test_database_keeps_only_hashes_and_is_private(tmp_path):
     stored = b"".join(p.read_bytes() for p in db.parent.glob("devices.db*"))
     for secret in (code, other, token):
         assert secret.encode() not in stored
-    assert store.verify(token, now=NOW) == claimed[0]
+    assert store.verify(token, now=NOW) == Caller(device=claimed[0], user="owner")
 
 
 def test_device_token_opens_api_and_revoke_closes_it_at_once(node):
@@ -182,7 +185,7 @@ def test_last_seen_is_written_at_most_once_a_minute(tmp_path):
     claimed = store.claim(store.create_invite(now=NOW)[0], "ПК", now=NOW)
     assert claimed is not None
     device_id, token = claimed
-    assert store.verify(token, now=NOW + 10) == device_id
+    assert store.verify(token, now=NOW + 10) == Caller(device=device_id, user="owner")
     assert store.devices()[0].last_seen == NOW + 10
     store.verify(token, now=NOW + 40)
     assert store.devices()[0].last_seen == NOW + 10
@@ -342,3 +345,275 @@ def test_devices_command_lists_and_revokes(tmp_path, capsys):
         _cli("devices", "revoke", "missing", "--dir", str(tmp_path))
     with pytest.raises(SystemExit):
         _cli("devices", "revoke", "--dir", str(tmp_path))
+
+
+_V0_SCHEMA = """
+CREATE TABLE invites (
+    hash TEXT PRIMARY KEY, created REAL NOT NULL, expires REAL NOT NULL,
+    used_at REAL, device_id TEXT
+);
+CREATE TABLE devices (
+    id TEXT PRIMARY KEY, name TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE,
+    created REAL NOT NULL, last_seen REAL, revoked INTEGER NOT NULL DEFAULT 0
+);
+"""
+
+
+def _sha(secret: str) -> str:
+    return hashlib.sha256(secret.encode()).hexdigest()
+
+
+def _old_database(root: Path) -> Path:
+    """devices.db of a server before users: one device and one unused invitation."""
+    db = root / ".mnema" / "devices.db"
+    db.parent.mkdir(parents=True, exist_ok=True)
+    con = sqlite3.connect(db)
+    con.executescript(_V0_SCHEMA)
+    con.execute(
+        "INSERT INTO devices (id, name, token_hash, created) VALUES (?, ?, ?, ?)",
+        ("old-device", "Pixel", _sha("old-token"), NOW),
+    )
+    con.execute(
+        "INSERT INTO invites (hash, created, expires) VALUES (?, ?, ?)",
+        (_sha("old-code"), NOW, NOW + 3600),
+    )
+    con.commit()
+    con.close()
+    db.chmod(0o600)
+    return db
+
+
+def _version(db: Path) -> int:
+    con = sqlite3.connect(db)
+    try:
+        return con.execute("PRAGMA user_version").fetchone()[0]
+    finally:
+        con.close()
+
+
+def test_an_old_database_belongs_to_the_owner_with_the_same_tokens(tmp_path):
+    db = _old_database(tmp_path)
+    store = DeviceStore(db)
+    assert store.verify("old-token", now=NOW) == Caller(device="old-device", user="owner")
+    assert _version(db) == 1
+    [owner] = store.users()
+    assert owner.name == "owner" and owner.library and not owner.removed
+    claimed = store.claim("old-code", "ПК", now=NOW + 1)
+    assert claimed is not None
+    assert store.verify(claimed[1], now=NOW + 1) == Caller(device=claimed[0], user="owner")
+    assert DeviceStore(db).users() == [owner]
+    assert {d.user for d in store.devices()} == {"owner"}
+
+
+@pytest.mark.parametrize("old", [True, False], ids=["old", "fresh"])
+def test_two_servers_opening_one_database_at_once(tmp_path, old):
+    db = _old_database(tmp_path) if old else tmp_path / ".mnema" / "devices.db"
+    barrier = threading.Barrier(2)
+    errors: list[Exception] = []
+
+    def open_store() -> None:
+        barrier.wait()
+        try:
+            DeviceStore(db)
+        except Exception as error:
+            errors.append(error)
+
+    threads = [threading.Thread(target=open_store) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert errors == []
+    assert _version(db) == 1
+    assert [u.name for u in DeviceStore(db).users()] == ["owner"]
+
+
+def test_an_invitation_of_a_user_gives_a_device_of_that_user(tmp_path):
+    store = _store(tmp_path)
+    anna, returned = store.add_user("anna", now=NOW)
+    owner = store.user("owner")
+    assert owner is not None
+    assert (anna.name, returned) == ("anna", False) and anna.library not in ("", owner.library)
+    code, _ = store.create_invite(user="anna", now=NOW)
+    with pytest.raises(OutdatedClient):
+        store.claim(code, "Pixel", now=NOW)
+    claimed = store.claim(code, "Pixel", now=NOW, library=True)
+    assert claimed is not None
+    assert store.verify(claimed[1], now=NOW) == Caller(device=claimed[0], user="anna")
+    assert [(d.id, d.user) for d in store.devices("anna")] == [(claimed[0], "anna")]
+    assert store.devices("owner") == []
+    assert store.claim(store.create_invite(now=NOW)[0], "Mac", now=NOW) is not None
+    assert [u.name for u in store.users()] == ["owner", "anna"]
+    with pytest.raises(ValueError):
+        store.add_user("anna", now=NOW)
+    with pytest.raises(ValueError):
+        store.create_invite(user="bob", now=NOW)
+
+
+def test_a_removed_user_loses_devices_and_invitations_and_comes_back_with_the_library(tmp_path):
+    store = _store(tmp_path)
+    anna, _ = store.add_user("anna", now=NOW)
+    claimed = store.claim(
+        store.create_invite(user="anna", now=NOW)[0], "Pixel", now=NOW, library=True
+    )
+    assert claimed is not None
+    unused, _ = store.create_invite(user="anna", now=NOW)
+    mine = store.claim(store.create_invite(now=NOW)[0], "Mac", now=NOW)
+    assert mine is not None
+
+    assert store.remove_user("anna") is True
+    assert store.verify(claimed[1], now=NOW) is None
+    assert store.claim(unused, "Phone", now=NOW, library=True) is None
+    assert store.verify(mine[1], now=NOW) == Caller(device=mine[0], user="owner")
+    assert [u.name for u in store.users()] == ["owner"]
+    assert store.user("anna") == User(name="anna", library=anna.library, created=NOW, removed=True)
+    assert store.remove_user("anna") is False and store.remove_user("bob") is False
+    with pytest.raises(ValueError):
+        store.create_invite(user="anna", now=NOW)
+    with pytest.raises(ValueError):
+        store.remove_user("owner")
+
+    back, returned = store.add_user("anna", now=NOW + 5)
+    assert returned and back.library == anna.library and not back.removed
+    assert store.verify(claimed[1], now=NOW) is None
+    again = store.claim(
+        store.create_invite(user="anna", now=NOW)[0], "Pixel", now=NOW, library=True
+    )
+    assert again is not None and store.verify(again[1], now=NOW) is not None
+
+
+def test_an_invitation_of_a_user_needs_an_app_that_knows_libraries(node):
+    root, client = node
+    store = _store(root)
+    store.add_user("anna", now=NOW)
+    code, _ = store.create_invite(user="anna", now=time.time())
+    old = _claim(client, code)
+    assert old.status_code == 403
+    assert old.json() == {"detail": "Обновите приложение, чтобы подключиться по этому приглашению"}
+    new = client.post("/api/devices/claim", json={"invite": code, "name": "Pixel", "library": True})
+    assert new.status_code == 200
+    assert client.get("/api/capabilities", headers=_bearer(new.json()["token"])).status_code == 200
+    again = client.post("/api/devices/claim", json={"invite": code, "name": "X", "library": True})
+    assert again.status_code == 403 and again.json() == {"detail": REFUSED}
+    mine = store.create_invite(now=time.time())[0]
+    assert _claim(client, mine).status_code == 200
+
+
+URL = "http://node.example:8000"
+
+
+@pytest.fixture
+def server(tmp_path, monkeypatch):
+    """A server folder with a server token: users need one."""
+    monkeypatch.setenv("MNEMA_TOKEN", NODE)
+    return _node_dir(tmp_path)
+
+
+def _said(out: str) -> str:
+    return " ".join(out.split())
+
+
+def test_users_add_invites_a_device_of_the_new_user(server, capsys):
+    _cli("users", "add", "Anna", "--dir", str(server), "--url", URL, "--hours", "2")
+    out = capsys.readouterr().out
+    assert "Приглашение для одного устройства пользователя anna, действует до " in out
+    library = server / "users" / "anna" / "library"
+    assert library.is_dir() and library.stat().st_mode & 0o777 == 0o700
+    parsed = parse_connection(_printed_invite(out))
+    assert parsed.url == URL and parsed.invite is not None
+    claimed = _store(server).claim(parsed.invite, "Pixel", now=time.time(), library=True)
+    assert claimed is not None
+    assert _store(server).verify(claimed[1], now=time.time()) == Caller(
+        device=claimed[0], user="anna"
+    )
+
+    with pytest.raises(SystemExit):
+        _cli("users", "add", "anna", "--dir", str(server), "--url", URL)
+    assert "Пользователь anna уже есть. Приглашение: mnema invite --user anna" in _said(
+        capsys.readouterr().out
+    )
+    _cli("invite", "--user", "anna", "--dir", str(server), "--url", URL)
+    code = parse_connection(_printed_invite(capsys.readouterr().out)).invite or ""
+    second = _store(server).claim(code, "Mac", now=time.time(), library=True)
+    assert second is not None
+    assert _store(server).verify(second[1], now=time.time()).user == "anna"
+
+
+def test_a_returned_user_finds_her_recordings(server, capsys):
+    _cli("users", "add", "anna", "--dir", str(server), "--url", URL)
+    record = server / "users" / "anna" / "library" / "2026-10-31_Talk"
+    record.mkdir()
+    (record / ".mnema-meta.json").write_text('{"id": "e4b45222-14d0-4ae5-a581-8c746c5f305f"}')
+    (record / "transcript.txt").write_text("Привет\n")
+    _cli("users", "remove", "anna", "--dir", str(server))
+    capsys.readouterr()
+    _cli("users", "add", "anna", "--dir", str(server), "--url", URL)
+    out = capsys.readouterr().out
+    assert "Пользователь anna вернулся с 1 записью" in _said(out)
+    assert parse_connection(_printed_invite(out)).invite
+    assert (record / "transcript.txt").read_text() == "Привет\n"
+
+
+def _rows(out: str) -> dict[str, list[str]]:
+    return {
+        cells[0]: cells[1:]
+        for line in out.splitlines()
+        if (cells := line.split()) and cells[0] in ("owner", "anna", "bob")
+    }
+
+
+def test_users_lists_people_with_their_devices_and_remove_hides_them(server, capsys):
+    store = _store(server)
+    store.add_user("anna", now=NOW)
+    store.add_user("bob", now=NOW)
+    for name in ("Pixel", "Mac"):
+        store.claim(store.create_invite(user="anna", now=NOW)[0], name, now=NOW, library=True)
+    _cli("users", "--dir", str(server))
+    assert _rows(capsys.readouterr().out) == {"owner": ["0"], "anna": ["2"], "bob": ["0"]}
+
+    _cli("users", "remove", "anna", "--dir", str(server))
+    capsys.readouterr()
+    _cli("users", "--dir", str(server))
+    assert set(_rows(capsys.readouterr().out)) == {"owner", "bob"}
+    for name in ("anna", "nobody"):
+        with pytest.raises(SystemExit):
+            _cli("users", "remove", name, "--dir", str(server))
+        assert f"Нет пользователя {name}. Добавьте: mnema users add {name}" in _said(
+            capsys.readouterr().out
+        )
+    with pytest.raises(SystemExit):
+        _cli("users", "remove", "owner", "--dir", str(server))
+    assert "Владельца сервера удалить нельзя" in capsys.readouterr().out
+    with pytest.raises(SystemExit):
+        _cli("invite", "--user", "anna", "--dir", str(server), "--url", URL)
+    assert "Нет пользователя anna. Добавьте: mnema users add anna" in _said(capsys.readouterr().out)
+
+
+def test_a_bad_user_name_is_refused(server, capsys):
+    with pytest.raises(SystemExit):
+        _cli("users", "add", "анна", "--dir", str(server), "--url", URL)
+    assert "латинские буквы" in capsys.readouterr().out
+    assert [u.name for u in _store(server).users()] == ["owner"]
+
+
+def test_users_need_a_server_with_a_token(tmp_path, capsys):
+    _node_dir(tmp_path)
+    for argv in (("users", "add", "anna"), ("invite", "--user", "anna")):
+        with pytest.raises(SystemExit):
+            _cli(*argv, "--dir", str(tmp_path), "--url", URL)
+        assert "У сервера нет токена: он нужен пользователям" in _said(capsys.readouterr().out)
+    assert [u.name for u in _store(tmp_path).users()] == ["owner"]
+
+
+def test_devices_command_names_the_user_of_each_device(server, capsys):
+    store = _store(server)
+    store.add_user("anna", now=NOW)
+    friend = store.claim(
+        store.create_invite(user="anna", now=NOW)[0], "Pixel", now=NOW, library=True
+    )
+    mine = store.claim(store.create_invite(now=NOW)[0], "Mac", now=NOW)
+    assert friend is not None and mine is not None
+    _cli("devices", "--dir", str(server))
+    lines = capsys.readouterr().out.splitlines()
+    assert any("Pixel" in line and "anna" in line and friend[0] in line for line in lines)
+    assert any("Mac" in line and "owner" in line and mine[0] in line for line in lines)

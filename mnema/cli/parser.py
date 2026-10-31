@@ -20,6 +20,7 @@ from .commands import (
     cmd_transcribe,
     cmd_translate,
     cmd_update,
+    cmd_users,
 )
 from .model import cmd_model
 
@@ -318,22 +319,40 @@ def build_parser() -> argparse.ArgumentParser:
 
     # invites and devices only on the server machine: straight from devices.db, no HTTP; the
     # server folder is the image's own (--dir only for a development server)
+    def invite_flags(parser: argparse.ArgumentParser) -> None:
+        parser.add_argument(
+            "--hours",
+            type=float,
+            default=6.0,
+            help=_("how long the invitation works, in hours: 6 by default, up to 72"),
+        )
+        parser.add_argument(
+            "--url",
+            help=_(
+                "the address devices use to reach this server, e.g. http://203.0.113.5:38837; "
+                "remembered for later invitations. Without it, this machine's network address"
+            ),
+        )
+
     sp = sub.add_parser("invite", help=_("an invitation for one device"))
-    sp.add_argument(
-        "--hours",
-        type=float,
-        default=6.0,
-        help=_("how long the invitation works, in hours: 6 by default, up to 72"),
-    )
+    invite_flags(sp)
     sp.add_argument("--dir", help=argparse.SUPPRESS)
-    sp.add_argument(
-        "--url",
-        help=_(
-            "the address devices use to reach this server, e.g. http://203.0.113.5:38837; "
-            "remembered for later invitations. Without it, this machine's network address"
-        ),
-    )
+    sp.add_argument("--user", help=_("whose device: a user from mnema users, the owner by default"))
     sp.set_defaults(func=cmd_invite)
+
+    sp = sub.add_parser("users", help=_("people of the server, each with own devices and library"))
+    sp.add_argument("--dir", help=argparse.SUPPRESS)
+    actions = sp.add_subparsers(dest="action")
+    add = actions.add_parser("add", help=_("add a user and print an invitation"))
+    add.add_argument("name", help=_("user name, for example anna"))
+    invite_flags(add)
+    add.add_argument("--dir", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
+    remove = actions.add_parser(
+        "remove", help=_("revoke the user's devices and invitations, the recordings stay")
+    )
+    remove.add_argument("name", help=_("user name"))
+    remove.add_argument("--dir", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
+    sp.set_defaults(func=cmd_users)
 
     sp = sub.add_parser("devices", help=_("devices connected to the server"))
     sp.add_argument("--dir", help=argparse.SUPPRESS)
