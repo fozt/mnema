@@ -105,15 +105,21 @@ class MacRelease(BaseModel):
 
 
 class CliRelease(BaseModel):
-    """The wheel of the mnema command: `uv tool install "mnema[cli] @ <wheel>"`."""
+    """The wheel of the mnema command and the locked versions of its dependencies:
+    `uv tool install --constraints <constraints> "mnema[cli] @ <wheel>"`."""
 
     wheel: str
     sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    constraints: str | None = None
 
-    @field_validator("wheel")
+    @field_validator("wheel", "constraints")
     @classmethod
-    def secure_wheel(cls, value: str) -> str:
-        return _https(value)
+    def secure_url(cls, value: str | None) -> str | None:
+        return None if value is None else _https(value)
+
+    def install_command(self) -> str:
+        pinned = f"--constraints {self.constraints} " if self.constraints else ""
+        return f'uv tool install --force {pinned}"mnema[cli] @ {self.wheel}"'
 
 
 class Release(BaseModel):
@@ -255,6 +261,10 @@ def _release_root() -> Path:
     return data_dir() / "releases"
 
 
+class NoConnection(MediaError):
+    """The package did not download for want of a connection: another package would not either."""
+
+
 def _fetch(
     url: str,
     sha256: str,
@@ -290,7 +300,7 @@ def _fetch(
                             shown = percent
                             on(percent / 100)
     except httpx.TransportError as exc:
-        raise MediaError(_("No connection to the update server")) from exc
+        raise NoConnection(_("No connection to the update server")) from exc
     if digest.hexdigest() != sha256:
         raise MediaError(_("The update didn't download correctly. Try again"))
 
@@ -334,10 +344,9 @@ def _tool_update(found: Available) -> Result:
         )
     raise MediaError(
         _(
-            'Mnema {version} is out. Update the command: uv tool install --force "mnema[cli] @ '
-            '{wheel}"',
+            "Mnema {version} is out. Update the command: {command}",
             version=release.version,
-            wheel=release.cli.wheel,
+            command=release.cli.install_command(),
         )
     )
 
@@ -456,11 +465,6 @@ def _clones(bundle: Path, work: Path) -> bool:
     return True
 
 
-class CodeNotApplicable(MediaError):
-    """The code-only update does not fit this bundle (another runtime, no code archive): the
-    whole bundle does."""
-
-
 def _unquarantine(app: Path) -> None:
     """A bundle from the DMG or a copy may carry the quarantine: a missing attribute is no
     failure."""
@@ -522,7 +526,7 @@ def prepare_code_bundle(bundle: Path, archive: Path, work: Path, version: str) -
     except ValueError:  # an entry of the installed runtime is neither a file nor a link
         same = False
     if not same:  # built for another runtime, or this one was changed
-        raise CodeNotApplicable(_("Invalid update package contents"))
+        raise MediaError(invalid)
     unpacked = [app / member.name for member in members]
     main_executable = app / codesign.MAIN
     try:
@@ -552,7 +556,8 @@ def _app_not_running() -> None:
 def _apply_bundle(bundle: Path, release: Release, on: Progress) -> Result:
     """Replace the running Mnema.app: make and check the new bundle next to it (from the code
     archive when the runtime is the same, else from the zip), then swap the folders; the old
-    bundle stays as .Mnema-previous.app until the next start."""
+    bundle stays as .Mnema-previous.app until the next start. Any failure of the code archive
+    takes the zip, except no connection: the zip would not download either."""
     mac = release.mac
     if mac is None:
         raise MediaError(_("This Mnema version has no Mac app"))
@@ -593,8 +598,10 @@ def _apply_bundle(bundle: Path, release: Release, on: Progress) -> Result:
         if code is not None and _runtime_of(bundle) == code.runtime and _clones(bundle, work):
             try:
                 app = _code_bundle(bundle, release, code, work / "code", on)
-            except CodeNotApplicable:
-                logger.warning("code-only update does not fit, taking the whole app", exc_info=True)
+            except NoConnection:
+                raise  # the zip would not download either
+            except Exception:
+                logger.warning("code-only update failed, taking the whole app", exc_info=True)
                 shutil.rmtree(work / "code", ignore_errors=True)
         if app is None:
             app = _whole_bundle(release, mac, work, on)
@@ -619,12 +626,7 @@ def _code_bundle(
 ) -> Path:
     work.mkdir()
     archive = work / "code.tar.gz"
-    try:
-        _fetch_package(release, code, archive, on)
-    except httpx.HTTPStatusError as exc:
-        if exc.response.status_code not in (404, 410):
-            raise
-        raise CodeNotApplicable(_("Invalid update package contents")) from exc
+    _fetch_package(release, code, archive, on)
     return prepare_code_bundle(bundle, archive, work, release.version)
 
 

@@ -43,5 +43,6 @@
   "no access": "нет доступа",
   "{first} and {second}": "{first} и {second}",
   "Mnema for Mac installs from the DMG: {url}": "Mnema для Mac ставится из DMG: {url}",
+  "The Mnema app needs a Mac with Apple silicon. On this Mac, the mnema command works with a server: {url}": "Приложению Mnema нужен Mac с чипом Apple. На этом Mac команда mnema работает с сервером: {url}",
   "The mnema command has no app. Install Mnema: {url}": "В команде mnema нет приложения. Установите Mnema: {url}"
 }

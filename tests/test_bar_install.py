@@ -132,6 +132,7 @@ def test_install_texts_follow_an_english_interface(home, monkeypatch) -> None:
     with i18n.using("en"):
         summary = install.install()
         uninstalled = install.uninstall()
+        monkeypatch.setattr(install.platform, "machine", lambda: "arm64")
         refusal = install.from_dmg()
     assert summary.startswith("Installed: ") and not _cyrillic(summary)
     assert not _cyrillic(uninstalled)
@@ -149,10 +150,25 @@ def test_mnema_bar_on_a_mac_points_at_the_dmg_in_english(monkeypatch) -> None:
     from mnema import i18n
 
     monkeypatch.setattr("platform.system", lambda: "Darwin")
+    monkeypatch.setattr("platform.machine", lambda: "arm64")
     monkeypatch.setattr(sys, "argv", ["mnema-bar"])
     monkeypatch.setenv("MNEMA_UI_LANG", "en")
     with i18n.using("en"), pytest.raises(SystemExit) as refused:
         main()
     assert refused.value.code == (
         "Mnema for Mac installs from the DMG: https://github.com/fozt/mnema/releases/latest"
+    )
+
+
+def test_old_source_app_on_an_intel_mac_is_not_sent_to_the_dmg(monkeypatch) -> None:
+    """The 0.4 update of a source-built app calls install_release: the DMG is Apple silicon only."""
+    from mnema import i18n
+
+    monkeypatch.setattr("platform.system", lambda: "Darwin")
+    monkeypatch.setattr("platform.machine", lambda: "x86_64")
+    with i18n.using("en"), pytest.raises(SystemExit) as refused:
+        install.install_release(terminal=True)
+    assert refused.value.code == (
+        "The Mnema app needs a Mac with Apple silicon. On this Mac, the mnema command works with "
+        "a server: https://github.com/fozt/mnema#install"
     )
