@@ -225,6 +225,23 @@ def test_prebuffer_is_bounded_and_drops_oldest() -> None:
     assert buf.dropped_seconds == 1.5  # 3 pieces of 0.5 s
 
 
+def test_prebuffer_drops_whole_samples_of_odd_chunks() -> None:
+    """Odd chunks overflow the prebuffer: what stays starts on a sample, so the rest of the
+    PCM16 stream is not shifted by a byte."""
+    from mnema.live.asr import PcmPrebuffer
+
+    buf = PcmPrebuffer(seconds=1.0)
+    stream = bytes(i % 251 for i in range(100_001))
+    for at in range(0, len(stream), 3001):
+        buf.push(stream[at : at + 3001])
+    kept = b"".join(buf.drain())
+
+    assert stream.endswith(kept) and len(kept) <= 32000
+    dropped = len(stream) - len(kept)
+    assert dropped % 2 == 0
+    assert buf.dropped_seconds == dropped / 32000
+
+
 def _decoded(monkeypatch, tmp_path, pieces):
     seen: list[dict] = []
     _models(

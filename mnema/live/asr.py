@@ -65,6 +65,14 @@ class PcmPrebuffer:
             old = self._chunks.popleft()
             self._size -= len(old)
             self._dropped += len(old)
+        # whole samples only: an odd drop would shift the rest of the PCM16 stream by a byte
+        while self._dropped % 2 and self._chunks:
+            head = self._chunks.popleft()
+            if head:
+                self._size -= 1
+                self._dropped += 1
+                if len(head) > 1:
+                    self._chunks.appendleft(head[1:])
 
     def drain(self) -> list[bytes]:
         chunks = list(self._chunks)
