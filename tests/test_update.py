@@ -208,7 +208,7 @@ def test_damaged_archive_never_runs_installer(release, tmp_path, damage):
     elif damage == "traversal":
         release["archive"] = release["build_archive"]({"../outside": "escape"})
     else:
-        release["version"] = "0.4.0"
+        release["version"] = "98.0.0"
     with pytest.raises(MediaError):
         update.apply()
     assert release["commands"] == []
