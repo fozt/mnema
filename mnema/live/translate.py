@@ -191,6 +191,19 @@ def check_deepl_key(key: str, *, timeout: float = 10.0) -> None:
         raise MediaError(_("DeepL answered with error {code}", code=resp.status_code))
 
 
+def deepl_reason(exc: httpx.HTTPError) -> str:
+    """Why a DeepL request failed, in the user's words: the key, the character limit, an error
+    code or no answer."""
+    code = exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None
+    if code in (401, 403):
+        return _("DeepL did not accept the key")
+    if code == 456:
+        return _("the DeepL character limit is used up")
+    if code is None or code in _DEEPL_TRANSIENT:
+        return _("DeepL did not answer")
+    return _("DeepL answered with error {code}", code=code)
+
+
 class DeepLTranslator:
     """Live translator over the DeepL API: does not stream (on_partial is ignored) but answers
     fast (~0.3–0.7 s per phrase). Plain httpx, no deepl package.

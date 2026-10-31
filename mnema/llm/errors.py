@@ -1,5 +1,5 @@
-"""Model provider errors, shared by call retries, recording remarks and the model check in
-`mnema model` and the model window (classify, check_refusal).
+"""Model provider errors, shared by call retries, recording remarks and the model check of the
+model window (classify, check_refusal).
 
 Quota and credits are not the recording's fault: such calls are not retried (backing off on 402
 is pointless).
@@ -196,7 +196,7 @@ def _reason(exc: BaseException) -> str:
 
 
 def human_sentence(exc: BaseException) -> str:
-    """human_reason capitalized: the error in `mnema model` and the model window."""
+    """human_reason capitalized: the error in the model window."""
     reason = human_reason(exc)
     return reason[:1].upper() + reason[1:]
 

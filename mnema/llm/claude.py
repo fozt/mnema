@@ -189,7 +189,7 @@ def ping(creds: Credentials, *, on: Progress = noop) -> str:
 
 
 def check_model(creds: Credentials, *, on: Progress = noop) -> Refusal | None:
-    """The model check of `mnema model` and the model window, a ping: None if the model
+    """The model check of the model window (here or PUT /api/model), a ping: None if the model
     answered, otherwise a refusal (errors.check_refusal). on is also called during retry
     pauses; its exception (the window was closed) ends the check at once and propagates as is,
     since it is not a model refusal."""

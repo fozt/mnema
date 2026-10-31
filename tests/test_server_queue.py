@@ -10,7 +10,8 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
 
-from mnema import ops
+from mnema import job_queue, ops
+from mnema.core import settings
 from mnema.server import create_app
 
 GIB = 1024**3
@@ -70,6 +71,7 @@ def machine(monkeypatch):
         return original(path, *args, **kwargs)
 
     monkeypatch.setattr(Path, "read_text", read)
+    monkeypatch.setattr(job_queue, "available_memory", settings.available_memory)
     monkeypatch.setattr(os, "sched_getaffinity", lambda _: set(range(6)), raising=False)
     monkeypatch.setattr(os, "cpu_count", lambda: 6)
     monkeypatch.delenv("MNEMA_ASR_THREADS", raising=False)

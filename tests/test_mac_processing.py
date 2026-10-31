@@ -461,7 +461,32 @@ def test_mac_with_a_server_that_refuses_the_summary_keeps_the_transcript(
     assert (folder / "transcript.txt").is_file() and not (folder / "summary.txt").exists()
     assert not (folder / PROCESSING_MARK).exists()
     [remark] = result.remarks
-    assert remark.cause == "Пересказ не составлен: На сервере не настроена модель"
+    assert (
+        remark.cause
+        == "Пересказ не составлен: Не настроена модель. Выберите её в настройках Mnema на Mac"
+    )
     run = meta.last(folder)
     assert run is not None and (run.kind, run.status) == ("process", "ok")
     assert run.notes == [remark] and run.remarks == [remark.text]
+
+
+@pytest.mark.parametrize("local", [True, False])
+def test_finish_with_local_summarizes_on_this_mac_too(monkeypatch, tmp_path, sources, local):
+    """`mnema finish --local` on a Mac connected to a server keeps the whole run here, the
+    summary by this Mac's model; without --local the summary is the server's (down here)."""
+    import argparse
+
+    import mnema.cli as cli_pkg
+    from mnema.cli import commands
+
+    _asr(monkeypatch)
+    calls = _model(monkeypatch)
+    monkeypatch.setenv("MNEMA_RUNNER", "http://node:8123")
+    monkeypatch.setattr(MnemaClient, "health", lambda self, **kw: None)
+    monkeypatch.setattr(cli_pkg, "run_streaming", lambda label, fn, **kw: fn(on=lambda *a: None))
+    folder = _recording(tmp_path / "notes")
+    args = argparse.Namespace(path=str(folder), start=None, end=None, lang="ru", runner=None)
+    commands.cmd_finish(argparse.Namespace(**vars(args), local=local))
+    [done] = (tmp_path / "notes").iterdir()
+    assert (done / "summary.txt").is_file() is local
+    assert len(calls) == (1 if local else 0)

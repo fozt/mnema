@@ -1036,9 +1036,7 @@ def _samples() -> dict[str, BaseModel]:
                     Choice(key="auto", title="Автоматически"),
                     Choice(key="gigaam", title="GigaAM"),
                     Choice(key="whisper", title="Whisper"),
-                    Choice(
-                        key="groq/whisper-large-v3-turbo", title="Groq · whisper-large-v3-turbo"
-                    ),
+                    Choice(key="openai/gpt-4o-transcribe", title="OpenAI · gpt-4o-transcribe"),
                 ],
                 sources=[
                     Choice(key="mic", title="Микрофон", checked=True),

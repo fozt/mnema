@@ -21,7 +21,7 @@
   "Job not found": "Задача не найдена",
   "Live text on the server is busy. Try again later": "Живой текст на сервере занят. Повторите позже",
   "No model configured. Click “Choose model…” in Mnema settings": "Не настроена модель. Нажмите «Выбрать модель…» в настройках Mnema",
-  "No model is configured on the server": "На сервере не настроена модель",
+  "No model configured. Choose one in Mnema settings on the Mac": "Не настроена модель. Выберите её в настройках Mnema на Mac",
   "Only a job result can be downloaded": "Скачать можно только результат задачи",
   "Pass the address and the token separately.": "Передайте адрес и токен отдельно.",
   "Paste the invitation from the server": "Вставьте приглашение с сервера",

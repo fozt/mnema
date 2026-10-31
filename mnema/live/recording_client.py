@@ -830,6 +830,7 @@ def finalize_on_node(prepared, tracks, *, connection, **kwargs):
     """Recording stopped and sources closed: the node gets the WAV, not the client's live
     draft."""
     if not prepared.config.record:
+        kwargs.pop("summary_at", None)  # the node that gave the live text summarizes it
         return finalize_text_on_node(prepared, tracks, connection=connection, **kwargs)
     from .persist import save
 

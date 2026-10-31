@@ -175,9 +175,7 @@ def _result(
 
 
 def _place(params: RecordingParams | RecordingSummaryParams) -> remarks.Place:
-    # Hints name the node only by a name its owner gave: the default name adds nothing.
-    given = node_settings.given_name() or ""
-    return remarks.Place(node=given, tz=params.started.tzinfo)
+    return remarks.Place(tz=params.started.tzinfo)
 
 
 def process_recording(root: Path, values: dict, on: Progress) -> dict:

@@ -73,7 +73,7 @@ class JobQueue:
         short_slots: int = 1,
         text_slots: int = 2,
         cloud_slots: int = 4,
-        memory: Callable[[], int | None] = available_memory,
+        memory: Callable[[], int | None] | None = None,
         recheck_s: float = MEMORY_RECHECK_S,
     ):
         self.workers = default_workers() if workers is None else workers
@@ -81,7 +81,7 @@ class JobQueue:
         self.text_slots = text_slots
         self.cloud_slots = cloud_slots
         self.pending_limit = pending
-        self.memory = memory
+        self.memory = memory  # None — this machine's free memory (available_memory)
         self.recheck_s = recheck_s
         self.lock = threading.RLock()
         self._busy = dict.fromkeys(_Lane, 0)
@@ -175,7 +175,7 @@ class JobQueue:
 
     def _free_memory(self) -> int | None:
         try:
-            return self.memory()
+            return (self.memory or available_memory)()
         except Exception:
             _log.exception("reading free memory failed")
             return None

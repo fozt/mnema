@@ -66,8 +66,8 @@
         "enabled": true
       },
       {
-        "key": "groq/whisper-large-v3-turbo",
-        "title": "Groq · whisper-large-v3-turbo",
+        "key": "openai/gpt-4o-transcribe",
+        "title": "OpenAI · gpt-4o-transcribe",
         "detail": "",
         "checked": false,
         "enabled": true

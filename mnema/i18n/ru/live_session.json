@@ -22,5 +22,6 @@
   "No connection to the server: the phrase was not translated": "Нет связи с сервером: фраза без перевода",
   "DeepL is not responding, try again later": "DeepL не отвечает, попробуйте позже",
   "DeepL did not accept the key": "DeepL не принял ключ",
-  "DeepL answered with error {code}": "DeepL ответил ошибкой {code}"
+  "DeepL answered with error {code}": "DeepL ответил ошибкой {code}",
+  "the DeepL character limit is used up": "лимит знаков DeepL исчерпан"
 }

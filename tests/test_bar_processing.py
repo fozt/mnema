@@ -508,5 +508,5 @@ def test_mac_on_server_summary_without_server_model_names_the_server(monkeypatch
     rt = BarRuntime(platform=_App(), prefs_file=home / "bar.json")
     rt.handle(f"summarize:{folder}")
     rt.join(timeout=10)
-    assert rt.state.error == "На сервере не настроена модель"
+    assert rt.state.error == "Не настроена модель. Выберите её в настройках Mnema на Mac"
     assert not (folder / PROCESSING_MARK).exists() and meta.last(folder) is None

@@ -105,13 +105,13 @@ def get(name: str) -> OpSpec | None:
     return _REGISTRY.get(name)
 
 
-SERVER_NO_MODEL = "No model is configured on the server"
+SERVER_NO_MODEL = "No model configured. Choose one in Mnema settings on the Mac"
 MAC_NO_MODEL = "No model configured. Click “Choose model…” in Mnema settings"
 
 
 def no_model() -> str:
     """The refusal without a cloud model, by where processing runs: on this Mac, where to choose
-    one; on the server, that there is none."""
+    one; on the server, that the user sets hers in the app on the Mac."""
     from .core import base
 
     return _(MAC_NO_MODEL) if base.processed_here() else _(SERVER_NO_MODEL)

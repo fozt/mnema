@@ -178,11 +178,11 @@ class _Closed(Exception):
 
 
 class ModelFlow:
-    """The "Summary model" window, with the steps of `mnema model`: Provider (no network), Key
-    (providers.check_key, a GET of the model list; a refusal clears the field), Model
-    (claude.check_model, then llm.config.save_model). After a refusal the engine picks the step:
-    a wrong key goes back to Key, no models back to Provider. The key lives only in the window
-    field, here until the window closes, and in redact; the window state shows only "Keep …a1B2".
+    """The "Summary model" window: Provider (no network), Key (providers.check_key, a GET of
+    the model list; a refusal clears the field), Model (claude.check_model, then
+    llm.config.save_model). After a refusal the engine picks the step: a wrong key goes back
+    to Key, no models back to Provider. The key lives only in the window field, here until the
+    window closes, and in redact; the window state shows only "Keep …a1B2".
     With a connected server (server) the model is the user's on the server: the same steps go to
     /api/model* and the server checks and keeps it; this Mac's .env is not touched. current is
     the server's model as the settings know it."""
@@ -309,6 +309,10 @@ class ModelFlow:
             models = providers.check_key(self._provider, key)
             self._key = key
             return models, providers.recommended(self._provider, models)
+        from ..llm.redact import add_secret
+
+        if typed:
+            add_secret(typed)  # hidden in this Mac's log before it leaves
         keep = not typed and self._saved_key() is not None
         answer = self._server.model_key(self._provider.value, None if keep else typed)
         models = [
@@ -422,6 +426,8 @@ class KeyFlow:
         key = values.get("key", "").strip()
         if not key:
             return self._form(_("A key is required"))
+        if self._server is None and self._kind == "deepl":
+            return self._form(_("Server not connected"))  # DeepL translates only on the server
         add_secret(key)
         try:
             if self._server is None:

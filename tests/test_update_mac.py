@@ -243,7 +243,8 @@ def test_bundled_cli_finds_its_bundle_without_the_app_environment(mac, monkeypat
 
 def test_app_shows_the_download_share_then_relaunches(mac, monkeypatch, tmp_path):
     """The Mac zip arrives in pieces: the app's environment carries the share of each, the
-    steps after the download carry none."""
+    steps after the download carry none. Only the update's own notices count: the server
+    check and the recognition list notify from their threads at any moment."""
     data = mac["zip"]
     pieces = [data[i : i + len(data) // 3 + 1] for i in range(0, len(data), len(data) // 3 + 1)]
     handler = update.TRANSPORT.handler
@@ -256,9 +257,12 @@ def test_app_shows_the_download_share_then_relaunches(mac, monkeypatch, tmp_path
     monkeypatch.setattr(update, "TRANSPORT", httpx.MockTransport(chunked))
     monkeypatch.setattr(subprocess, "Popen", lambda *a, **kw: None)
     seen = []
-    bar = BarRuntime(
-        on_change=lambda: seen.append(bar.menu_env()), prefs_file=tmp_path / "bar.json"
-    )
+
+    def changed() -> None:
+        if threading.current_thread().name == "mnema-bar-update":
+            seen.append(bar.menu_env())
+
+    bar = BarRuntime(on_change=changed, prefs_file=tmp_path / "bar.json")
 
     bar.handle("update")
     for thread in threading.enumerate():

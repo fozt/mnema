@@ -103,7 +103,7 @@ def test_node_without_model_refuses_translation(tmp_path, monkeypatch):
     path = _upload(client, RU_TEXT)
     response = client.post("/api/jobs", json={"op": "translate", "path": path})
     assert response.status_code == 400
-    assert response.json()["detail"] == "На сервере не настроена модель"
+    assert response.json()["detail"] == "Не настроена модель. Выберите её в настройках Mnema на Mac"
     assert not calls
     assert Path(path).is_file()  # the upload is not claimed and can go to another job
 

@@ -848,6 +848,13 @@ _CLOUD_PROMPT_WORDS = 200
 _CLOUD_REQUESTS = 4
 
 
+class NoCloudKey(MediaError):
+    """Cloud recognition without the user's OpenAI key: the remark says so, not "an error"."""
+
+    def __init__(self) -> None:
+        super().__init__(_(NO_CLOUD_KEY))
+
+
 def is_cloud(choice: str | None) -> bool:
     """Whether the choice is cloud recognition: the audio goes to OpenAI."""
     return choice in CLOUD_MODELS
@@ -928,7 +935,7 @@ class CloudBackend(Engine):
         on: Progress = noop,
     ) -> Transcript:
         if not self.key:
-            raise MediaError(_(NO_CLOUD_KEY))
+            raise NoCloudKey
         with tempfile.TemporaryDirectory() as tmp:
             wav = src if _is_track(src) else extract_audio(src, Path(tmp) / "audio.wav", on=on)
             on(None, _("Looking for speech…"))

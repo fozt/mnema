@@ -1109,3 +1109,39 @@ def test_no_record_finalizes_server_text_without_wav_or_asr(monkeypatch, tmp_pat
     from mnema.live import meta
 
     assert meta.last(base).status == "ok"
+
+
+@pytest.mark.parametrize("no_record", [False, True], ids=["rec --no-save", "text only"])
+def test_rec_with_local_on_a_mac_finishes_here(monkeypatch, tmp_path, no_record):
+    """`mnema rec --local --no-save` and a text-only session with --local on a Mac connected to a
+    server finish on this Mac: the text is ready, nothing fails on where the summary goes."""
+    import mnema.live.setup as setup_mod
+    from mnema.core import base as core_base
+
+    _patch_live(monkeypatch, {"write_pcm": True})
+    monkeypatch.setattr(core_base, "STANDALONE", True)
+    _temp_recording(monkeypatch, tmp_path / "eph")
+    copied: list[str] = []
+    monkeypatch.setattr(
+        "mnema.live.clipboard.copy_to_clipboard", lambda t: copied.append(t) or True
+    )
+    monkeypatch.setattr(
+        setup_mod,
+        "dispatch",
+        lambda *a, **k: {
+            "text": "Всё решено.",
+            "segments": [{"start": 0.0, "end": 1.0, "text": "Всё решено."}],
+            "language": "ru",
+        },
+    )
+    monkeypatch.setattr(commands, "done_panel", lambda p, d: None)
+    monkeypatch.chdir(tmp_path)
+    args = build_parser().parse_args(["rec", "--local", "--lang", "ru"])
+    args.no_save, args.no_record = not no_record, no_record
+    commands.cmd_live(args)
+    if no_record:
+        [folder] = (tmp_path / "recordings").iterdir()
+        assert "привет" in (folder / "transcript.txt").read_text(encoding="utf-8")
+    else:
+        assert copied and "решено" in copied[0]
+        assert not (tmp_path / "eph").exists()
