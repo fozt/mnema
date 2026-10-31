@@ -77,5 +77,8 @@
   "User name: Latin letters, digits, - and _, up to 32, for example anna": "Имя пользователя: латинские буквы, цифры, - и _, до 32 знаков, например anna",
   "No user {name}. Add one: {command}": "Нет пользователя {name}. Добавьте: {command}",
   "Invitation for one device of {user}, valid until {until}:\n{invite}": "Приглашение для одного устройства пользователя {user}, действует до {until}:\n{invite}",
-  "Update the app to connect with this invitation": "Обновите приложение, чтобы подключиться по этому приглашению"
+  "Update the app to connect with this invitation": "Обновите приложение, чтобы подключиться по этому приглашению",
+  "The input must be an uploaded file": "Нужен загруженный файл",
+  "The server chooses the recognition model": "Модель распознавания выбирает сервер",
+  "The user was removed": "Пользователь удалён"
 }

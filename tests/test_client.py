@@ -353,11 +353,11 @@ def test_client_download_retries_transient_transport_error(tmp_path: Path, monke
     from mnema.client import MnemaClient
 
     root = tmp_path / "root"
-    src = root / "outputs" / "job1" / "clip.mp4"
+    app = create_app(root)
+    job = app.state.store.create(op="compress", path="in.mov", params={})
+    src = app.state.root / "outputs" / job.id / "clip.mp4"
     src.parent.mkdir(parents=True)
     src.write_bytes(b"video-bytes")
-
-    app = create_app(root)
     transport = httpx.ASGITransport(app=app)
     c = MnemaClient("http://test", transport=transport)
     c._retry_backoff = 0

@@ -16,6 +16,8 @@ from pydantic import BaseModel
 from ..i18n import _
 
 MARKER = ".partial.json"  # next to a chunked upload until all its bytes have arrived
+OWNER_MARK = ".mnema-owner"  # the name of the user who made the upload
+GONE = "The uploaded file is already deleted; upload the file again."
 MAX_UPLOAD_SIZE = 20 * 1024**3
 _UPLOAD_ID = re.compile(r"[0-9a-f]{32}")
 
@@ -50,7 +52,7 @@ def target(folder: Path, raw: str) -> Path | None:
     """The upload's file in its folder: basename only; None when the name is not allowed."""
     name = Path(raw).name
     try:
-        if name == MARKER or len(name.encode()) > 255:
+        if name in (MARKER, OWNER_MARK) or len(name.encode()) > 255:
             return None
         base, dest = folder.resolve(), (folder / name).resolve()
     except (OSError, ValueError):  # NUL or lone surrogates in the name
@@ -58,6 +60,10 @@ def target(folder: Path, raw: str) -> Path | None:
     if not dest.is_relative_to(base) or dest == base:
         return None
     return dest
+
+
+def _mark(folder: Path, user: str) -> None:
+    (folder / OWNER_MARK).write_text(user, encoding="utf-8")
 
 
 class Uploads:
@@ -72,6 +78,18 @@ class Uploads:
             return None
         parts = resolved.relative_to(self.root).parts
         return self.root / parts[0] if len(parts) >= 2 else None
+
+    def owner(self, path: str | Path) -> str | None:
+        """The user who made the upload holding `path` (the folder itself too); None without
+        the mark or outside uploads/."""
+        resolved = Path(path).resolve()
+        if not resolved.is_relative_to(self.root) or resolved == self.root:
+            return None
+        folder = self.root / resolved.relative_to(self.root).parts[0]
+        try:
+            return (folder / OWNER_MARK).read_text(encoding="utf-8") or None
+        except (OSError, ValueError):
+            return None
 
     def claim(self, path: str) -> None:
         """An upload is single-use: a second job cannot delete the first one's input."""
@@ -88,16 +106,19 @@ class Uploads:
                     _("The upload is already used by another job; upload the file again.")
                 )
             if not Path(path).is_file():
-                raise FileNotFoundError(
-                    _("The uploaded file is already deleted; upload the file again.")
-                )
+                raise FileNotFoundError(_(GONE))
             self._busy.add(folder)
 
-    def writing(self, folder: Path) -> None:
+    def writing(self, folder: Path, *, user: str) -> None:
         with self._lock:
             self._busy.add(folder)
             try:
                 folder.mkdir(parents=True)
+                try:
+                    _mark(folder, user)
+                except Exception:
+                    shutil.rmtree(folder, ignore_errors=True)
+                    raise
             except Exception:
                 self._busy.discard(folder)
                 raise
@@ -138,7 +159,7 @@ class Uploads:
                 except OSError:
                     continue
 
-    def start(self, name: str, size: int) -> Part:
+    def start(self, name: str, size: int, *, user: str) -> Part:
         """A new chunked upload: an empty uploads/<id>/<name> and a marker with name and size."""
         self.sweep()
         folder = self.root / uuid.uuid4().hex
@@ -148,6 +169,7 @@ class Uploads:
         with self._lock:
             folder.mkdir(parents=True)
             try:
+                _mark(folder, user)
                 (folder / MARKER).write_text(json.dumps({"name": dest.name, "size": size}))
                 dest.touch()
             except Exception:
@@ -214,7 +236,9 @@ class Uploads:
     @staticmethod
     def _finished(folder: Path) -> Part | None:
         try:
-            files = [p for p in folder.iterdir() if p.is_file()]
+            files = [
+                p for p in folder.iterdir() if p.is_file() and p.name not in (MARKER, OWNER_MARK)
+            ]
             if len(files) != 1:
                 return None
             size = files[0].stat().st_size

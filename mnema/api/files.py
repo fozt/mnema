@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
 from ..i18n import _
+from ..jobs import NODE_OWNER, sees
 from .uploads import MAX_UPLOAD_SIZE, OffsetConflict, target
 
 CHUNK_STALL_S = 30.0  # the client goes quiet mid-chunk: the chunk ends, the upload is free
@@ -73,13 +74,19 @@ async def _receive_chunk(request: Request, file: Path, offset: int, room: int) -
 
 
 def register_file_routes(app: FastAPI) -> None:
+    def _mine(request: Request, upload_id: str) -> bool:
+        """A device uses only uploads of its user; the node token any."""
+        if request.state.owner == NODE_OWNER:
+            return True
+        return app.state.uploads.owner(app.state.uploads.root / upload_id) == request.state.user
+
     @app.post("/api/upload")
-    def upload(file: UploadFile = File(...)) -> dict:  # noqa: B008
+    def upload(request: Request, file: UploadFile = File(...)) -> dict:  # noqa: B008
         # A unique uploads/<uuid>/ per upload: equal names never overwrite each other's input.
         # The folder is ephemeral: jobs.py removes it once the job ends.
         app.state.uploads.sweep()
         dest_dir = app.state.root / "uploads" / uuid.uuid4().hex
-        app.state.uploads.writing(dest_dir)
+        app.state.uploads.writing(dest_dir, user=request.state.user)
         success = False
         try:
             dest = target(dest_dir, file.filename or "upload.bin")
@@ -93,16 +100,16 @@ def register_file_routes(app: FastAPI) -> None:
             app.state.uploads.written(dest_dir, success=success)
 
     @app.post("/api/uploads", status_code=201)
-    def start_upload(req: UploadStart) -> dict:
+    def start_upload(req: UploadStart, request: Request) -> dict:
         try:
-            part = app.state.uploads.start(req.name, req.size)
+            part = app.state.uploads.start(req.name, req.size, user=request.state.user)
         except ValueError as exc:
             raise HTTPException(403, _(INVALID_NAME)) from exc
         return {"id": part.id, "offset": part.offset}
 
     @app.get("/api/uploads/{upload_id}")
-    def upload_state(upload_id: str) -> dict:
-        part = app.state.uploads.part(upload_id)
+    def upload_state(upload_id: str, request: Request) -> dict:
+        part = app.state.uploads.part(upload_id) if _mine(request, upload_id) else None
         if part is None:
             raise HTTPException(404, _(NO_UPLOAD))
         return part.model_dump()
@@ -110,6 +117,8 @@ def register_file_routes(app: FastAPI) -> None:
     @app.put("/api/uploads/{upload_id}")
     async def upload_chunk(upload_id: str, offset: int, request: Request) -> JSONResponse:
         uploads = app.state.uploads
+        if not await run_in_threadpool(_mine, request, upload_id):
+            raise HTTPException(404, _(NO_UPLOAD))
         try:
             part = uploads.begin_chunk(upload_id, offset)
         except LookupError as exc:
@@ -132,17 +141,19 @@ def register_file_routes(app: FastAPI) -> None:
             )
         return JSONResponse({"offset": part.offset, "path": part.path})
 
-    def _checked(raw: str) -> Path:
-        # The node root can be a recordings folder: only FILE results of jobs go out.
+    def _checked(raw: str, owner: str) -> Path:
+        # The node root can be a recordings folder: only FILE results of jobs go out, and only
+        # to whoever sees the job.
         outputs = (app.state.root / "outputs").resolve()
         p = Path(raw).expanduser().resolve()
         if not p.is_relative_to(outputs) or p == outputs:
             raise HTTPException(403, _(ONLY_RESULTS))
-        if not p.is_file():
+        job = app.state.store.get(p.relative_to(outputs).parts[0])
+        if job is None or not sees(owner, job) or not p.is_file():
             raise HTTPException(404, _("File not found"))
         return p
 
     @app.get("/api/download")
-    def download(path: str) -> FileResponse:
+    def download(path: str, request: Request) -> FileResponse:
         # Starlette handles Content-Type and Range/206.
-        return FileResponse(_checked(path))
+        return FileResponse(_checked(path, request.state.owner))

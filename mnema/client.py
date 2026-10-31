@@ -371,7 +371,8 @@ class MnemaClient:
     ) -> dict:
         """Runs an operation on the server and polls until it ends.
 
-        The input is exactly one of path (a file already on the runner), url or urls. Links are
+        The input is exactly one of path (this client's upload on the runner; only the node
+        token may name another file inside the runner's folder), url or urls. Links are
         downloaded and joined on the client; cookies stay on the client. on(fraction|None,
         message) gets download, upload and processing progress. A failure of the preparation
         or of the remote operation is raised as MediaError.

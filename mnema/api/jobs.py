@@ -28,11 +28,15 @@ from ..jobs import (
     job_error_text,
     run_job,
     safe_path,
+    sees,
 )
 from ..llm.config import LLMSettings
 from ..ops import TEXT_SUFFIXES, InputKind, Refused, admit, no_model
+from ..users import OWNER, as_user
 from .models import JobRequest
-from .uploads import UploadBusy
+from .uploads import GONE, UploadBusy
+
+TRACK_UPLOADED = "A track must be an uploaded file"
 
 _log = logging.getLogger(__name__)
 
@@ -65,15 +69,10 @@ SHORT_JOB_MAX_S = 300.0  # short recordings get their own queue slot, never wait
 _VIEW = set(JobView.model_fields)
 
 
-def _sees(owner: str, job: Job) -> bool:
-    """A device sees only its own jobs; the node token sees all."""
-    return owner == NODE_OWNER or job.owner == owner
-
-
 def _job_of(app: FastAPI, request: Request, job_id: str) -> Job:
     """The job for the caller; someone else's job looks like a missing one: 404."""
     job = app.state.store.get(job_id)
-    if job is None or not _sees(request.state.owner, job):
+    if job is None or not sees(request.state.owner, job):
         raise HTTPException(404, _("Job not found"))
     return job
 
@@ -81,9 +80,34 @@ def _job_of(app: FastAPI, request: Request, job_id: str) -> Job:
 def _same_key(owner: str, previous: Job | None) -> dict | JSONResponse:
     """The same retry key is the same job; the key of someone else's job is refused without
     its id."""
-    if previous is None or not _sees(owner, previous):
+    if previous is None or not sees(owner, previous):
         return JSONResponse(status_code=409, content={"detail": _(KEY_TAKEN), "reason": KEY_REASON})
     return {"id": previous.id}
+
+
+def _device_inputs(app: FastAPI, request: Request, req: JobRequest) -> JSONResponse | None:
+    """A device gives only uploads of its user and does not choose the transcription model;
+    the node token any path inside the root. Checked before admission and ffprobe."""
+    if request.state.owner == NODE_OWNER:
+        return None
+    if req.op == "transcribe" and req.params.get("model") is not None:
+        raise HTTPException(422, _("The server chooses the recognition model"))
+    inputs = req.tracks or {None: req.path}
+    for label, raw in inputs.items():
+        try:
+            path = safe_path(app.state.root, raw)
+        except mc.MediaError as exc:
+            raise HTTPException(403, str(exc)) from exc
+        if app.state.uploads.directory(path) is None:
+            if label is not None:
+                raise HTTPException(403, _(TRACK_UPLOADED))
+            raise HTTPException(403, _("The input must be an uploaded file"))
+        if app.state.uploads.owner(path) != request.state.user:  # looks like a deleted one
+            detail = {"detail": _(GONE)}
+            if label is not None:
+                detail["track"] = label
+            return JSONResponse(status_code=404, content=detail)
+    return None
 
 
 def _is_short(root: Path, path: str | None) -> bool:
@@ -141,6 +165,8 @@ def register_job_routes(app: FastAPI) -> None:
             raise HTTPException(400, no_model())
         if (spec.input_kind == InputKind.TRACKS) != (req.tracks is not None):
             raise HTTPException(422, _("The operation takes another kind of input"))
+        if (refused := _device_inputs(app, request, req)) is not None:
+            return refused
         tracks = None
         try:
             if req.tracks is not None:
@@ -150,7 +176,7 @@ def register_job_routes(app: FastAPI) -> None:
                     if not path.is_relative_to(app.state.root / "uploads") or (
                         app.state.uploads.directory(path) is None
                     ):
-                        raise mc.MediaError(_("A track must be an uploaded file"))
+                        raise mc.MediaError(_(TRACK_UPLOADED))
                     tracks[label] = str(path)
                 if len(set(tracks.values())) != len(tracks):
                     raise HTTPException(422, _("Track paths must differ"))
@@ -173,7 +199,7 @@ def register_job_routes(app: FastAPI) -> None:
         with app.state.job_queue.lock:
             if req.key is not None and (previous := app.state.store.find_by_key(req.key)):
                 return _same_key(owner, previous)
-            if not app.state.job_queue.has_room(text=text):
+            if not app.state.job_queue.has_room(text=text, user=request.state.user):
                 raise HTTPException(
                     429, _("The server is busy: the queue is full. Try again later")
                 )
@@ -192,7 +218,14 @@ def register_job_routes(app: FastAPI) -> None:
                         return JSONResponse(status_code=status, content=detail)
                     claimed.append(path)
                 return _enqueue_job(
-                    req, spec, params, tracks=tracks, short=short, text=text, owner=owner
+                    req,
+                    spec,
+                    params,
+                    tracks=tracks,
+                    short=short,
+                    text=text,
+                    owner=owner,
+                    user=request.state.user,
                 )
             except DuplicateJobKey as exc:
                 for held in claimed:
@@ -203,7 +236,9 @@ def register_job_routes(app: FastAPI) -> None:
                     app.state.uploads.release(held, delete=False)
                 raise
 
-    def _enqueue_job(req, spec, params, *, tracks, short: bool, text: bool, owner: str) -> dict:
+    def _enqueue_job(
+        req, spec, params, *, tracks, short: bool, text: bool, owner: str, user: str
+    ) -> dict:
         job = app.state.store.create(
             op=req.op,
             path=str(app.state.root) if tracks is not None else req.path,
@@ -212,7 +247,7 @@ def register_job_routes(app: FastAPI) -> None:
             key=req.key,
             lang=current(),
         )
-        job.owner = owner  # saved by the next update, under the same queue lock
+        job.owner, job.user = owner, user  # saved by the next update, under the same queue lock
         job.message = _("Queued")
         app.state.store.update(job)
         app.state.cancels.discard(job.id)
@@ -258,6 +293,7 @@ def register_job_routes(app: FastAPI) -> None:
                 j.started_at = time.time()
                 j.message = _("Starting processing")
                 app.state.store.update(j)
+                _log.info("job %s started: op=%s user=%s", j.id, j.op, j.user)
 
                 def _finishing(p, params, on, _f=fn):
                     # the ephemeral input goes before run_job sets done: a client that sees
@@ -282,6 +318,7 @@ def register_job_routes(app: FastAPI) -> None:
                 _log.exception("preparing job %s failed", j.id)
                 app.state.store.update(j)
             finally:
+                _log.info("job %s ended: status=%s user=%s", j.id, j.status, j.user)
                 _cleanup_inputs()  # idempotent: on success it already ran before done
                 with app.state.job_queue.lock:
                     app.state.cancels.discard(j.id)
@@ -298,9 +335,10 @@ def register_job_routes(app: FastAPI) -> None:
                 for path in job.tracks.values() if job.tracks else [job.path]:
                     app.state.uploads.release(path)
                 app.state.cancels.discard(job.id)
+            _log.info("job %s ended before start: %s user=%s", job.id, error, job.user)
 
         def _execute() -> None:
-            with using(job.lang):
+            with using(job.lang), as_user(job.user):
                 _execute_job()
 
         def _cancel_pending() -> None:
@@ -310,6 +348,9 @@ def register_job_routes(app: FastAPI) -> None:
         def _execute_job() -> None:
             if job.id in app.state.cancels:
                 _fail_before_run(_(CANCEL_MESSAGE))
+                return
+            if job.user != OWNER and not _active(job.user):
+                _fail_before_run(_("The user was removed"))
                 return
             try:
                 _run_and_persist()
@@ -326,11 +367,17 @@ def register_job_routes(app: FastAPI) -> None:
                 _cancel_pending,
                 short=short,
                 text=text,
+                user=job.user,
             )
         except Exception as exc:
             _fail_before_run(job_error_text(exc))
             raise
+        _log.info("job %s queued: op=%s user=%s", job.id, job.op, job.user)
         return {"id": job.id}
+
+    def _active(user: str) -> bool:
+        found = app.state.devices.user(user)
+        return found is not None and not found.removed
 
     @app.post("/api/jobs/{job_id}/cancel")
     def cancel_job(job_id: str, request: Request) -> dict:

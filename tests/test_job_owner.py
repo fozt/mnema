@@ -42,7 +42,6 @@ def node(tmp_path, monkeypatch):
         input_kind=ops.InputKind.MEDIA,
         output_kind=ops.OutputKind.JSON,
     )
-    (tmp_path / "talk.wav").write_bytes(b"audio")
     headers = {"node": {"Authorization": f"Bearer {NODE}"}}
     for name in ("phone", "laptop"):
         code, _ = app.state.devices.create_invite(now=time.time())
@@ -53,11 +52,18 @@ def node(tmp_path, monkeypatch):
     finish.set()
 
 
+def _upload(n, who: str) -> str:
+    """A device gives a job only its own upload."""
+    response = n.client.post(
+        "/api/upload", files={"file": ("talk.wav", b"audio")}, headers=n.h[who]
+    )
+    assert response.status_code == 200, response.text
+    return response.json()["path"]
+
+
 def _submit(n, who: str, **extra) -> str:
     response = n.client.post(
-        "/api/jobs",
-        json={"op": "slow", "path": str(n.root / "talk.wav"), **extra},
-        headers=n.h[who],
+        "/api/jobs", json={"op": "slow", "path": _upload(n, who), **extra}, headers=n.h[who]
     )
     assert response.status_code == 200, response.text
     return response.json()["id"]
@@ -141,7 +147,7 @@ def test_retry_key_of_another_device_does_not_reveal_its_job(node):
     assert _submit(node, "phone", key="shared-key") == job_id
     other = node.client.post(
         "/api/jobs",
-        json={"op": "slow", "path": str(node.root / "talk.wav"), "key": "shared-key"},
+        json={"op": "slow", "path": _upload(node, "laptop"), "key": "shared-key"},
         headers=node.h["laptop"],
     )
     assert other.status_code == 409 and job_id not in other.text

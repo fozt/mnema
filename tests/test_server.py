@@ -129,9 +129,11 @@ def test_require_safe_bind_rejects_public_host_without_token(host, token, refuse
         require_safe_bind(host, token)
 
 
-def _job_output(root: Path, data: bytes = b"0123456789") -> Path:
+def _job_output(client: TestClient, data: bytes = b"0123456789") -> Path:
     """A file as a FILE job leaves it: root/outputs/<job-id>/<name>."""
-    f = root / "outputs" / "job1" / "a.mov"
+    state = client.app.state  # type: ignore[attr-defined]
+    job = state.store.create(op="compress", path="in.mov", params={})
+    f = state.root / "outputs" / job.id / "a.mov"
     f.parent.mkdir(parents=True)
     f.write_bytes(data)
     return f
@@ -139,8 +141,8 @@ def _job_output(root: Path, data: bytes = b"0123456789") -> Path:
 
 def test_download_serves_job_output(tmp_path: Path):
     """Serves a job result from outputs/; Range → 206 (Starlette)."""
-    f = _job_output(tmp_path)
     client = _client(tmp_path)
+    f = _job_output(client)
 
     resp = client.get("/api/download", params={"path": str(f)})
     assert resp.status_code == 200
@@ -153,7 +155,8 @@ def test_download_serves_job_output(tmp_path: Path):
 
 def test_download_refuses_everything_but_job_outputs(tmp_path: Path):
     """The node root is a recordings folder: the token must open only job results, not them all."""
-    _job_output(tmp_path)
+    client = _client(tmp_path)
+    result = _job_output(client)
     recording = tmp_path / "2026-10-22_Дейли" / "transcript.txt"
     recording.parent.mkdir()
     recording.write_text("секрет")
@@ -162,16 +165,15 @@ def test_download_refuses_everything_but_job_outputs(tmp_path: Path):
     upload.write_bytes(b"audio")
     outside = tmp_path.parent / f"{tmp_path.name}-outside.txt"
     outside.write_text("чужое")
-    (tmp_path / "outputs" / "job1" / "link.txt").symlink_to(recording)
+    (result.parent / "link.txt").symlink_to(recording)
     (tmp_path / "outputs" / "escape").symlink_to(outside.parent, target_is_directory=True)
-    client = _client(tmp_path)
     refused = [
         recording,
         upload,
         tmp_path / ".mnema" / "jobs.db",
         Path("/etc/passwd"),
         tmp_path / "outputs" / ".." / recording.parent.name / "transcript.txt",
-        tmp_path / "outputs" / "job1" / "link.txt",
+        result.parent / "link.txt",
         tmp_path / "outputs" / "escape" / outside.name,
         tmp_path / "outputs",
     ]

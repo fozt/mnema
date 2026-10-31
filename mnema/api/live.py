@@ -14,7 +14,8 @@ from fastapi import FastAPI, WebSocket
 from ..core.base import MediaError
 from ..i18n import _
 from ..live.asr import StreamingTranscriber
-from .auth import authorized, bearer
+from ..users import as_user
+from .auth import NODE, bearer, caller
 
 logger = logging.getLogger(__name__)
 # the client sends PCM only after ready, so idle time counts from ready
@@ -29,11 +30,16 @@ def register_live_routes(app: FastAPI) -> None:
         from ..install_setup import server_token
 
         token = server_token()
+        found = NODE
         if token:
-            provided = bearer(ws.headers.get("authorization", ""))
-            if not await authorized(app, provided, token):
+            found = await caller(app, bearer(ws.headers.get("authorization", "")), token)
+            if found is None:
                 await ws.close(code=1008)
                 return
+        with as_user(found.user):  # the websocket does not pass the HTTP middleware
+            await _live(ws)
+
+    async def _live(ws: WebSocket) -> None:
         await ws.accept()
         transcriber = StreamingTranscriber(
             lang=ws.query_params.get("lang") or None,
