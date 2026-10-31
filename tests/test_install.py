@@ -36,7 +36,8 @@ def install(name):
 if name == "id":
     print(os.environ.get("FAKE_UID", "1000"))
 elif name == "uname":
-    print(os.environ.get("FAKE_OS", "Linux") if args == ["-s"] else "x86_64")
+    machine = os.environ.get("FAKE_ARCH", "x86_64")
+    print(os.environ.get("FAKE_OS", "Linux") if args == ["-s"] else machine)
 elif name == "sudo":
     if args[0] == "bash":
         assert pathlib.Path(args[1]).name == "setup-swap.sh"
@@ -827,17 +828,24 @@ def test_installer_speaks_the_language_of_the_locale(system, lang, text):
     assert text in done.stdout
 
 
-def test_mac_client_is_sent_to_the_dmg_before_installing(system):
+@pytest.mark.parametrize(
+    ("arch", "text"),
+    [
+        ("arm64", "Mnema для Mac ставится из DMG: https://github.com/fozt/mnema/releases/latest"),
+        # the DMG is arm64 only: an Intel Mac gets the command and a server
+        ("x86_64", "Приложению Mnema нужен Mac на Apple silicon. На этом Mac пользуйтесь командой "
+         "mnema с сервером: https://github.com/fozt/mnema/blob/main/README.ru.md#командная-строка"),
+    ],
+)  # fmt: skip
+def test_mac_client_is_sent_to_the_dmg_before_installing(system, arch, text):
     """There is no Mnema.app from the sources: on a Mac the installer names the DMG and touches
     nothing."""
-    system[1]["FAKE_OS"] = "Darwin"
+    system[1].update(FAKE_OS="Darwin", FAKE_ARCH=arch)
     done = installer(system, "client", "http://203.0.113.7:43117")
     assert done.returncode != 0
-    assert (
-        "Mnema для Mac ставится из DMG: https://github.com/fozt/mnema/releases/latest"
-        in done.stdout
-    )
-    assert [c[0] for c in calls(system)] == ["uname"]
+    assert text in done.stdout
+    assert "DMG" not in done.stdout or arch == "arm64"
+    assert {c[0] for c in calls(system)} == {"uname"}
     assert not env_file(system).parent.exists()
     assert not app_env(system).exists()
 

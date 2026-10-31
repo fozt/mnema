@@ -95,7 +95,7 @@ mnema-bar = "mnema.bar.app:main"
 mnema-mcp = "mnema.mcp.server:main"
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling==1.33.0"]  # the wheel names its generator: the same in every build
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]

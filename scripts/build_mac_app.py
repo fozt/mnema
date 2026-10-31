@@ -42,8 +42,8 @@ if str(ROOT) not in sys.path:
 
 from mnema.bar import codesign  # noqa: E402 - code, runtime and the signature of the bundle
 from mnema.bar.codesign import macho_files  # noqa: E402
-from mnema.core.base import APP_ID  # noqa: E402
 from mnema.extras import MAC as EXTRAS  # noqa: E402 - the one list of what the Mac app ships
+from mnema.macapp import APP_ID  # noqa: E402
 from scripts import third_party_sources  # noqa: E402
 
 SWIFT_PACKAGE = ROOT / "mnema" / "bar" / "macos"
@@ -82,12 +82,12 @@ _SHEBANG = (
 MCP_STUB = (
     "#!/bin/sh\n"
     "echo 'mnema-mcp is part of the mnema command now. Install it: "
-    'uv tool install "mnema[cli] @ {wheel}"\' >&2\n'
+    'uv tool install "mnema[cli] @ {wheel}" --constraints {constraints}\' >&2\n'
     "exit 1\n"
 )
-WHEEL = (
-    "https://github.com/fozt/mnema/releases/download/v{version}/mnema-{version}-py3-none-any.whl"
-)
+_RELEASE = "https://github.com/fozt/mnema/releases/download/v{version}/"
+WHEEL = _RELEASE + "mnema-{version}-py3-none-any.whl"
+CONSTRAINTS = _RELEASE + "mnema-{version}-constraints.txt"  # the versions it was tested with
 # The weights mnema-asr downloads on first use: CC-BY-4.0 asks for attribution
 MODELS = """\
 Models Mnema downloads on first use (not part of this app)
@@ -208,7 +208,10 @@ def trim(python_home: Path) -> int:
 def write_mcp_stub(bin_dir: Path, version: str) -> Path:
     stub = bin_dir / "mnema-mcp"
     bin_dir.mkdir(parents=True, exist_ok=True)
-    stub.write_text(MCP_STUB.format(wheel=WHEEL.format(version=version)), encoding="utf-8")
+    text = MCP_STUB.format(
+        wheel=WHEEL.format(version=version), constraints=CONSTRAINTS.format(version=version)
+    )
+    stub.write_text(text, encoding="utf-8")
     stub.chmod(0o755)
     return stub
 
@@ -333,11 +336,20 @@ def absolute_links(tree: Path) -> list[Path]:
 
 def build_swift(cache: Path) -> dict[str, Path]:
     """The panel and mnema-asr, release builds; FluidAudio's resource bundles (text to speech)
-    stay out of the app."""
+    stay out of the app. The object times in the debug map are zero (ZERO_AR_DATE): mnema-asr is
+    part of the runtime, the same sources must give the same bytes."""
     cmd = ["swift", "build", "-c", "release", "--package-path", SWIFT_PACKAGE, "--scratch-path"]
+    env = {**os.environ, "ZERO_AR_DATE": "1"}
     for product in SWIFT_PRODUCTS:
-        run([*cmd, cache, "--product", product])
+        run([*cmd, cache, "--product", product], env=env)
     return {product: cache / "release" / product for product in SWIFT_PRODUCTS}
+
+
+def strip_debug_map(binary: Path) -> None:
+    """Drop the debug map (the paths of the build's object files), before signing."""
+    run(["strip", "-S", binary])
+    if " OSO " in run(["nm", "-ap", binary], capture_output=True, text=True).stdout:
+        raise SystemExit(f"{binary.name} still names the object files of the build")
 
 
 def compile_bytecode(python: Path, app: Path) -> None:
@@ -402,15 +414,17 @@ def scrub_all(app: Path) -> None:
         raise SystemExit("libraries outside the bundle:\n" + "\n".join(broken[:20]))
 
 
-def runtime_inputs(requirements: Path, ffmpeg: Path | None) -> str:
+def runtime_inputs(requirements: Path, ffmpeg: Path | None, swift_build: Path) -> str:
     """What the runtime is built from. The same inputs must give the same runtime key: the release
-    check fails otherwise."""
+    check fails otherwise. swift_build is the scratch path of build_swift: mnema-asr keeps the path
+    of a FluidAudio resource bundle under it (the release builds in the same folder every time)."""
     digest = hashlib.sha256()
 
     def add(name: str, data: bytes) -> None:
         digest.update(name.encode() + b"\0" + hashlib.sha256(data).digest())
 
     add("python", PYTHON_VERSION.encode())
+    add("swift build", str(swift_build).encode())
     add("requirements", requirements.read_bytes())
     for tool in ("uv", "swift"):
         add(tool, run([tool, "--version"], capture_output=True).stdout)
@@ -521,6 +535,7 @@ def assemble(out: Path, ffmpeg: Path | None, version: str, sources: bool = False
     say("building the Swift panel and mnema-asr")
     for product, built in build_swift(work / "swift").items():
         shutil.copy2(built, app / "Contents" / "MacOS" / product)
+        strip_debug_map(app / "Contents" / "MacOS" / product)
     say("copying Python")
     python = copy_python(managed_python(), res / "python")
     say("installing packages")
@@ -553,7 +568,7 @@ def assemble(out: Path, ffmpeg: Path | None, version: str, sources: bool = False
         raise SystemExit(f"links leave the bundle: {', '.join(map(str, links[:5]))}")
     scrub_all(app)
     say("signing")
-    say(f"runtime key {seal(app, runtime_inputs(requirements, ffmpeg))}")
+    say(f"runtime key {seal(app, runtime_inputs(requirements, ffmpeg, work / 'swift'))}")
     return app
 
 

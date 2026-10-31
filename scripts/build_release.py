@@ -8,7 +8,8 @@ Writes DIR/mnema-X.Y.Z.tar.gz and DIR/mnema-release.json (the channel of `mnema 
 scripts/build_mac_app.py), with --mac-code its code-only update (Mnema-X.Y.Z-mac-code.tar.gz);
 with --wheel uv builds the wheel of the mnema command from the source archive
 (mnema-X.Y.Z-py3-none-any.whl, the manifest's cli block) and DIR/mnema-X.Y.Z-constraints.txt,
-the locked versions of its dependencies; with --apk also DIR/mnema-android.json (the channel of
+the locked versions of its dependencies (the cli block names it too: uv tool install
+--constraints <url>); with --apk also DIR/mnema-android.json (the channel of
 the phone).
 Nothing is uploaded: the manifests point at the assets of the GitHub release vX.Y.Z, and
 `releases/latest/download/` serves the manifests of the latest release.
@@ -226,6 +227,8 @@ def build(
         release["cli"] = {
             "wheel": f"{package_url}/{command.name}",
             "sha256": hashlib.sha256(command.read_bytes()).hexdigest(),
+            # uv tool install --constraints <url>: the locked versions, not the newest on PyPI
+            "constraints": f"{package_url}/{constraints.name}",
         }
         files += [command, constraints]
     manifest = _write_json(output / "mnema-release.json", release)

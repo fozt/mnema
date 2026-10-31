@@ -308,10 +308,12 @@ Parakeet Ultra распознаёт 25 языков: английский, бо�
 (вместо `X.Y.Z` подставьте версию [последнего выпуска](https://github.com/fozt/mnema/releases/latest)):
 
 ```bash
-uv tool install "mnema[cli] @ https://github.com/fozt/mnema/releases/download/vX.Y.Z/mnema-X.Y.Z-py3-none-any.whl"
+uv tool install "mnema[cli] @ https://github.com/fozt/mnema/releases/download/vX.Y.Z/mnema-X.Y.Z-py3-none-any.whl" \
+  --constraints https://github.com/fozt/mnema/releases/download/vX.Y.Z/mnema-X.Y.Z-constraints.txt
 ```
 
-Так ставятся `mnema` и `mnema-mcp` в `~/.local/bin`; добавьте эту папку в `PATH`, если её там нет.
+Файл ограничений задаёт версии зависимостей, с которыми проверен выпуск. Так ставятся `mnema` и
+`mnema-mcp` в `~/.local/bin`; добавьте эту папку в `PATH`, если её там нет.
 Обновить можно той же командой с `--force` (её печатает `mnema update`). На Маке команда
 распознаёт через установленное приложение Mnema, поэтому поставьте и его, либо подключите сервер;
 на Linux она распознаёт на процессоре Parakeet или на сервере. Установщик приложения на Linux

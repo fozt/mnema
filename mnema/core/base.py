@@ -15,6 +15,8 @@ from pathlib import Path
 
 from ..i18n import _
 from ..i18n.fmt import _MONTHS
+from ..macapp import APP_ID as APP_ID
+from ..macapp import app_helper as app_helper
 
 logger = logging.getLogger(__name__)
 
@@ -122,7 +124,6 @@ TOOL_ENV = {"ffmpeg": "MNEMA_FFMPEG", "ffprobe": "MNEMA_FFPROBE"}
 MISSING_TOOL = "{program} not found. Install ffmpeg or reinstall Mnema"
 
 
-APP_ID = "com.mnema.bar"  # CFBundleIdentifier of Mnema.app
 SYSTEM_APPS = Path("/Applications")
 
 
@@ -140,11 +141,6 @@ def reinstall_command() -> str:
     if STANDALONE or uv_tool():
         return _("Reinstall the mnema command: {url}", url=COMMAND_PAGE)
     return _("Reinstall Mnema: ./install.sh client")
-
-
-def app_helper(bundle: Path) -> Path:
-    """mnema-asr of a Mnema.app: recognition on CoreML (core/mac_helper.py)."""
-    return bundle / "Contents" / "MacOS" / "mnema-asr"
 
 
 def app_file() -> Path:

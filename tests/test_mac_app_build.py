@@ -3,6 +3,7 @@
 import os
 import plistlib
 import subprocess
+import sys
 import tarfile
 from pathlib import Path
 
@@ -27,6 +28,17 @@ def _run(path: Path, *args: str) -> str:
     return subprocess.run([str(path), *args], capture_output=True, text=True, check=True).stdout
 
 
+def test_build_and_smoke_scripts_run_on_a_bare_python():
+    """The release runs them with uv run --no-project: a Python without the app's packages."""
+    root = Path(build.__file__).resolve().parent.parent
+    code = f"import sys; sys.path.insert(0, {str(root)!r}); "
+    code += "import scripts.build_mac_app, scripts.smoke_mac_app"
+    done = subprocess.run(
+        [sys.executable, "-I", "-S", "-c", code], cwd=root, capture_output=True, text=True
+    )
+    assert done.returncode == 0, done.stderr
+
+
 def test_console_scripts_run_the_python_next_to_them(tmp_path):
     bin_dir = _bundle(tmp_path / "a") / "Contents/Resources/python/bin"
     script = bin_dir / "tool"
@@ -44,12 +56,14 @@ def test_console_scripts_run_the_python_next_to_them(tmp_path):
 
 def test_mcp_client_of_the_old_app_is_told_how_to_get_the_command(tmp_path):
     """MCP configs still start Resources/bin/mnema-mcp of the app: it fails and names the wheel of
-    this very release."""
+    this very release with the versions it was tested with."""
     stub = build.write_mcp_stub(tmp_path / "bin", "0.5.0")
     done = subprocess.run([str(stub)], capture_output=True, text=True, input="{}\n")
     assert done.returncode != 0 and done.stdout == ""
-    wheel = "https://github.com/fozt/mnema/releases/download/v0.5.0/mnema-0.5.0-py3-none-any.whl"
-    assert f'uv tool install "mnema[cli] @ {wheel}"' in done.stderr
+    release = "https://github.com/fozt/mnema/releases/download/v0.5.0"
+    wheel = f"{release}/mnema-0.5.0-py3-none-any.whl"
+    constraints = f"{release}/mnema-0.5.0-constraints.txt"
+    assert f'uv tool install "mnema[cli] @ {wheel}" --constraints {constraints}' in done.stderr
     assert len(stub.read_text().splitlines()) == 3
 
 

@@ -56,7 +56,8 @@ jobs:
             dist/mnema-*-constraints.txt
           if-no-files-found: error
 
-  # The command as users install it: uv tool, the wheel of this release, a clean tool folder
+  # The command as users install it: uv tool, the wheel of this release with its constraints (the
+  # same files publish uploads and the manifest's cli block names), a clean tool folder
   cli:
     needs: source
     strategy:
@@ -76,7 +77,8 @@ jobs:
         run: |
           version=${TAG#v}
           export UV_TOOL_DIR="$RUNNER_TEMP/tools" UV_TOOL_BIN_DIR="$RUNNER_TEMP/bin"
-          uv tool install --python 3.12 "mnema[cli] @ file://$PWD/dist/mnema-$version-py3-none-any.whl"
+          uv tool install --python 3.12 "mnema[cli] @ file://$PWD/dist/mnema-$version-py3-none-any.whl" \
+            --constraints "$PWD/dist/mnema-$version-constraints.txt"
           "$RUNNER_TEMP/bin/mnema" --version | grep -qx "mnema $version"
       - name: mnema-mcp answers initialize
         timeout-minutes: 2
@@ -110,7 +112,13 @@ jobs:
     needs: ffmpeg
     runs-on: macos-15
     timeout-minutes: 120
+    env:
+      # one Swift for every release: it is an input of the runtime key, and FluidAudio 0.18.0
+      # builds with its Package.swift for Swift 6.0/6.1 (the same as the CI swift job)
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
     steps:
+      - name: Xcode
+        run: test -d "$DEVELOPER_DIR" || { echo "::error::No $DEVELOPER_DIR on this runner"; exit 1; }
       - uses: actions/checkout@v7
       # setup-uv prunes the cache to what uv built from source, so a tag's own copy stays small
       - uses: astral-sh/setup-uv@v10.3.0
