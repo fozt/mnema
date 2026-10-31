@@ -171,8 +171,10 @@ def test_a_long_recording_is_recognized_in_windows_of_up_to_15s(monkeypatch, tmp
 
 def test_sessions_use_the_job_threads(monkeypatch, tmp_path, model_dir):
     """The encoder gets the job's CPU budget; the decoder, one thread; no spinning."""
+    from mnema.core import settings
     from mnema.core.settings import asr_thread_budget
 
+    monkeypatch.setattr(settings, "available_cpu_threads", lambda: 8)
     ort = _install(monkeypatch, [{}])
     with asr_thread_budget(6):
         pk.OnnxParakeet().words(_wav(tmp_path / "a.wav", 1.0))
