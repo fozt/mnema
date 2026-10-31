@@ -200,6 +200,7 @@ def _deliver_text(text: str, out: Path, *, detail: str, no_save: bool) -> None:
     """Deliver a text result: a file (with done_panel) or, with --no-save, the clipboard; no
     clipboard — print it. A batch comes as one text."""
     if not no_save:
+        out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(text if text.endswith("\n") else text + "\n", encoding="utf-8")
         done_panel(out, detail)
         return

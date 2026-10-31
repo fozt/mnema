@@ -358,6 +358,22 @@ def test_transcribe_txt_starts_with_title_line(tmp_path: Path, monkeypatch):
     assert out.read_text(encoding="utf-8") == "Дейли про релиз\n\nпривет команда\n"
 
 
+def test_transcribe_output_into_a_new_folder_creates_it(tmp_path: Path, monkeypatch):
+    import mnema.cli.commands as commands
+    from mnema.cli.parser import build_parser
+
+    rec = tmp_path / "x.mov"
+    rec.write_bytes(b"v")
+    _fake_transcribe_env(monkeypatch, {"text": "привет", "segments": [], "language": "ru"})
+    out = tmp_path / "new" / "a.txt"
+
+    commands.cmd_transcribe(
+        build_parser().parse_args(["transcribe", str(rec), "--local", "-o", str(out)])
+    )
+
+    assert out.read_text(encoding="utf-8").endswith("привет\n")
+
+
 def test_transcribe_no_save_copies_to_clipboard_no_file(tmp_path: Path, monkeypatch):
     """--no-save: no file; the body (without the title line) goes to the clipboard."""
     import mnema.cli.commands as commands
