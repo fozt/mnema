@@ -738,25 +738,34 @@ def test_mac_recognizes_both_tracks_with_one_model_load(monkeypatch, tmp_path, s
     assert {"Распознаю микрофон…", "Распознаю системный звук…"} <= set(steps)
 
 
-def test_the_first_model_download_does_not_fill_the_recognition_bar(
+def test_the_card_counts_recognition_from_zero_after_the_first_model_download(
     monkeypatch, tmp_path, sources
 ) -> None:
-    """The model downloads to the end before both tracks are recognized: recognition goes on
-    from where the download left the bar instead of sitting at the end of the step."""
+    """The one-off model download shows its message without a share, and the card's
+    recognition step starts at 0 % and ends at 100 % of recognition itself."""
+    from mnema.bar.state import Job, processing_step
+
     helper = _mac_helper(monkeypatch, tmp_path, installed={"parakeet": False})
     _model(monkeypatch)
-    seen: list[tuple[float, str]] = []
+    seen: list[tuple[float | None, str]] = []
     recording_client.recover_on_node(
         _recording(tmp_path / "mac"),
         LiveConfig(mix_audio=False),
         None,
-        on=lambda fraction, message: fraction is not None and seen.append((fraction, message)),
+        on=lambda fraction, message: seen.append((fraction, message)),
     )
     assert helper.operations() == ["transcribe", "download", "transcribe"]
     downloads = [f for f, m in seen if m.startswith("Скачиваю модель распознавания")]
-    recognized = [f for f, m in seen if m.startswith("Распознаю ")]
-    assert len(downloads) == 2 and downloads[0] < downloads[1]  # the download shows its share
-    assert recognized and downloads[-1] < min(recognized)
+    assert downloads and set(downloads) == {None}
+
+    def card(fraction: float) -> float | None:
+        job = Job(id="x", folder=tmp_path, stage="Распознаю речь…", progress=fraction)
+        return processing_step(job)[1]
+
+    recognized = [card(f) for f, m in seen if f is not None and m.startswith("Распознаю ")]
+    assert recognized[0] is not None and recognized[0] <= 0.5  # the first of two tracks
+    assert all(share is not None and share < 1.0 for share in recognized)
+    assert max(card(f) or 0.0 for f, _m in seen if f is not None) == 1.0  # the step ends full
 
 
 def test_a_failed_request_of_both_tracks_is_told_per_track(monkeypatch, tmp_path, sources):
