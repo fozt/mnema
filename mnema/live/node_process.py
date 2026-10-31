@@ -9,7 +9,7 @@ from tempfile import TemporaryDirectory
 
 from .. import node_settings
 from ..core import audio
-from ..core.base import MediaError, Progress, phased
+from ..core.base import MediaError, Progress
 from ..core.models import Segment
 from ..i18n import _, catalog
 from ..jobs import CANCEL_MESSAGE
@@ -202,18 +202,21 @@ def process_recording(root: Path, values: dict, on: Progress) -> dict:
         progress = _progress(on)
         try:
             _prepare(base, params)
-            prepare, process = phased(progress, 1, 9)
-            slices = phased(prepare, *([1.0] * len(params.tracks)))
-            for (label, path), report in zip(params.tracks.items(), slices, strict=True):
-                audio.extract_audio(Path(path), base / f"{label}.wav", on=report)
-                report(1.0, "")
+            # Preparing the audio is quick and no step of the card: its message only, so the
+            # card's steps (FINALIZE_STEPS) keep the whole bar.
+            for label, path in params.tracks.items():
+                audio.extract_audio(
+                    Path(path),
+                    base / f"{label}.wav",
+                    on=lambda _f, message: progress(None, message),
+                )
             result, _full = recover_session(
                 base,
                 config,
                 retitle=params.retitle,
                 user_title=lambda: params.user_title,
                 recording_error=params.recording_error,
-                on=process,
+                on=progress,
             )
             return _result(result.base or base, params, node, config)
         except FinalizeCancelled as exc:

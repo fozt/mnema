@@ -69,7 +69,6 @@ logger = logging.getLogger(__name__)
 INCOMPLETE_INSTALL = "Mnema is not fully installed. Reinstall it"
 # Progress line of the recognition engines (core, cloud ASR); a track names its source instead.
 RECOGNIZING = "Recognizing…"
-_MODEL_SHARE = 0.25  # of the recognition bar: the first model download, ~630 MB
 
 if TYPE_CHECKING:
     from .session import LiveSession, View
@@ -614,25 +613,19 @@ def _refine_tracks(
     from ..core.parakeet import DOWNLOADING
 
     reached = [0.0]
-    model = [0.0]  # the share of the first model download at the start of this pass
 
     def forward(fraction: float | None, message: str) -> None:
         # never back: one request recognizes every track while the first is being asked for
         if fraction is not None:
             fraction = reached[0] = max(reached[0], fraction)
-            fraction = model[0] + fraction * (1.0 - model[0])
         on_asr(fraction, message)
 
     def downloading(fraction: float | None, message: str) -> bool:
-        """The model downloads before the first track: its own share at the start of the
-        pass, not a track's, so recognition does not start from a full bar."""
+        """The first model download is a one-off: its message alone, without a share of the
+        recognition bar."""
         if message not in (DOWNLOADING, _(DOWNLOADING)):
             return False
-        if fraction is not None and reached[0] == 0.0:
-            model[0] = _MODEL_SHARE
-            on_asr(fraction * _MODEL_SHARE, message)
-        else:
-            on_asr(None, message)
+        on_asr(None, message)
         return True
 
     def progress_of(sl: Progress, label: str) -> Progress:

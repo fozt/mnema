@@ -445,7 +445,7 @@ def test_panel_shows_processing_and_waiting_cards_under_start(setup, tmp_path) -
     assert (running.id, running.busy, running.detail.startswith("Распознаю речь…")) == (
         job.id, True, True,
     )  # fmt: skip
-    assert running.progress is not None and 0.0 <= running.progress < 1.0
+    assert running.progress is None  # recognition has not counted anything yet: not 40 %
     # the old transcript is about to be replaced: not offered until the new one (as in the tray)
     assert [b.title for b in running.menu if not b.children] == [
         "Открыть папку", "Задать название…", "Остановить обработку",
