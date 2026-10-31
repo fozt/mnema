@@ -230,75 +230,73 @@ fun RecordingsScreen(graph: AppGraph, onOpen: (File) -> Unit, onDeleted: (Record
         snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
         val shown = groups
-        when {
-            shown == null -> Unit
-            else -> LazyColumn(
-                contentPadding = listPadding(padding),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
-            ) {
-                item(key = "library-controls", contentType = "controls") {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        // rounded like the section chips under the field
-                        OutlinedTextField(value = query, onValueChange = { model.query.value = it }, modifier = Modifier.fillMaxWidth(),
-                            label = { Text(tr("Search by title")) }, singleLine = true, shape = FilterChipDefaults.shape)
-                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            item { FilterChip(selected = section == null, onClick = { model.section.value = null }, label = { Text(tr("All sections")) }) }
-                            item { FilterChip(selected = section == "", onClick = { model.section.value = "" }, label = { Text(NO_SECTION) }) }
-                            items(sections, key = { it }) { group ->
-                                FilterChip(selected = section == group, onClick = { model.section.value = group }, label = { Text(group) })
-                            }
-                        }
-                        failure?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium) }
-                        if (sync.bulkMissing.isNotEmpty()) {
-                            Text(
-                                tr("Recordings missing on the phone: {n}. They are kept on the server.", "n" to sync.bulkMissing.size),
-                                style = MaterialTheme.typography.bodyMedium,
-                            )
-                            Column {
-                                TextButton(onClick = { model.resolveBulk(false) }, enabled = !resolving) { Text(tr("Delete everywhere")) }
-                                TextButton(onClick = { model.resolveBulk(true) }, enabled = !resolving) { Text(tr("Restore from the server")) }
-                            }
-                        }
-                        if (sync.serverMissing.isNotEmpty()) {
-                            val ask = serverMissingAsk(sync)
-                            Text(ask.text, style = MaterialTheme.typography.bodyMedium)
-                            Column {
-                                TextButton(onClick = { model.resolveBulk(false, onServer = true) }, enabled = !resolving) { Text(ask.delete) }
-                                TextButton(onClick = { model.resolveBulk(true, onServer = true) }, enabled = !resolving) { Text(tr("Restore to the server")) }
-                            }
-                        }
-                        if (sync.otherLibrary != null) {
-                            Text(otherLibraryAsk(sync), style = MaterialTheme.typography.bodyMedium)
-                            TextButton(onClick = model::sendToLibrary, enabled = !resolving) { Text(tr("Send")) }
+        // the search and sections show at once; cards come with the scan
+        LazyColumn(
+            contentPadding = listPadding(padding),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            item(key = "library-controls", contentType = "controls") {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // rounded like the section chips under the field
+                    OutlinedTextField(value = query, onValueChange = { model.query.value = it }, modifier = Modifier.fillMaxWidth(),
+                        label = { Text(tr("Search by title")) }, singleLine = true, shape = FilterChipDefaults.shape)
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        item { FilterChip(selected = section == null, onClick = { model.section.value = null }, label = { Text(tr("All sections")) }) }
+                        item { FilterChip(selected = section == "", onClick = { model.section.value = "" }, label = { Text(NO_SECTION) }) }
+                        items(sections, key = { it }) { group ->
+                            FilterChip(selected = section == group, onClick = { model.section.value = group }, label = { Text(group) })
                         }
                     }
-                }
-                if (shown.isEmpty()) item(key = "empty") {
-                    Text(if (query.isBlank() && section == null) EMPTY else tr("Nothing found"),
-                        Modifier.padding(24.dp), style = MaterialTheme.typography.bodyLarge)
-                }
-                val ids = shown.flatMap { it.items }.mapNotNull { it.id }.groupingBy { it }.eachCount()
-                fun key(item: RecordingItem): String = item.id?.takeIf { ids[it] == 1 } ?: item.dir.path
-                shown.forEachIndexed { groupIndex, group ->
-                    item(key = "day:${group.label}", contentType = "day") { DayHeader(group.label) }
-                    // the newest recording as a large card, the rest of the day as one group under it
-                    val newest = group.items.first().takeIf { groupIndex == 0 }
-                    val rest = if (newest == null) group.items else group.items.drop(1)
-                    if (newest != null) {
-                        item(key = key(newest), contentType = "newest") {
-                            RecordingActions(newest, MaterialTheme.shapes.extraLarge, syncing, trash, sections,
-                                onDelete = { forever, failed -> delete(newest, forever, failed) }, onMove = move) { actions, onMenu ->
-                                NewestCard(newest, today, zone, sectionTag(newest, section), onClick = { onOpen(newest.dir) }, onLongClick = onMenu, modifier = actions)
-                            }
+                    failure?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium) }
+                    if (sync.bulkMissing.isNotEmpty()) {
+                        Text(
+                            tr("Recordings missing on the phone: {n}. They are kept on the server.", "n" to sync.bulkMissing.size),
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Column {
+                            TextButton(onClick = { model.resolveBulk(false) }, enabled = !resolving) { Text(tr("Delete everywhere")) }
+                            TextButton(onClick = { model.resolveBulk(true) }, enabled = !resolving) { Text(tr("Restore from the server")) }
                         }
-                        if (rest.isNotEmpty()) item(key = "gap", contentType = "gap") { Spacer(Modifier.height(10.dp)) }
                     }
-                    itemsIndexed(rest, key = { _, item -> key(item) }, contentType = { _, _ -> "recording" }) { index, item ->
-                        val shape = segmentShape(index, rest.size)
-                        RecordingActions(item, shape, syncing, trash, sections,
-                            onDelete = { forever, failed -> delete(item, forever, failed) }, onMove = move) { actions, onMenu ->
-                            RecordingCard(item, today, zone, shape, sectionTag(item, section), onClick = { onOpen(item.dir) }, onLongClick = onMenu, modifier = actions)
+                    if (sync.serverMissing.isNotEmpty()) {
+                        val ask = serverMissingAsk(sync)
+                        Text(ask.text, style = MaterialTheme.typography.bodyMedium)
+                        Column {
+                            TextButton(onClick = { model.resolveBulk(false, onServer = true) }, enabled = !resolving) { Text(ask.delete) }
+                            TextButton(onClick = { model.resolveBulk(true, onServer = true) }, enabled = !resolving) { Text(tr("Restore to the server")) }
                         }
+                    }
+                    if (sync.otherLibrary != null) {
+                        Text(otherLibraryAsk(sync), style = MaterialTheme.typography.bodyMedium)
+                        TextButton(onClick = model::sendToLibrary, enabled = !resolving) { Text(tr("Send")) }
+                    }
+                }
+            }
+            if (shown?.isEmpty() == true) item(key = "empty") {
+                Text(if (query.isBlank() && section == null) EMPTY else tr("Nothing found"),
+                    Modifier.padding(24.dp), style = MaterialTheme.typography.bodyLarge)
+            }
+            val ids = shown.orEmpty().flatMap { it.items }.mapNotNull { it.id }.groupingBy { it }.eachCount()
+            fun key(item: RecordingItem): String = item.id?.takeIf { ids[it] == 1 } ?: item.dir.path
+            shown.orEmpty().forEachIndexed { groupIndex, group ->
+                item(key = "day:${group.label}", contentType = "day") { DayHeader(group.label) }
+                // the newest recording as a large card, the rest of the day as one group under it
+                val newest = group.items.first().takeIf { groupIndex == 0 }
+                val rest = if (newest == null) group.items else group.items.drop(1)
+                if (newest != null) {
+                    item(key = key(newest), contentType = "newest") {
+                        RecordingActions(newest, MaterialTheme.shapes.extraLarge, syncing, trash, sections,
+                            onDelete = { forever, failed -> delete(newest, forever, failed) }, onMove = move) { actions, onMenu ->
+                            NewestCard(newest, today, zone, sectionTag(newest, section), onClick = { onOpen(newest.dir) }, onLongClick = onMenu, modifier = actions)
+                        }
+                    }
+                    if (rest.isNotEmpty()) item(key = "gap", contentType = "gap") { Spacer(Modifier.height(10.dp)) }
+                }
+                itemsIndexed(rest, key = { _, item -> key(item) }, contentType = { _, _ -> "recording" }) { index, item ->
+                    val shape = segmentShape(index, rest.size)
+                    RecordingActions(item, shape, syncing, trash, sections,
+                        onDelete = { forever, failed -> delete(item, forever, failed) }, onMove = move) { actions, onMenu ->
+                        RecordingCard(item, today, zone, shape, sectionTag(item, section), onClick = { onOpen(item.dir) }, onLongClick = onMenu, modifier = actions)
                     }
                 }
             }

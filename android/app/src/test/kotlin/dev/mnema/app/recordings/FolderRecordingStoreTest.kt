@@ -502,6 +502,48 @@ class FolderRecordingStoreTest {
         assertEquals("новая", File(both, "summary.txt").readText())
     }
 
+    // a library of recordings the phone processed: each keeps its finished work file
+    private fun processedLibrary(count: Int): List<File> = (1..count).map { n ->
+        folder("2026-10-%02d_Звонок %d".format(n % 28 + 1, n), files = arrayOf(RecordingFolder.TRANSCRIPT to "mic: Привет", "summary.txt" to "Суть.")).also {
+            withWork(it, ProcessState("id-$n", stage = ProcessStage.DONE))
+        }
+    }
+
+    @Test fun aScanOfProcessedRecordingsDoesNotAskWorkManagerAboutEachOfThem() {
+        processedLibrary(60)
+        var queries = 0
+        working = { queries++; false }
+        assertEquals(60, store().byName().size)
+        // it used to ask about every recording once per recording: 3600 WorkManager queries, seconds on a phone
+        assertEquals(0, queries)
+    }
+
+    @Test fun theFirstScanShowsWhatItReadSoFarAndALaterScanReplacesTheListOnlyWhenDone() {
+        val newest = processedLibrary(25).maxBy { it.name }
+        // the oldest name is read last; its running work asks WorkManager while the scan is there
+        val last = folder("2026-01-01_Старая")
+        withWork(last, ProcessState("last", stage = ProcessStage.ASR))
+        val store = store()
+        val seen = mutableListOf<Pair<List<String>, Boolean>>()
+        working = { seen += store.items.value.map { it.dir.name } to store.loaded.value; true }
+
+        store.refresh()
+        val (early, loaded) = seen.single()
+        assertFalse(loaded)
+        assertEquals(20, early.size) // two parts of ten
+        assertFalse(last.name in early)
+        assertEquals(26, store.items.value.size)
+        assertTrue(store.loaded.value)
+
+        seen.clear()
+        assertTrue(newest.deleteRecursively())
+        store.refresh()
+        // the previous full list until the scan ends, then no card of the deleted folder
+        assertEquals(26, seen.single().first.size)
+        assertEquals(25, store.items.value.size)
+        assertFalse(store.items.value.any { it.dir.name == newest.name })
+    }
+
     @Test fun titleAndroidDidNotApplyIsShownButDoesNotOfferAnotherSummary() = runBlocking {
         val dir = folder("Запись", files = arrayOf(RecordingFolder.TRANSCRIPT to "mic: Привет", "summary.txt" to "Итог."))
         val remark = "Название «Дейли» не применено: Android не дал переименовать папку. Нажмите «Переименовать» в меню записи."
