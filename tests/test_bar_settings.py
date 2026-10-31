@@ -207,6 +207,27 @@ def test_records_on_server_only_from_the_sync_with_this_server(monkeypatch, tmp_
     assert rt.menu_env().server_records is None
 
 
+def test_records_on_server_wait_for_a_sync_after_a_new_invitation(monkeypatch, tmp_path) -> None:
+    """A new invitation at the address of the last sync (another device token, maybe another
+    user): no row until a sync tells whose library the server has; saving the same address with
+    the saved token again keeps it."""
+    tokens = iter(["first", "second"])
+
+    def node(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/devices/claim":
+            return httpx.Response(200, json={"token": next(tokens), "device": {"id": "d1"}})
+        return _mnema_server(request)
+
+    _transport(monkeypatch, node)
+    rt = BarRuntime(prefs_file=tmp_path / "bar.json")
+    assert ServerFlow().submit({"connection": "http://srv:8123#invite=a"}, force=False) is None
+    _checkpoint("http://srv:8123", 3)
+    assert ServerFlow().submit({"connection": "http://srv:8123"}, force=False) is None
+    assert rt.menu_env().server_records == 3
+    assert ServerFlow().submit({"connection": "http://srv:8123#invite=b"}, force=False) is None
+    assert rt.menu_env().server_records is None
+
+
 @pytest.mark.parametrize(
     ("mac", "place"), [(True, "на этом Mac"), (False, "на этом компьютере")], ids=["mac", "linux"]
 )

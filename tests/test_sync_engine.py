@@ -13,6 +13,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
+from mnema.install_setup import connect
 from mnema.library.models import FileBody, FileName
 from mnema.server import create_app
 from mnema.sync.client import LibraryClient
@@ -1261,6 +1262,8 @@ DECISIONS = json.loads((Path(__file__).parent / "fixtures/sync-decisions-v1.json
 def test_shared_sync_decisions(pair, tmp_path, case):
     """Deletions, copies, busy recordings and library numbers: the same decisions as the phone
     (shared fixture)."""
+    if case.get("rejoined"):
+        connect("http://node", "private")  # the connection of the first syncs
     pair.transport.library = case.get("library")
     ids = {path: synced(pair, path)[1] for path in case["synced"]}
     names = {id: path for path, id in ids.items()}
@@ -1282,6 +1285,9 @@ def test_shared_sync_decisions(pair, tmp_path, case):
     if case.get("checkpoint_lost"):
         pair.checkpoint.unlink()
     pair.busy.update(ids[path] for path in case.get("busy", []))
+    if case.get("rejoined"):
+        connect("http://node", "another")  # a new invitation at the same address
+        pair.selected[0] = "http://node#token=another"
     if "server_library" in case:
         pair.transport.library = case["server_library"]
     if case.get("server_unavailable"):
@@ -1309,7 +1315,8 @@ def test_shared_sync_decisions(pair, tmp_path, case):
         client_factory=lambda connection: LibraryClient(connection, transport=pair.transport),
     )
     try:
-        result = asyncio.run(engine.run_once())
+        for _ in range(case.get("syncs", 1)):
+            result = asyncio.run(engine.run_once())
     finally:
         if mode is not None:
             root.chmod(mode)

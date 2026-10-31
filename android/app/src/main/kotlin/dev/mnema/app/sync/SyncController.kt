@@ -4,11 +4,13 @@ import dev.mnema.app.i18n.tr
 import dev.mnema.app.server.Connection
 import java.io.File
 import java.io.IOException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 
 /** One instance for the worker and explicit bulk choices; statuses are not an operation queue. */
 class SyncController(
@@ -39,6 +41,12 @@ class SyncController(
         val server = selected()?.url ?: return null
         val state = loadCheckpoint(stateFile)
         return { dir -> textsOnServer(root, dir, state, server) }
+    }
+
+    /** A new device token for [server] (a new invitation, maybe another user): nothing is confirmed there until its next list. */
+    suspend fun joined(server: String) = withContext(Dispatchers.IO) {
+        // the claimed token is saved anyway: an invitation cannot be exchanged twice
+        try { synchronized(filesLock) { markUnchecked(stateFile, server) } } catch (e: IOException) { android.util.Log.w("MnemaSync", "Last sync not marked unchecked", e) }
     }
 
     /** Sections of the last sync: the feed never treats them as recordings, even with sync off. */

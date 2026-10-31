@@ -57,8 +57,10 @@ class NodeJoinTest {
 
     private fun reply(code: Int, body: String = "") = MockResponse.Builder().code(code).body(body).build()
 
+    private val joined = mutableListOf<String>()
+
     private fun join(text: String) = runBlocking {
-        joinNode(text, "Pixel 9", { connection: Connection -> RunnerClient(connection, http) }, store)
+        joinNode(text, "Pixel 9", { connection: Connection -> RunnerClient(connection, http) }, store) { joined += it }
     }
 
     @Test
@@ -135,6 +137,22 @@ class NodeJoinTest {
 
         assertEquals(listOf("Сервер", "ПК Ubuntu"), store.current().nodes.map { it.name })
         assertEquals("http://box:8000", store.current().activeNode)
+    }
+
+    @Test
+    fun onlyANewTokenForAnAddressLeavesItsLastSyncUnchecked() = runBlocking<Unit> {
+        store.update { it.withNode(NodeEntry("$address#token=old", "Сервер")) }
+        node.enqueue(reply(200, """{"token":"device-token-1","device":{"id":"d1","name":"Pixel 9"}}"""))
+        node.enqueue(reply(200, capabilities))
+        join("$address#invite=$code")
+        assertEquals(listOf(address), joined)
+
+        node.enqueue(reply(200, capabilities))
+        join(address)
+        assertEquals(listOf(address, address), joined) // an open server where the device had a token
+        node.enqueue(reply(200, capabilities))
+        join(address)
+        assertEquals(listOf(address, address), joined) // the same open server again
     }
 
     @Test
