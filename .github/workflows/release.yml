@@ -56,7 +56,8 @@ jobs:
             dist/mnema-*-constraints.txt
           if-no-files-found: error
 
-  # The command as users install it: uv tool, the wheel of this release, a clean tool folder
+  # The command as users install it: uv tool, the wheel of this release with its constraints (the
+  # same files publish uploads and the manifest's cli block names), a clean tool folder
   cli:
     needs: source
     strategy:
@@ -76,7 +77,8 @@ jobs:
         run: |
           version=${TAG#v}
           export UV_TOOL_DIR="$RUNNER_TEMP/tools" UV_TOOL_BIN_DIR="$RUNNER_TEMP/bin"
-          uv tool install --python 3.12 "mnema[cli] @ file://$PWD/dist/mnema-$version-py3-none-any.whl"
+          uv tool install --python 3.12 "mnema[cli] @ file://$PWD/dist/mnema-$version-py3-none-any.whl" \
+            --constraints "$PWD/dist/mnema-$version-constraints.txt"
           "$RUNNER_TEMP/bin/mnema" --version | grep -qx "mnema $version"
       - name: mnema-mcp answers initialize
         timeout-minutes: 2

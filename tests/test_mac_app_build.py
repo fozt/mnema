@@ -56,12 +56,14 @@ def test_console_scripts_run_the_python_next_to_them(tmp_path):
 
 def test_mcp_client_of_the_old_app_is_told_how_to_get_the_command(tmp_path):
     """MCP configs still start Resources/bin/mnema-mcp of the app: it fails and names the wheel of
-    this very release."""
+    this very release with the versions it was tested with."""
     stub = build.write_mcp_stub(tmp_path / "bin", "0.5.0")
     done = subprocess.run([str(stub)], capture_output=True, text=True, input="{}\n")
     assert done.returncode != 0 and done.stdout == ""
-    wheel = "https://github.com/fozt/mnema/releases/download/v0.5.0/mnema-0.5.0-py3-none-any.whl"
-    assert f'uv tool install "mnema[cli] @ {wheel}"' in done.stderr
+    release = "https://github.com/fozt/mnema/releases/download/v0.5.0"
+    wheel = f"{release}/mnema-0.5.0-py3-none-any.whl"
+    constraints = f"{release}/mnema-0.5.0-constraints.txt"
+    assert f'uv tool install "mnema[cli] @ {wheel}" --constraints {constraints}' in done.stderr
     assert len(stub.read_text().splitlines()) == 3
 
 

@@ -82,12 +82,12 @@ _SHEBANG = (
 MCP_STUB = (
     "#!/bin/sh\n"
     "echo 'mnema-mcp is part of the mnema command now. Install it: "
-    'uv tool install "mnema[cli] @ {wheel}"\' >&2\n'
+    'uv tool install "mnema[cli] @ {wheel}" --constraints {constraints}\' >&2\n'
     "exit 1\n"
 )
-WHEEL = (
-    "https://github.com/fozt/mnema/releases/download/v{version}/mnema-{version}-py3-none-any.whl"
-)
+_RELEASE = "https://github.com/fozt/mnema/releases/download/v{version}/"
+WHEEL = _RELEASE + "mnema-{version}-py3-none-any.whl"
+CONSTRAINTS = _RELEASE + "mnema-{version}-constraints.txt"  # the versions it was tested with
 # The weights mnema-asr downloads on first use: CC-BY-4.0 asks for attribution
 MODELS = """\
 Models Mnema downloads on first use (not part of this app)
@@ -208,7 +208,10 @@ def trim(python_home: Path) -> int:
 def write_mcp_stub(bin_dir: Path, version: str) -> Path:
     stub = bin_dir / "mnema-mcp"
     bin_dir.mkdir(parents=True, exist_ok=True)
-    stub.write_text(MCP_STUB.format(wheel=WHEEL.format(version=version)), encoding="utf-8")
+    text = MCP_STUB.format(
+        wheel=WHEEL.format(version=version), constraints=CONSTRAINTS.format(version=version)
+    )
+    stub.write_text(text, encoding="utf-8")
     stub.chmod(0o755)
     return stub
 

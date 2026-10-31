@@ -312,10 +312,12 @@ wheel of a release (put the version of the
 [latest release](https://github.com/fozt/mnema/releases/latest) in place of `X.Y.Z`):
 
 ```bash
-uv tool install "mnema[cli] @ https://github.com/fozt/mnema/releases/download/vX.Y.Z/mnema-X.Y.Z-py3-none-any.whl"
+uv tool install "mnema[cli] @ https://github.com/fozt/mnema/releases/download/vX.Y.Z/mnema-X.Y.Z-py3-none-any.whl" \
+  --constraints https://github.com/fozt/mnema/releases/download/vX.Y.Z/mnema-X.Y.Z-constraints.txt
 ```
 
-It installs `mnema` and `mnema-mcp` into `~/.local/bin`; add that folder to `PATH` if your shell
+The constraints file holds the versions of the dependencies the release was tested with. It
+installs `mnema` and `mnema-mcp` into `~/.local/bin`; add that folder to `PATH` if your shell
 doesn't have it. Update with the same command and `--force` (`mnema update` prints it). On a Mac
 the command recognizes through the installed Mnema app, so install the app too, or connect a
 server; on Linux it recognizes on the CPU with Parakeet or on a server. The Linux app installer

@@ -312,5 +312,7 @@ def test_release_builds_the_command_wheel_and_its_constraints(source, tmp_path, 
         "wheel": "https://github.com/fozt/mnema/releases/download/v0.3.0/"
         "mnema-0.3.0-py3-none-any.whl",
         "sha256": hashlib.sha256(b"wheel").hexdigest(),
+        "constraints": "https://github.com/fozt/mnema/releases/download/v0.3.0/"
+        "mnema-0.3.0-constraints.txt",
     }
     assert update.Release.model_validate(data).cli is not None

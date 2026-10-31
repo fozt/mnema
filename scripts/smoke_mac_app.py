@@ -33,7 +33,14 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from mnema.macapp import app_helper
-from scripts.build_mac_app import FORBIDDEN, WHEEL, load_commands, macho_files, outside
+from scripts.build_mac_app import (
+    CONSTRAINTS,
+    FORBIDDEN,
+    WHEEL,
+    load_commands,
+    macho_files,
+    outside,
+)
 
 
 class SmokeError(SystemExit):
@@ -107,8 +114,9 @@ def check_mcp(app: Path, env: dict[str, str], version: str) -> None:
     """The mnema-mcp of old MCP configs fails and names the command's wheel of this release."""
     stub = app / "Contents" / "Resources" / "bin" / "mnema-mcp"
     out = run([str(stub)], env, input="{}\n")
-    wheel = WHEEL.format(version=version)
-    if out.returncode == 0 or out.stdout or wheel not in out.stderr:
+    advice = f'"mnema[cli] @ {WHEEL.format(version=version)}" --constraints '
+    advice += CONSTRAINTS.format(version=version)
+    if out.returncode == 0 or out.stdout or advice not in out.stderr:
         raise SmokeError(f"mnema-mcp:\n{out.stdout}\n{out.stderr[-2000:]}")
 
 
