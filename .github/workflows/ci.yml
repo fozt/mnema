@@ -36,10 +36,16 @@ jobs:
   swift:
     runs-on: macos-15
     timeout-minutes: 30
+    env:
+      # the Xcode of the release mac job: FluidAudio 0.18.0 with its Package.swift for Swift 6.0/6.1
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
     defaults:
       run:
         working-directory: mnema/bar/macos
     steps:
+      - name: Xcode
+        working-directory: .
+        run: test -d "$DEVELOPER_DIR" || { echo "::error::No $DEVELOPER_DIR on this runner"; exit 1; }
       - uses: actions/checkout@v7
       # Saved on main only: a tag sees the caches of its own ref and of main, and the release
       # restores this one. Without Package.resolved the key is just the platform.
@@ -48,6 +54,7 @@ jobs:
         with:
           path: ~/Library/Caches/org.swift.swiftpm
           key: swiftpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('mnema/bar/macos/Package.resolved') }}
+      - run: swift --version
       - run: swift build
       - run: swift test
       - if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.swiftpm.outputs.cache-hit != 'true'
