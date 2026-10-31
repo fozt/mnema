@@ -42,6 +42,7 @@ private func text(_ lines: [Data]) -> [String] {
     #expect(launch.libpython == res + "/python/lib/libpython3.12.dylib")
     #expect(launch.path == "\(res)/bin:\(res)/python/bin:/usr/bin:/bin:/usr/sbin:/sbin")
     #expect(launch.env["MNEMA_APP_BUNDLE"] == bundle)
+    #expect(launch.env["MNEMA_ASR"] == bundle + "/Contents/MacOS/mnema-asr")  // recognition on CoreML
     #expect(launch.env["SSL_CERT_FILE"] == res + "/python/lib/python3.12/site-packages/certifi/cacert.pem")
     #expect(launch.configHome == nil && launch.log == Launch.defaultLog)
     // a source build or a terminal run still names its venv

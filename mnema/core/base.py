@@ -122,16 +122,62 @@ TOOL_ENV = {"ffmpeg": "MNEMA_FFMPEG", "ffprobe": "MNEMA_FFPROBE"}
 MISSING_TOOL = "{program} not found. Install ffmpeg or reinstall Mnema"
 
 
+APP_ID = "com.mnema.bar"  # CFBundleIdentifier of Mnema.app (bar.install.BUNDLE_ID)
+SYSTEM_APPS = Path("/Applications")
+
+
+def app_file() -> Path:
+    """~/.local/share/mnema/app.json: the Mac app writes where it is ({bundle, asr, version}),
+    the mnema command reads it."""
+    base = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
+    return Path(base) / "mnema" / "app.json"
+
+
+def installed_app() -> dict[str, str]:
+    """What app.json says, {} without it."""
+    import json
+
+    try:
+        found = json.loads(app_file().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(found, dict):
+        return {}
+    return {k: v for k, v in found.items() if isinstance(v, str) and v}
+
+
+def is_mnema_app(bundle: Path) -> bool:
+    import plistlib
+
+    try:
+        with open(bundle / "Contents" / "Info.plist", "rb") as f:
+            return plistlib.load(f).get("CFBundleIdentifier") == APP_ID
+    except (OSError, plistlib.InvalidFileException, AttributeError):
+        return False
+
+
+def mac_app() -> Path | None:
+    """Mnema.app of this Mac: the running one (MNEMA_APP_BUNDLE), the one app.json names, else
+    Mnema.app in /Applications or ~/Applications with Mnema's bundle identifier."""
+    running = os.environ.get("MNEMA_APP_BUNDLE", "").strip()
+    if running:
+        return Path(running)
+    named = installed_app().get("bundle")
+    places = [Path(named)] if named else []
+    places += [SYSTEM_APPS / "Mnema.app", Path.home() / "Applications" / "Mnema.app"]
+    return next((p for p in places if is_mnema_app(p)), None)
+
+
 def tool(name: str) -> str:
     """Path to ffmpeg or ffprobe: MNEMA_FFMPEG/MNEMA_FFPROBE, then the copy next to this Python
-    or in the Mac app bundle (MNEMA_APP_BUNDLE), then PATH."""
+    or in the Mac app bundle (base.mac_app), then PATH."""
     explicit = os.environ.get(TOOL_ENV.get(name, ""), "").strip()
     if explicit:
         return explicit
     places = [Path(sys.executable).parent / name]
-    bundle = os.environ.get("MNEMA_APP_BUNDLE", "").strip()
-    if bundle:
-        places.append(Path(bundle) / "Contents" / "Resources" / "bin" / name)
+    bundle = mac_app()
+    if bundle is not None:
+        places.append(bundle / "Contents" / "Resources" / "bin" / name)
     for place in places:
         if place.is_file() and os.access(place, os.X_OK):
             return str(place)

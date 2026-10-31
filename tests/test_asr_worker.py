@@ -237,12 +237,16 @@ class InferenceSession:  # silero hears speech everywhere
 
 def test_real_worker_gives_the_key_from_the_pipe_to_the_cloud_engine(monkeypatch, tmp_path):
     """The real recognition process: the key sent with the job is the one the OpenAI request
-    carries. The child's boundaries are stubs: litellm, onnxruntime and ffprobe."""
+    carries. The child's boundaries are stubs: litellm, ffprobe and its speech search
+    (onnxruntime, on a Mac mnema-asr)."""
     import wave
 
     from mnema import config
     from mnema.core import transcribe
     from mnema.core.backends import CloudBackend
+    from tests.mac_helper_stub import Helper
+
+    monkeypatch.setenv("MNEMA_ASR", str(Helper(tmp_path / "app", speech=[[0, 16000]]).path))
 
     stubs = tmp_path / "stubs"
     stubs.mkdir()

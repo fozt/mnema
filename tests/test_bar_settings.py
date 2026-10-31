@@ -1045,3 +1045,90 @@ def test_forms_render_in_english(env_file) -> None:
         shown = [ask.title, ask.message, ask.ok, ask.cancel]
         shown += [t for f in ask.fields for t in (f.label, f.placeholder)]
         assert not [t for t in shown if _CYRILLIC.search(t)], shown
+
+
+@pytest.fixture
+def mac_helper(monkeypatch, tmp_path):
+    """A Mac without a server whose Mnema.app has mnema-asr (a real stub process) and no model."""
+    from mnema.core import base
+    from mnema.core import mac_helper as mac_helper_mod
+    from tests.mac_helper_stub import Helper
+
+    monkeypatch.setattr(base, "STANDALONE", True)
+    monkeypatch.setattr(mac_helper_mod.platform, "machine", lambda: "arm64")
+    monkeypatch.setenv("MNEMA_LIVE_DIR", str(tmp_path / "notes"))
+    helper = Helper(tmp_path / "app")
+    helper.configure(installed={"parakeet": False, "vad": False})
+    monkeypatch.setenv("MNEMA_ASR", str(helper.path))
+    return helper
+
+
+def _settled_model() -> None:
+    _settled()
+    _join("mnema-bar-asr-model")
+
+
+def _model_row(rt: BarRuntime) -> SettingsField | None:
+    return _processing(rt).get("Модель распознавания")
+
+
+def _until(check: Callable[[], bool]) -> None:
+    deadline = time.monotonic() + 10
+    while not check():
+        assert time.monotonic() < deadline, "the state did not come"
+        time.sleep(0.02)
+
+
+def test_choosing_this_mac_downloads_the_model_with_progress(mac_helper, tmp_path) -> None:
+    """Nothing is downloaded until recognition on this Mac is chosen; then the model row shows
+    the download, and once it is there the row goes."""
+    (tmp_path / "bar.json").write_text(json.dumps({"recognition": "cloud"}), encoding="utf-8")
+    gate = tmp_path / "go-on"
+    mac_helper.configure(wait_for=str(gate))
+    rt = BarRuntime(prefs_file=tmp_path / "bar.json")
+    _settled_model()
+    assert "Модель распознавания" not in _processing(rt)
+    assert not mac_helper.config()["installed"]["parakeet"]
+
+    try:
+        rt.handle("recognition:mac")
+        _until(lambda: _model_row(rt) is not None and _model_row(rt).progress == 0.25)
+        assert _processing(rt)["Модель распознавания"].value == "Скачиваю… 25\u00a0%"
+    finally:
+        gate.write_text("")  # the download goes on
+    _settled_model()
+    rows = _processing(rt)
+    assert "Модель распознавания" not in rows and "Скачать" not in rows
+    assert mac_helper.config()["installed"]["parakeet"]
+    assert [c.key for c in rows["Движок"].choices] == ["asr:auto", "asr:parakeet"]
+
+
+def test_a_mac_without_the_model_offers_to_download_it_and_tells_why_it_failed(
+    mac_helper, tmp_path
+) -> None:
+    """On this Mac by default: the model is not fetched at start, the row says so with the
+    download size; a failed download tells why and offers to try again."""
+    rt = BarRuntime(prefs_file=tmp_path / "bar.json")
+    _settled_model()
+    rows = _processing(rt)
+    row = rows["Модель распознавания"]
+    assert (row.value, row.detail) == ("Не скачана", "633 МБ")
+    assert rows["Скачать"].key == "asr_model_download"
+    assert not mac_helper.config()["installed"]["parakeet"]
+
+    mac_helper.configure(fail={"download": "no_space"})
+    rt.handle("asr_model_download")
+    _settled_model()
+    rows = _processing(rt)
+    row = rows["Модель распознавания"]
+    assert (row.value, row.detail, row.tone) == (
+        "Не удалось скачать",
+        "Не хватает места на диске для модели распознавания",
+        Tone.WARN,
+    )
+    assert rows["Скачать ещё раз"].key == "asr_model_download"
+
+    mac_helper.configure(fail={})
+    rt.handle("asr_model_download")
+    _settled_model()
+    assert "Модель распознавания" not in _processing(rt)

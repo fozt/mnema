@@ -5,7 +5,16 @@ from __future__ import annotations
 from pathlib import Path
 
 from ..i18n import _
-from .backends import AUTO, CloudBackend, NoCloudKey, engine, is_cloud, select_backend
+from . import base
+from .backends import (
+    AUTO,
+    CloudBackend,
+    NoCloudKey,
+    ParakeetBackend,
+    engine,
+    is_cloud,
+    select_backend,
+)
 from .base import MediaError, Progress, noop
 from .models import Transcript
 from .probe import probe
@@ -20,8 +29,9 @@ def transcribe(
     lang: str | None = None,
     on: Progress = noop,
 ) -> Transcript:
-    """Recognize in a separate process, so all ASR memory is freed before the result returns.
-    The cloud key goes with the job through the pipe: the process cannot tell whose it is."""
+    """Recognize in a separate process, so all ASR memory is freed before the result returns:
+    a Python child, on the Mac mnema-asr itself. The cloud key goes with the job through the
+    pipe: the process cannot tell whose it is."""
     from .worker import run
 
     payload = {
@@ -41,6 +51,11 @@ def transcribe(
         found = engine(backend)
         title = found.title if found is not None else backend
         raise MediaError(_("{name} recognition is not installed on this computer", name=title))
+    if base.STANDALONE and isinstance(
+        select_backend(backend, model=model, lang=lang), ParakeetBackend
+    ):
+        # mnema-asr is the recognition process: no Python child in between
+        return _transcribe(src, backend=backend, model=model, lang=lang, on=on)
     return Transcript.model_validate(run("transcribe", payload, on=on))
 
 

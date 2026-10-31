@@ -18,6 +18,7 @@ from .protocol import (
 )
 from .state import (
     BarPrefs,
+    LocalModel,
     MenuEnv,
     Recognition,
     asr_options,
@@ -127,6 +128,31 @@ def _model_rows(env: MenuEnv) -> list[SettingsField]:
         f(kind=FieldKind.STATUS, title=_("Model"), value=value, tone=tone),
         f(kind=FieldKind.BUTTON, title=_("Choose model…"), key="model_setup"),
     ]
+
+
+def _local_model_rows(model: LocalModel) -> list[SettingsField]:
+    """Mac, on this Mac: the recognition model while it is not there, its download and why
+    the download failed; a downloaded model needs no row."""
+    f = SettingsField
+    status = f(kind=FieldKind.STATUS, title=_("Recognition model"))
+    if model.downloading:
+        if model.progress is None:
+            status.value, status.tone = _("Preparing…"), Tone.BUSY
+        else:
+            percent = int(model.progress * 100)
+            status.value = _("Downloading… {percent}%", percent=percent)
+            status.progress = model.progress
+        return [status]
+    if model.installed:
+        return []
+    if model.error:
+        status.value, status.detail, status.tone = _("Could not download"), model.error, Tone.WARN
+        button = _("Download again")
+    else:
+        status.value = _("Not downloaded")
+        status.detail = _("{size} MB", size=round(model.size / 1_000_000)) if model.size else ""
+        button = _("Download")
+    return [status, f(kind=FieldKind.BUTTON, title=button, key="asr_model_download")]
 
 
 def _asr_key_rows(env: MenuEnv) -> list[SettingsField]:
@@ -264,6 +290,8 @@ def settings_model(
     ]
     if env.mac and recognition_at(prefs, env) == Recognition.CLOUD:
         processing += _asr_key_rows(env)
+    if env.mac and recognition_at(prefs, env) == Recognition.MAC and env.asr_model is not None:
+        processing += _local_model_rows(env.asr_model)
     if env.mac:
         processing += _model_rows(env)
     processing += [

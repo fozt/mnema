@@ -187,3 +187,22 @@ def test_on_the_server_the_track_is_cut_where_silero_hears_speech(tmp_path, sent
     (segment,) = tr.segments
     assert segment.start == pytest.approx(1.0, abs=0.05)
     assert segment.end == pytest.approx(3.0, abs=0.05)
+
+
+def test_on_the_mac_the_pauses_come_from_mnema_asr(tmp_path, sent, monkeypatch):
+    """A Mac without a server: the cloud works where mnema-asr is, cut by its speech segments
+    (its small speech model is downloaded the first time)."""
+    from mnema.core import base, mac_helper
+    from tests.mac_helper_stub import Helper
+
+    monkeypatch.setattr(base, "STANDALONE", True)
+    monkeypatch.setattr(mac_helper.platform, "machine", lambda: "arm64")
+    assert not backends.CloudBackend().available()  # no Mnema.app, onnxruntime or not
+    helper = Helper(tmp_path / "app", speech=[[SR, 3 * SR]])
+    helper.configure(installed={"parakeet": False, "vad": False})
+    monkeypatch.setenv("MNEMA_ASR", str(helper.path))
+    assert backends.CloudBackend().available()
+    tr = _recognize(_track(tmp_path / "mic.wav", 4))
+    assert [c["seconds"] for c in sent.calls] == [2.0]
+    assert [(s.start, s.end) for s in tr.segments] == [(1.0, 3.0)]
+    assert helper.config()["installed"] == {"parakeet": False, "vad": True}

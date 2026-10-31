@@ -44,7 +44,14 @@ class Recognizer(Protocol):
 
 
 def local_recognizer() -> Recognizer:
-    """This machine's recognizer: Parakeet Ultra on ONNX Runtime."""
+    """This machine's recognizer: on the Mac mnema-asr of Mnema.app (CoreML), elsewhere
+    Parakeet Ultra on ONNX Runtime."""
+    from . import base
+
+    if base.STANDALONE:
+        from .mac_helper import MacHelper
+
+        return MacHelper()
     from .parakeet import OnnxParakeet
 
     return OnnxParakeet()

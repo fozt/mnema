@@ -54,8 +54,9 @@ extension Launch {
             configHome: (info["MnemaConfigHome"] as? String).flatMap { $0.isEmpty ? nil : $0 })
     }
 
-    /// The self-contained app (scripts/build_mac_app.py): Python, its packages, the mnema
-    /// command and ffmpeg are in Contents/Resources, so the app runs from any folder.
+    /// The self-contained app (scripts/build_mac_app.py): Python, its packages and ffmpeg are
+    /// in Contents/Resources, mnema-asr next to the app in Contents/MacOS, so the app runs from
+    /// any folder.
     /// nil — no Python in the bundle.
     init?(bundle: String, log: String) {
         let res = bundle + "/Contents/Resources"
@@ -72,6 +73,7 @@ extension Launch {
                 "PYTHONNOUSERSITE": "1",
                 "PYTHONDONTWRITEBYTECODE": "1",  // the signed bundle is never written to
                 "MNEMA_APP_BUNDLE": bundle,
+                "MNEMA_ASR": bundle + "/Contents/MacOS/mnema-asr",  // core/mac_helper.py
             ])
     }
 }

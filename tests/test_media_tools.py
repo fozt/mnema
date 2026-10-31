@@ -79,3 +79,20 @@ def test_operations_run_the_bundled_ffmpeg(no_tools, monkeypatch, tmp_path):
     monkeypatch.setenv("MNEMA_APP_BUNDLE", str(no_tools / "Mnema.app"))
     audio.extract_audio(tmp_path / "in.wav", tmp_path / "out.wav")
     assert calls.read_text().split() == [str(stub)]
+
+
+def test_the_command_runs_ffmpeg_of_the_app_it_found(no_tools, monkeypatch, tmp_path):
+    """The mnema command outside the app: ffmpeg from the bundle app.json names (the app writes
+    it at start), only a Mnema bundle."""
+    import json
+    import plistlib
+
+    app = no_tools / "Programs" / "Mnema.app"
+    bundled = _binary(app / "Contents" / "Resources" / "bin", "ffmpeg")
+    base.app_file().parent.mkdir(parents=True, exist_ok=True)
+    base.app_file().write_text(json.dumps({"bundle": str(app)}), encoding="utf-8")
+    with pytest.raises(base.MediaError):
+        base.tool("ffmpeg")  # no Info.plist: not Mnema's bundle
+    with open(app / "Contents" / "Info.plist", "wb") as f:
+        plistlib.dump({"CFBundleIdentifier": "com.mnema.bar"}, f)
+    assert base.tool("ffmpeg") == str(bundled)

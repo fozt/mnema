@@ -36,6 +36,8 @@ _LEVELS = {"DEBUG": logging.DEBUG, "INFO": logging.INFO, "WARNING": logging.WARN
            "ERROR": logging.ERROR, "CRITICAL": logging.CRITICAL}  # fmt: skip
 _ACTIVE: weakref.WeakSet[Worker] = weakref.WeakSet()
 _ACTIVE_LOCK = threading.Lock()
+# the environment of a program that is not Python (Worker argv): nothing else is inherited
+HELPER_ENV = ("HOME", "PATH", "TMPDIR", "LANG", "TDT_EMISSION_DELAY_FRAMES")
 
 
 def close_workers() -> None:
@@ -84,32 +86,30 @@ def isolate_stdout() -> None:
 
 
 class Worker:
-    """A separate interpreter with a bounded stop wait and cleanup of its descendants."""
+    """A separate process (a Python interpreter or mnema-asr) with a bounded stop wait and
+    cleanup of its descendants."""
 
-    def __init__(self, module: str = "mnema.core.worker") -> None:
+    def __init__(self, module: str = "mnema.core.worker", *, argv: list[str] | None = None) -> None:
+        """A Python module, or argv: another program on the same pipes (mnema-asr), which
+        gets only the HELPER_ENV variables (FluidAudio reads REGISTRY_URL and proxies)."""
         self._temp = tempfile.TemporaryDirectory(prefix="mnema-asr-")
         self._tail: collections.deque[str] = collections.deque(maxlen=_TAIL)
         self._events: queue.Queue[Any] = queue.Queue()
         self._closed = False
         self._close_lock = threading.Lock()
-        env = os.environ.copy()
-        # Inside Mnema.app sys.executable is the app itself; the venv interpreter comes from
-        # sys.prefix. The child needs neither PYTHONEXECUTABLE (set by Bridge.swift) nor
-        # __PYVENV_LAUNCHER__.
-        python = Path(sys.prefix) / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-        executable = str(python) if python.is_file() else sys.executable
-        for name in ("PYTHONEXECUTABLE", "__PYVENV_LAUNCHER__", "PYTHONHOME"):
-            env.pop(name, None)
-        # Works from sources and from the installed app, whatever the cwd.
-        root = str(Path(__file__).resolve().parents[2])
-        env["PYTHONPATH"] = os.pathsep.join(filter(None, (root, env.get("PYTHONPATH"))))
-        env["TMPDIR"] = self._temp.name
-        env["TEMP"] = self._temp.name
-        env["TMP"] = self._temp.name
-        env[i18n.ENV] = i18n.current()  # texts from the child follow the job's language
+        if argv is not None:
+            env = {k: os.environ[k] for k in HELPER_ENV if k in os.environ}
+            env["TMPDIR"] = self._temp.name
+            command = argv
+        else:
+            env = self._python_env()
+            # Inside Mnema.app sys.executable is the app itself; the venv interpreter comes
+            # from sys.prefix.
+            python = Path(sys.prefix) / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+            command = [str(python) if python.is_file() else sys.executable, "-u", "-m", module]
         try:
             self.process = subprocess.Popen(
-                [executable, "-u", "-m", module],
+                command,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -132,6 +132,20 @@ class Worker:
             self.close()
             raise
 
+    def _python_env(self) -> dict[str, str]:
+        env = os.environ.copy()
+        # The child needs neither PYTHONEXECUTABLE (set by Bridge.swift) nor __PYVENV_LAUNCHER__.
+        for name in ("PYTHONEXECUTABLE", "__PYVENV_LAUNCHER__", "PYTHONHOME"):
+            env.pop(name, None)
+        # Works from sources and from the installed app, whatever the cwd.
+        root = str(Path(__file__).resolve().parents[2])
+        env["PYTHONPATH"] = os.pathsep.join(filter(None, (root, env.get("PYTHONPATH"))))
+        env["TMPDIR"] = self._temp.name
+        env["TEMP"] = self._temp.name
+        env["TMP"] = self._temp.name
+        env[i18n.ENV] = i18n.current()  # texts from the child follow the job's language
+        return env
+
     def _read(self) -> None:
         assert self.process.stdout is not None
         try:
@@ -146,6 +160,8 @@ class Worker:
                         }
                     )
                     break
+        except (ValueError, OSError):  # close() shut the pipe mid-read
+            pass
         finally:
             self._events.put(_EOF)
 
@@ -155,16 +171,17 @@ class Worker:
         assert self.process.stderr is not None
         from ..llm.redact import redact
 
-        for raw in self.process.stderr:
-            line = redact(raw.rstrip())
-            if not line:
-                continue
-            self._tail.append(line)
-            head, _sep, rest = line.partition(" ")
-            if head in _LEVELS and rest:
-                logger.log(_LEVELS[head], "%s", rest)
-            else:  # library progress lines and warnings
-                logger.debug("%s", line)
+        with contextlib.suppress(ValueError, OSError):  # close() shut the pipe mid-read
+            for raw in self.process.stderr:
+                line = redact(raw.rstrip())
+                if not line:
+                    continue
+                self._tail.append(line)
+                head, _sep, rest = line.partition(" ")
+                if head in _LEVELS and rest:
+                    logger.log(_LEVELS[head], "%s", rest)
+                else:  # library progress lines and warnings
+                    logger.debug("%s", line)
 
     def failure(self) -> str:
         """The last non-empty child stderr line (the failure reason), or empty."""

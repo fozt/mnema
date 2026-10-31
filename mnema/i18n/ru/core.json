@@ -57,5 +57,12 @@
   "No {name} in {folder}": "В папке {folder} нет {name}",
   "This language is recognized only in the cloud": "Этот язык распознаёт только облако",
   "Could not download the recognition model. Check the connection and try again": "Не удалось скачать модель распознавания. Проверьте подключение и попробуйте ещё раз",
-  "Not enough disk space for the recognition model": "Не хватает места на диске для модели распознавания"
+  "Not enough disk space for the recognition model": "Не хватает места на диске для модели распознавания",
+  "Install Mnema or connect a server": "Установите Mnema или подключите сервер",
+  "Update Mnema to recognize on this Mac": "Обновите Mnema, чтобы распознавать на этом Mac",
+  "Update the mnema command to recognize on this Mac": "Обновите команду mnema, чтобы распознавать на этом Mac",
+  "Could not recognize on this Mac. See the Mnema log for details": "Не удалось распознать на этом Mac. Подробности в журнале Mnema",
+  "The recognition model is not downloaded": "Модель распознавания не скачана",
+  "Could not read the recording audio": "Не удалось прочитать звук записи",
+  "Recognition on this Mac needs Apple silicon": "Распознавать на этом Mac можно только с процессором Apple"
 }
