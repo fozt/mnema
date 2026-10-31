@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import platform
 import re
 import shutil
 import subprocess
@@ -23,6 +24,8 @@ logger = logging.getLogger(__name__)
 # The Mac app is standalone (processes on its own or on a server, as chosen in the settings);
 # Linux and the rest are server clients. Modules read base.STANDALONE at call time.
 STANDALONE = sys.platform == "darwin"
+# The Mac app and mnema-asr are arm64 only. Read at call time (tests pin it, as STANDALONE).
+APPLE_SILICON = platform.machine() == "arm64"
 
 # True while a recording is processed inside the Mac app (live/recording_client.LocalNode):
 # remarks and refusals name the place of processing by this, not by the platform.

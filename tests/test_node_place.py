@@ -264,12 +264,11 @@ def test_a_mac_without_mnema_app_or_a_server_asks_for_one(tmp_path, monkeypatch,
 
 def test_an_intel_mac_with_the_app_is_told_it_needs_apple_silicon(tmp_path, monkeypatch):
     from mnema import node_settings
-    from mnema.core import mac_helper
     from tests.mac_helper_stub import install
 
     monkeypatch.setattr(base, "STANDALONE", True)
     install(monkeypatch, tmp_path / "Mnema.app")
-    monkeypatch.setattr(mac_helper.platform, "machine", lambda: "x86_64")
+    monkeypatch.setattr(base, "APPLE_SILICON", False)
     assert node_settings.asr_problem("auto") == (
         "Распознавать на этом Mac можно только с процессором Apple"
     )

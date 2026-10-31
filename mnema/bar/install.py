@@ -22,6 +22,7 @@ import tempfile
 from pathlib import Path
 
 from .. import __version__
+from ..core import base
 from ..core.base import APP_ID, MediaError
 from ..i18n import _
 
@@ -40,7 +41,7 @@ def from_dmg() -> str:
     """The refusal of every source install of the Mac app; the DMG is arm64 only."""
     from ..update import RELEASES_PAGE
 
-    if platform.machine() != "arm64":
+    if not base.APPLE_SILICON:
         return _(_NEEDS_APPLE_SILICON, url=INSTALL_PAGE)
     return _(_FROM_DMG, url=RELEASES_PAGE)
 

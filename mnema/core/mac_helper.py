@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import logging
 import os
-import platform
 from pathlib import Path
 from typing import Any
 
@@ -129,16 +128,12 @@ def _runnable(path: Path) -> bool:
     return path.is_file() and os.access(path, os.X_OK)
 
 
-def _apple_silicon() -> bool:
-    return platform.machine() == "arm64"
-
-
 def problem() -> str | None:
     """Why this Mac cannot recognize, in the user's words, or None: no Mnema.app with its
     mnema-asr, or a Mac without Apple silicon. Runs no process."""
     if helper_path() is None:
         return _(NO_HELPER)
-    if not _apple_silicon():
+    if not base.APPLE_SILICON:
         return _(_ERRORS["unsupported_mac"])
     return None
 
@@ -155,7 +150,7 @@ def _call(
     helper = helper_path()
     if helper is None:
         raise MediaError(_(NO_HELPER))
-    if not _apple_silicon():
+    if not base.APPLE_SILICON:
         raise HelperError("unsupported_mac")
     status: tuple[float | None, str] = (None, _("Preparing recognition…"))
     on(*status)

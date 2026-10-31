@@ -192,11 +192,10 @@ def test_on_the_server_the_track_is_cut_where_silero_hears_speech(tmp_path, sent
 def test_on_the_mac_the_pauses_come_from_mnema_asr(tmp_path, sent, monkeypatch):
     """A Mac without a server: the cloud works where mnema-asr is, cut by its speech segments
     (its small speech model is downloaded the first time)."""
-    from mnema.core import base, mac_helper
+    from mnema.core import base
     from tests.mac_helper_stub import Helper
 
     monkeypatch.setattr(base, "STANDALONE", True)
-    monkeypatch.setattr(mac_helper.platform, "machine", lambda: "arm64")
     assert not backends.CloudBackend().available()  # no Mnema.app, onnxruntime or not
     helper = Helper(tmp_path / "app", speech=[[SR, 3 * SR]])
     helper.configure(installed={"parakeet": False, "vad": False})

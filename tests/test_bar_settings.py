@@ -1073,11 +1073,9 @@ def test_forms_render_in_english(env_file) -> None:
 def mac_helper(monkeypatch, tmp_path):
     """A Mac without a server whose Mnema.app has mnema-asr (a real stub process) and no model."""
     from mnema.core import base
-    from mnema.core import mac_helper as mac_helper_mod
     from tests.mac_helper_stub import Helper
 
     monkeypatch.setattr(base, "STANDALONE", True)
-    monkeypatch.setattr(mac_helper_mod.platform, "machine", lambda: "arm64")
     monkeypatch.setenv("MNEMA_LIVE_DIR", str(tmp_path / "notes"))
     helper = Helper(tmp_path / "app")
     helper.configure(installed={"parakeet": False, "vad": False})

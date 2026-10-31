@@ -280,7 +280,6 @@ def test_mac_without_the_app_bundle_is_sent_to_the_dmg(release, tmp_path, monkey
     """On a Mac there is no app built from the sources: an update outside Mnema.app downloads
     nothing and names the DMG."""
     monkeypatch.setattr(update.sys, "platform", "darwin")
-    monkeypatch.setattr("platform.machine", lambda: "arm64")
     monkeypatch.setattr(
         update.importlib.util, "find_spec", lambda name: object() if name == "AppKit" else None
     )
@@ -320,7 +319,7 @@ def test_command_of_uv_tool_is_told_how_to_update_itself(release, uv_tool, capsy
 def test_intel_mac_is_not_sent_to_the_arm64_dmg(release, monkeypatch):
     """The DMG holds an Apple silicon app: an Intel Mac gets the command with a server."""
     monkeypatch.setattr(update.sys, "platform", "darwin")
-    monkeypatch.setattr("platform.machine", lambda: "x86_64")
+    monkeypatch.setattr(base, "APPLE_SILICON", False)
     monkeypatch.setattr(
         update.importlib.util, "find_spec", lambda name: object() if name == "AppKit" else None
     )

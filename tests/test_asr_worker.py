@@ -217,6 +217,8 @@ def test_cloud_recognition_key_reaches_the_process_through_the_pipe(
 
 
 _CLOUD_STUBS = {
+    # the child is on Apple silicon whatever runs the tests, as conftest pins it in this process
+    "sitecustomize.py": "import platform\nplatform.machine = lambda: 'arm64'\n",
     "litellm.py": """
 suppress_debug_info = False
 def transcription(**kw):

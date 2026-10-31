@@ -142,9 +142,7 @@ class Helper:
 def install(monkeypatch, folder: Path, **config: object) -> Helper:
     """Mnema.app on an Apple silicon Mac: its mnema-asr is the stub (MNEMA_ASR, as Bridge
     passes it); the model is downloaded unless config says otherwise."""
-    import platform
 
     helper = Helper(folder, **config)
     monkeypatch.setenv("MNEMA_ASR", str(helper.path))
-    monkeypatch.setattr(platform, "machine", lambda: "arm64")
     return helper

@@ -17,11 +17,6 @@ from mnema.core.base import MediaError
 from tests.mac_helper_stub import FIXTURE, Helper
 
 
-@pytest.fixture(autouse=True)
-def _apple_silicon(monkeypatch):
-    monkeypatch.setattr(mac_helper.platform, "machine", lambda: "arm64")
-
-
 @pytest.fixture
 def helper(tmp_path, monkeypatch) -> Helper:
     found = Helper(tmp_path / "app")
@@ -267,7 +262,7 @@ def test_without_the_helper_recognition_asks_for_mnema_or_a_server(tmp_path, mon
 
 
 def test_an_intel_mac_cannot_recognize_here(helper, tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr(mac_helper.platform, "machine", lambda: "x86_64")
+    monkeypatch.setattr(base, "APPLE_SILICON", False)
     recognizer = mac_helper.MacHelper()
     assert not recognizer.available()
     with pytest.raises(MediaError, match="только с процессором Apple"):

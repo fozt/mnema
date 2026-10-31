@@ -74,7 +74,6 @@ def test_launch_agent_opens_the_running_bundle(home, monkeypatch, tmp_path) -> N
 def test_mac_install_from_the_sources_is_sent_to_the_dmg(home, monkeypatch, capsys) -> None:
     """`mnema-bar install` on a Mac builds nothing and starts nothing: the app is the DMG."""
     monkeypatch.setattr(install.platform, "system", lambda: "Darwin")
-    monkeypatch.setattr(install.platform, "machine", lambda: "arm64")
     monkeypatch.setattr(sys, "argv", ["mnema-bar", "install"])
     with pytest.raises(SystemExit) as refused:
         main()
@@ -89,7 +88,6 @@ def test_update_of_a_mac_app_built_from_the_sources_is_sent_to_the_dmg(
     """The 0.4 update of a source-built Mac app runs install_release of the new release: one
     line naming the DMG, the old app stays."""
     monkeypatch.setattr(install.platform, "system", lambda: "Darwin")
-    monkeypatch.setattr(install.platform, "machine", lambda: "arm64")
     with pytest.raises(SystemExit) as refused:
         install.install_release(terminal=terminal)
     assert refused.value.code == DMG
@@ -134,7 +132,6 @@ def test_install_texts_follow_an_english_interface(home, monkeypatch) -> None:
     with i18n.using("en"):
         summary = install.install()
         uninstalled = install.uninstall()
-        monkeypatch.setattr(install.platform, "machine", lambda: "arm64")
         refusal = install.from_dmg()
     assert summary.startswith("Installed: ") and not _cyrillic(summary)
     assert not _cyrillic(uninstalled)
@@ -152,7 +149,6 @@ def test_mnema_bar_on_a_mac_points_at_the_dmg_in_english(monkeypatch) -> None:
     from mnema import i18n
 
     monkeypatch.setattr("platform.system", lambda: "Darwin")
-    monkeypatch.setattr("platform.machine", lambda: "arm64")
     monkeypatch.setattr(sys, "argv", ["mnema-bar"])
     monkeypatch.setenv("MNEMA_UI_LANG", "en")
     with i18n.using("en"), pytest.raises(SystemExit) as refused:
@@ -165,9 +161,10 @@ def test_mnema_bar_on_a_mac_points_at_the_dmg_in_english(monkeypatch) -> None:
 def test_old_source_app_on_an_intel_mac_is_not_sent_to_the_dmg(monkeypatch) -> None:
     """The 0.4 update of a source-built app calls install_release: the DMG is Apple silicon only."""
     from mnema import i18n
+    from mnema.core import base
 
     monkeypatch.setattr("platform.system", lambda: "Darwin")
-    monkeypatch.setattr("platform.machine", lambda: "x86_64")
+    monkeypatch.setattr(base, "APPLE_SILICON", False)
     with i18n.using("en"), pytest.raises(SystemExit) as refused:
         install.install_release(terminal=True)
     assert refused.value.code == (

@@ -623,12 +623,11 @@ def test_mac_recognizes_through_mnema_asr_and_fetches_the_model_first(
     step), then both tracks are recognized and their words become the transcript."""
     import importlib
 
-    from mnema.core import backends, mac_helper
+    from mnema.core import backends
     from mnema.core.probe import MediaInfo
     from tests.mac_helper_stub import Helper
 
     transcribe_mod = importlib.import_module("mnema.core.transcribe")
-    monkeypatch.setattr(mac_helper.platform, "machine", lambda: "arm64")
     helper = Helper(tmp_path / "app")
     helper.configure(installed={"parakeet": False, "vad": False})
     monkeypatch.setenv("MNEMA_ASR", str(helper.path))
@@ -658,12 +657,11 @@ def _mac_helper(monkeypatch, tmp_path, **config):
     """mnema-asr of Mnema.app (the stub) with the model downloaded; ffprobe and ffmpeg stubbed."""
     import importlib
 
-    from mnema.core import backends, mac_helper
+    from mnema.core import backends
     from mnema.core.probe import MediaInfo
     from tests.mac_helper_stub import Helper
 
     transcribe_mod = importlib.import_module("mnema.core.transcribe")
-    monkeypatch.setattr(mac_helper.platform, "machine", lambda: "arm64")
     helper = Helper(tmp_path / "app")
     helper.configure(**config)
     monkeypatch.setenv("MNEMA_ASR", str(helper.path))

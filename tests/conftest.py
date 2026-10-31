@@ -56,11 +56,13 @@ def _unknown_free_memory(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _client_platform(monkeypatch):
-    """The default platform is a server client (CI on Linux, the local gate on a Mac): tests of
-    the standalone Mac set base.STANDALONE = True themselves."""
+    """The default platform is a server client on Apple silicon, whatever runs the tests (CI on
+    x86_64 Linux, the local gate on an arm64 Mac): tests of the standalone Mac set
+    base.STANDALONE = True, tests of an Intel Mac base.APPLE_SILICON = False themselves."""
     from mnema.core import base
 
     monkeypatch.setattr(base, "STANDALONE", False)
+    monkeypatch.setattr(base, "APPLE_SILICON", True)
 
 
 @pytest.fixture(autouse=True)
