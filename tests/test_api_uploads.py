@@ -137,7 +137,8 @@ def test_three_chunks_assemble_the_file_and_a_job_accepts_it(tmp_path):
     assert path.is_absolute() and path.name == "call.m4a"
     assert path.parent == (tmp_path / "uploads" / upload_id).resolve()
     assert path.read_bytes() == RECORDING
-    assert [p.name for p in path.parent.iterdir()] == ["call.m4a"]  # the marker is gone
+    names = sorted(p.name for p in path.parent.iterdir())
+    assert names == [".mnema-owner", "call.m4a"]  # the marker of missing bytes is gone
     info = client.get(f"/api/uploads/{upload_id}").json()
     assert info == {
         "id": upload_id,

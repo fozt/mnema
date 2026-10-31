@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 from .core.base import MediaError, Progress
 from .i18n import _, catalog, current, using
+from .users import OWNER
 
 logger = logging.getLogger(__name__)
 SERVER_FAILURE = "Processing failed on the server. Details are in the server log"
@@ -66,12 +67,18 @@ class Job(JobView):
     tracks: dict[str, str] | None = None
     key: str | None = None
     owner: str = NODE_OWNER  # id of the device that queued the job, or NODE_OWNER
+    user: str = OWNER  # the server user of that device: the job runs as them
     params: dict = Field(default_factory=dict)
     lang: str = Field(default_factory=current)  # language of the client that queued the job
     # lifecycle stamps (unix time): how long a job waited and how long it ran
     created_at: float = Field(default_factory=time.time)
     started_at: float | None = None
     finished_at: float | None = None
+
+
+def sees(owner: str, job: Job) -> bool:
+    """A device sees only its own jobs; the node token sees all."""
+    return owner == NODE_OWNER or job.owner == owner
 
 
 class DuplicateJobKey(Exception):
