@@ -77,6 +77,7 @@ internal val RU_DATA: Map<String, Any> = mapOf(
     "“{title}” is in a subfolder of the section “{section}”. Move it into the section itself: until then sync skips it and deletes nothing on the server" to "«{title}» лежит в подпапке раздела «{section}». Перенесите её в сам раздел: до этого синхронизация пропускает её и ничего не удаляет на сервере",
     "The recording folder “{path}” has none of its files" to "В папке записи «{path}» нет её файлов",
     "The list of missing recordings changed; sync again" to "Список исчезнувших записей изменился; повторите синхронизацию",
+    "The recordings library on the server changed; sync again" to "Библиотека записей на сервере изменилась; повторите синхронизацию",
     "Local files changed; deletion is postponed" to "Локальные файлы изменились; удаление отложено",
     "The local recording has already changed; deletion is postponed" to "Локальная запись уже изменена; удаление отложено",
     "Could not sync the recording" to "Не удалось синхронизировать запись",

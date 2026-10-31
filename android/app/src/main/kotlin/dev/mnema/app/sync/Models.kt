@@ -1,6 +1,8 @@
 package dev.mnema.app.sync
 
 import java.io.IOException
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.descriptors.PrimitiveKind
@@ -31,7 +33,8 @@ data class Record(val id: String, val path: String, val files: Map<FileName, Sta
 }
 
 @Serializable
-data class Manifest(val records: List<Record> = emptyList(), val sections: List<String> = emptyList())
+data class Manifest(val records: List<Record> = emptyList(), val sections: List<String> = emptyList(),
+    val library: String = "") // the user's library number on the server; empty from a 0.3 server
 
 @Serializable
 data class FileBody(val text: String, @SerialName("mtime_ns") @Serializable(with = NanosecondsSerializer::class) val mtimeNs: Long)
@@ -42,8 +45,12 @@ internal data class CreateRecord(val id: String, val path: String, val files: Ma
 @Serializable
 internal data class MoveRecord(@SerialName("expected_path") val expectedPath: String, val path: String)
 
+// library — the server's library number of this sync, empty before 0.4; foreign — another number the server answered,
+// not accepted yet: sync waits for "Send"
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable
-data class Checkpoint(val server: String = "", val records: Map<String, Record> = emptyMap(), val sections: List<String> = emptyList())
+data class Checkpoint(val server: String = "", @EncodeDefault val library: String = "", @EncodeDefault val foreign: String = "",
+    val records: Map<String, Record> = emptyMap(), val sections: List<String> = emptyList())
 
 data class Scan(val manifest: Manifest = Manifest(), val complete: Boolean = true, val blockedPaths: List<String> = emptyList(), val missingRoot: Boolean = false,
     val nested: List<String> = emptyList(), // recordings inside a recording; the path is shown to the user
@@ -52,9 +59,11 @@ data class Scan(val manifest: Manifest = Manifest(), val complete: Boolean = tru
     val readable: Boolean = true) // no other folder failed to be read
 
 // bulkMissing — gone on this device, serverMissing — gone on the server; both wait for the user's choice.
-// withoutTrash — there is no trash: what vanished on the server is deleted here only forever
+// withoutTrash — there is no trash: what vanished on the server is deleted here only forever.
+// otherLibrary — not null: the server has another library (foreign) and sync waits; the number of recordings "Send" sends
 data class SyncStatus(val bulkMissing: MutableList<String> = mutableListOf(), val errors: MutableList<String> = mutableListOf(), var changed: Boolean = false,
-    val serverMissing: MutableList<String> = mutableListOf(), var withoutTrash: Boolean = false)
+    val serverMissing: MutableList<String> = mutableListOf(), var withoutTrash: Boolean = false,
+    var otherLibrary: Int? = null, var foreign: String = "")
 
 class SyncException(message: String) : IOException(message)
 

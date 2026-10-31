@@ -56,6 +56,11 @@ class SyncController(
         if (selected() != shownConnection) SyncStatus(errors = mutableListOf(tr("The sync server changed; refresh the list")))
         else engine.resolveBulk(ids, restore, forever)
     }
+    /** "Send" to the other library [library] the list asked about. */
+    suspend fun sendToLibrary(library: String) = cycle {
+        if (selected() != shownConnection) SyncStatus(errors = mutableListOf(tr("The sync server changed; refresh the list")))
+        else engine.sendToLibrary(library)
+    }
     private suspend fun cycle(action: suspend () -> SyncStatus) = lock.withLock {
         val connection = selected()
         val result = try { prepare(); action() } catch (e: IOException) {

@@ -107,12 +107,13 @@ class LibrarySyncTest {
         val expectedRecord = wire.decodeFromJsonElement(Manifest.serializer(), fixture.getValue("manifest")).records.single()
         library.records[create.id] = Remote(create.path, create.files.toMutableMap(), expectedRecord.tag)
         library.sections += "Работа"
+        val expected = wire.decodeFromString(Checkpoint.serializer(), resource("sync-checkpoint-v1.json")).copy(server = selected!!.url)
+        library.number = expected.library
         ok()
         val otherRoot = temp.newFolder("other")
         val otherState = File(temp.root, "other.json")
         val other = LibrarySync(otherRoot, otherState, { selected }, { emptySet() }, { fail("unexpected trash") }, { LibraryClient(it, http) })
         assertTrue(runBlocking { other.runOnce() }.errors.isEmpty())
-        val expected = wire.decodeFromString(Checkpoint.serializer(), resource("sync-checkpoint-v1.json")).copy(server = selected!!.url)
         assertEquals(expected, loadCheckpoint(checkpoint))
         assertEquals(expected, loadCheckpoint(otherState))
         library.requests.clear()
@@ -1153,6 +1154,90 @@ class LibrarySyncTest {
         assertEquals("server", File(root, "z-later/transcript.txt").readText())
     }
 
+    /** a and b synced with library L1; then the server at the same address lost a and got c, this phone lost b and got d, and the server answers L2. */
+    private fun otherLibrary(): Set<String> {
+        library.number = "L1"
+        val (_, aid) = synced("a")
+        val (b, bid) = synced("b")
+        library.records.remove(aid)
+        library.add("c")
+        assertTrue(b.deleteRecursively())
+        recording(root, "d")
+        library.number = "L2"
+        library.requests.clear()
+        return setOf(aid, bid)
+    }
+    private fun serverPaths() = library.records.values.map { it.path }.sorted()
+    private fun writes() = library.requests.filter { it.method != "GET" }
+
+    @Test fun anotherLibraryAtTheSameAddressChangesNothingUntilTheAnswer() {
+        val known = otherLibrary()
+        repeat(2) {
+            val result = ok()
+            assertFalse(result.changed)
+            assertEquals(2 to "L2", result.otherLibrary to result.foreign) // a and d are here
+        }
+        assertEquals(emptyList<RecordedRequest>(), writes())
+        assertEquals(listOf("a", "d"), folders()); assertEquals(listOf("b", "c"), serverPaths())
+        assertTrue(trashed.isEmpty())
+        val state = loadCheckpoint(checkpoint)
+        assertEquals("L1" to "L2", state.library to state.foreign)
+        assertEquals(known, state.records.keys)
+
+        library.number = "L1" // the own library again: the usual rules
+        assertNull(ok().otherLibrary)
+        assertEquals(listOf("c", "d"), folders()); assertEquals(listOf("c", "d"), serverPaths())
+        assertEquals(1, trashed.size)
+        assertEquals("L1" to "", loadCheckpoint(checkpoint).let { it.library to it.foreign })
+    }
+
+    @Test fun sendToAnotherLibrarySyncsLikeANewServer() {
+        otherLibrary()
+        ok()
+        library.number = "L3" // the server changed again before the answer
+        library.requests.clear()
+        val stale = runBlocking { engine().sendToLibrary("L2") }
+        assertTrue(stale.errors.isNotEmpty()); assertFalse(stale.changed)
+        assertEquals(emptyList<RecordedRequest>(), writes())
+        assertEquals(listOf("a", "d"), folders()); assertEquals(listOf("b", "c"), serverPaths())
+        assertEquals("L1" to "L2", loadCheckpoint(checkpoint).let { it.library to it.foreign })
+
+        val asked = ok()
+        assertEquals(2 to "L3", asked.otherLibrary to asked.foreign)
+        val result = runBlocking { engine().sendToLibrary("L3") }
+        assertEquals(emptyList<String>(), result.errors)
+        assertTrue(result.changed); assertNull(result.otherLibrary)
+        assertEquals(listOf("a", "b", "c", "d"), folders()); assertEquals(listOf("a", "b", "c", "d"), serverPaths())
+        assertTrue(trashed.isEmpty())
+        val state = loadCheckpoint(checkpoint)
+        assertEquals("L3" to "", state.library to state.foreign)
+        assertEquals(4, state.records.size)
+        assertFalse(ok().changed)
+    }
+
+    @Test fun sendWithoutAQuestionChangesNothing() {
+        library.number = "L1"
+        synced("a")
+        val before = checkpoint.readBytes()
+        library.requests.clear()
+        assertTrue(runBlocking { engine().sendToLibrary("L1") }.errors.isNotEmpty())
+        assertEquals(emptyList<RecordedRequest>(), writes())
+        assertArrayEquals(before, checkpoint.readBytes())
+    }
+
+    @Test fun aLibraryChangedDuringTheSyncStopsBeforeSections() {
+        library.number = "L1"
+        synced("a")
+        File(root, "Новый").mkdir()
+        var lists = 0
+        library.after = { request, response ->
+            if (request.method == "GET" && request.url.pathSegments.size == 2 && ++lists == 1) library.number = "L2"
+            response
+        }
+        assertTrue(run().errors.isNotEmpty())
+        assertFalse("Новый" in library.sections)
+    }
+
     /** Deletions, copies and busy recordings: the same decisions as the desktop (shared fixture sync-decisions-v1). */
     @Test fun sharedSyncDecisionsMatchTheDesktopEngine() {
         val cases = Json.parseToJsonElement(resource("sync-decisions-v1.json")).jsonObject.getValue("cases").jsonArray.map { it.jsonObject }
@@ -1163,6 +1248,7 @@ class LibrarySyncTest {
             root = temp.newFolder("decisions-$i")
             checkpoint = File(temp.newFolder("decisions-state-$i"), "sync.json")
             library.records.clear(); library.sections.clear(); busy.clear(); library.before = { null }
+            library.number = case["library"]?.jsonPrimitive?.content ?: OWN_LIBRARY
             val ids = strings("synced").associateWith { synced(it).second }
             val names = ids.entries.associate { (path, id) -> id to path }
             pairs("copied").forEach { (copy, source) -> File(root, source).copyRecursively(File(root, copy)) }
@@ -1174,6 +1260,7 @@ class LibrarySyncTest {
             pairs("server_renamed").forEach { (from, to) -> remote(ids.getValue(from)).path = to }
             if (case["checkpoint_lost"]?.jsonPrimitive?.boolean == true) assertTrue(checkpoint.delete())
             strings("busy").forEach { busy += ids.getValue(it) }
+            case["server_library"]?.let { library.number = it.jsonPrimitive.content }
             if (case["server_unavailable"]?.jsonPrimitive?.boolean == true) library.before = { response(503) }
             val unreadable = case["root_unreadable"]?.jsonPrimitive?.boolean == true
             val rights = if (unreadable) Files.getPosixFilePermissions(root.toPath()) else null
@@ -1194,6 +1281,10 @@ class LibrarySyncTest {
             assertEquals(name, strings("local").sorted(), local.sorted().toList())
             assertEquals(name, pairs("server"), library.records.entries.associate { (id, remote) -> remote.path to (names[id] ?: "new") })
             assertEquals(name, strings("trashed").sorted(), moved.sorted())
+            assertEquals(name, case["other_library"]?.jsonPrimitive?.content?.toInt(), status.otherLibrary)
+            val state = loadCheckpoint(checkpoint)
+            assertEquals(name, case["remembered"]?.jsonPrimitive?.content ?: state.library, state.library)
+            assertEquals(name, case["foreign"]?.jsonPrimitive?.content ?: "", state.foreign)
         }
     }
 }
@@ -1210,6 +1301,7 @@ internal class Remote(var path: String, val files: MutableMap<FileName, FileBody
 internal class TestLibrary : Dispatcher() {
     val records = linkedMapOf<String, Remote>()
     val sections = linkedSetOf<String>()
+    var number = OWN_LIBRARY // the library number in the list of recordings; empty — a 0.3 server
     val requests = mutableListOf<RecordedRequest>()
     var before: (RecordedRequest) -> MockResponse? = { null }
     var after: (RecordedRequest, MockResponse) -> MockResponse = { _, response -> response }
@@ -1229,7 +1321,7 @@ internal class TestLibrary : Dispatcher() {
     private fun handle(req: RecordedRequest): MockResponse {
         val url = req.url
         val parts = url.pathSegments.drop(2)
-        if (parts.isEmpty()) return json(wire.encodeToString(Manifest.serializer(), Manifest(records.map { (id, record) -> record.record(id) }, sections.sorted())))
+        if (parts.isEmpty()) return json(wire.encodeToString(Manifest.serializer(), Manifest(records.map { (id, record) -> record.record(id) }, sections.sorted(), number)))
         if (parts[0] == "sections") {
             val path = url.queryParameter("path")!!
             if (req.method == "DELETE") {
@@ -1274,6 +1366,7 @@ internal class TestLibrary : Dispatcher() {
         return json(wire.encodeToString(Stamp.serializer(), remote.record(id).files.getValue(name)))
     }
 }
+internal const val OWN_LIBRARY = "0a1b2c3d4e5f6071"
 internal fun response(code: Int) = MockResponse.Builder().code(code).build()
 internal fun json(body: String) = MockResponse.Builder().body(body).addHeader("Content-Type", "application/json").build()
 internal fun dropped() = MockResponse.Builder().onResponseStart(SocketEffect.CloseSocket()).build()

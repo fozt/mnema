@@ -162,7 +162,8 @@ class AudioCleanupTest {
             }
             val synced = case["synced"] as? JsonObject
             val server = case.getValue("server").jsonPrimitive.content.let { if (it == "selected") SELECTED else it }
-            val checkpoint = if (synced == null) Checkpoint(server = server) else Checkpoint(server = server, records = mapOf(id to Record(
+            val foreign = case["foreign"]?.jsonPrimitive?.content ?: ""
+            val checkpoint = if (synced == null) Checkpoint(server = server, foreign = foreign) else Checkpoint(server = server, foreign = foreign, records = mapOf(id to Record(
                 id, folder.name, synced.entries.associate { (file, text) ->
                     FileName.entries.single { it.fileName == file } to Stamp(sha256(text.jsonPrimitive.content.toByteArray()), 0)
                 }, "")))

@@ -33,9 +33,9 @@ fun saveCheckpoint(file: File, state: Checkpoint) {
     atomicReplace(file, (wire.encodeToString(Checkpoint.serializer(), state) + "\n").toByteArray(), private = true)
 }
 
-/** The folder's transcript and summary match the last sync with [server]: the audio can go, the texts stay there. */
+/** The folder's transcript and summary match the last sync with [server], and its library is still there: the audio can go, the texts stay there. */
 internal fun textsOnServer(root: File, dir: File, state: Checkpoint, server: String): Boolean {
-    if (state.server != server) return false
+    if (state.server != server || state.foreign.isNotEmpty()) return false
     val base = root.absoluteFile.normalize()
     val local = try { readRecord(base, dir.absoluteFile.normalize().relativeTo(base).invariantSeparatorsPath) }
         catch (_: IOException) { return false }
