@@ -1,5 +1,5 @@
-"""Cloud model providers: key check and the key's model list (`mnema model` and the Mac model
-window), model descriptions with limits, limit reset time, litellm names.
+"""Cloud model providers: key check and the key's model list (the model window and the
+server's /api/model*), model descriptions with limits, limit reset time, litellm names.
 
 Only GET requests to provider addresses, the key in a header, never in the URL; no generation
 requests here. One httpx client, http(): tests substitute TRANSPORT (httpx.MockTransport), and
@@ -38,7 +38,7 @@ TITLES: dict[Provider, str] = {
     Provider.OPENROUTER: "OpenRouter",
     Provider.GROQ: "Groq",
 }
-# recommended model (`mnema model` and the model window): if the key lists it, else the first
+# recommended model (the model window, /api/model/key): if the key lists it, else the first
 _RECOMMENDED: dict[Provider, str] = {
     Provider.GEMINI: "gemini-flash-latest",
     Provider.DEEPSEEK: "deepseek-chat",
@@ -274,9 +274,9 @@ def key_problem(provider: Provider, key: str) -> str:
 
 
 def check_key(provider: Provider, key: str, *, timeout: float = 10.0) -> list[ModelInfo]:
-    """The "Key" step of `mnema model` and the model window: the key is hidden in the log first,
-    then key_problem, then key_models. A refusal is a MediaError for the user: key_problem or
-    the provider's reason, capitalized."""
+    """The "Key" step of the model window (here or /api/model/key): the key is hidden in the
+    log first, then key_problem, then key_models. A refusal is a MediaError for the user:
+    key_problem or the provider's reason, capitalized."""
     from ..core.base import MediaError
     from .errors import human_sentence
     from .redact import add_secret
@@ -293,7 +293,7 @@ def check_key(provider: Provider, key: str, *, timeout: float = 10.0) -> list[Mo
 
 
 def recommended(provider: Provider, models: list[ModelInfo]) -> str | None:
-    """The model for Enter in `mnema model` and preselected in the model window: Gemini
+    """The model preselected in the model window: Gemini
     gemini-flash-latest, DeepSeek deepseek-chat, OpenRouter the first free Qwen; otherwise the
     first listed; with no list, qwen-plus for Qwen and None for the rest."""
     ids = [m.id for m in models]

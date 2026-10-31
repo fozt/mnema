@@ -213,6 +213,67 @@ def test_cloud_recognition_key_reaches_the_process_through_the_pipe(
     assert "sk-proj-fixture-key-for-worker" not in " ".join(subprocess_engine[0].process.args)
 
 
+_CLOUD_STUBS = {
+    "litellm.py": """
+suppress_debug_info = False
+def transcription(**kw):
+    return {"text": "услышано с ключом " + kw["api_key"]}
+""",
+    "silero_vad.py": """
+def load_silero_vad():
+    return object()
+def get_speech_timestamps(audio, model, **kw):
+    return [{"start": 0, "end": 16000}]
+""",
+    "torch.py": """
+import numpy
+def get_num_threads():
+    return 1
+def set_num_threads(n):
+    pass
+from_numpy = numpy.asarray
+""",
+}
+
+
+def test_real_worker_gives_the_key_from_the_pipe_to_the_cloud_engine(monkeypatch, tmp_path):
+    """The real recognition process: the key sent with the job is the one the OpenAI request
+    carries. The child's boundaries are stubs: litellm, silero-vad, torch and ffprobe."""
+    import wave
+
+    from mnema import config
+    from mnema.core import transcribe
+    from mnema.core.backends import CloudBackend
+
+    stubs = tmp_path / "stubs"
+    stubs.mkdir()
+    for name, code in _CLOUD_STUBS.items():
+        (stubs / name).write_text(code)
+    ffprobe = tmp_path / "ffprobe"
+    ffprobe.write_text(
+        '#!/bin/sh\ncase "$*" in *"select_streams a"*) echo pcm_s16le;; '
+        "*format=duration*) echo 1.0;; esac\n"
+    )
+    ffprobe.chmod(0o755)
+    monkeypatch.setenv("MNEMA_FFPROBE", str(ffprobe))
+    monkeypatch.setenv(
+        "PYTHONPATH", os.pathsep.join(filter(None, (str(stubs), os.getenv("PYTHONPATH"))))
+    )
+    monkeypatch.setattr(CloudBackend, "available", lambda self: True)  # installed in the child
+    env = config.user_env_file()
+    env.parent.mkdir(parents=True, exist_ok=True)
+    env.write_text("MNEMA_ASR_API_KEY=sk-proj-the-users-own-key\n")
+    track = tmp_path / "mic.wav"
+    with wave.open(str(track), "wb") as out:
+        out.setnchannels(1)
+        out.setsampwidth(2)
+        out.setframerate(16000)
+        out.writeframes(b"\x00\x10" * 16000)
+    result = transcribe(track, backend="openai/gpt-4o-transcribe", lang="ru")
+    assert result.text == "услышано с ключом sk-proj-the-users-own-key"
+    assert result.engine == "openai/gpt-4o-transcribe"
+
+
 def test_real_worker_error_does_not_import_heavy_libraries_in_parent(tmp_path):
     # A new interpreter: other tests may legitimately have imported torch.
     code = """

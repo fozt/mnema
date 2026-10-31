@@ -22,7 +22,7 @@ class PhraseRequest(BaseModel):
 def register_live_translate_routes(app: FastAPI) -> None:
     @app.post("/api/translate/phrase")
     def translate_phrase(req: PhraseRequest) -> dict:
-        from ..live.translate import live_translate_available, make_live_translator
+        from ..live.translate import deepl_reason, live_translate_available, make_live_translator
 
         if not live_translate_available():
             raise HTTPException(400, no_model())
@@ -31,8 +31,6 @@ def register_live_translate_routes(app: FastAPI) -> None:
             # a callback, as for a live stream: one retry, the phrase does not wait a minute
             text = translator.push(req.text, on_partial=lambda _text: None)
         except Exception as exc:  # noqa: BLE001 - the provider's refusal in the user's words
-            reason = _("DeepL did not answer") if isinstance(exc, httpx.HTTPError) else None
-            raise HTTPException(
-                502, _("Translation failed: {reason}", reason=reason or human_reason(exc))
-            ) from exc
+            reason = deepl_reason(exc) if isinstance(exc, httpx.HTTPError) else human_reason(exc)
+            raise HTTPException(502, _("Translation failed: {reason}", reason=reason)) from exc
         return {"text": text}

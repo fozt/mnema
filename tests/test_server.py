@@ -53,7 +53,7 @@ def test_cloud_operations_require_server_model(tmp_path, monkeypatch):
     app.state.operations = {"cloud": spec.model_copy(update={"requires_model": True})}
     response = TestClient(app).post("/api/jobs", json={"op": "cloud", "path": "a.mp3", "key": "k"})
     assert response.status_code == 400
-    assert response.json()["detail"] == "На сервере не настроена модель"
+    assert response.json()["detail"] == "Не настроена модель. Выберите её в настройках Mnema на Mac"
     assert app.state.store.find_by_key("k") is None
 
 
@@ -450,7 +450,7 @@ def test_server_answers_in_english_for_an_english_client(tmp_path, monkeypatch):
     details = [response.json()["detail"] for response in texts]
     assert details == [
         "Unknown operation: nope",
-        "No model is configured on the server",
+        "No model configured. Choose one in Mnema settings on the Mac",
         "Job not found",
         "Upload not found",
         "Only a job result can be downloaded",

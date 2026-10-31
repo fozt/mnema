@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 
 import httpx
+import pytest
 
 from mnema.live.translate import LiveTranslator
 from mnema.llm import claude
@@ -298,13 +299,23 @@ def test_deepl_down_falls_back_to_her_model(tmp_path, monkeypatch) -> None:
     assert len(deepl.seen) == 2 and [c["key"] for c in model] == ["sk-anna"]
 
 
-def test_deepl_only_refusal_is_not_retried_and_says_deepl(tmp_path, monkeypatch) -> None:
-    deepl = DeepL(monkeypatch, status=456, fail=1)
+@pytest.mark.parametrize(
+    ("status", "fail", "asked", "reason"),
+    [
+        (456, 1, 1, "лимит знаков DeepL исчерпан"),
+        (403, 1, 1, "DeepL не принял ключ"),
+        (400, 1, 1, "DeepL ответил ошибкой 400"),
+        (503, 2, 2, "DeepL не ответил"),
+    ],
+)
+def test_deepl_only_refusal_says_why_in_words(tmp_path, monkeypatch, status, fail, asked, reason):
+    """Without a model DeepL's refusal is the answer: its reason, a retry only when it may help."""
+    deepl = DeepL(monkeypatch, status=status, fail=fail)
     client = _server(tmp_path, monkeypatch, f"DEEPL_API_KEY={ANNA_DEEPL}")
     answer = client.post("/api/translate/phrase", json=PHRASE)
     assert answer.status_code == 502
-    assert answer.json()["detail"] == "Перевод не получился: DeepL не ответил"
-    assert len(deepl.seen) == 1
+    assert answer.json()["detail"] == f"Перевод не получился: {reason}"
+    assert len(deepl.seen) == asked
 
 
 def test_no_deepl_key_and_no_model_is_no_live_translation(tmp_path, monkeypatch) -> None:

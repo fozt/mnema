@@ -48,12 +48,10 @@ SOURCE_NAMES: Mapping[str, str] = _Translated({"mic": "Microphone", "system": "S
 
 
 class Place(BaseModel):
-    """Where the processing runs: the server name its owner gave (empty: none) and the
-    recording's time zone."""
+    """Where the processing runs: the recording's time zone."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True)
 
-    node: str = ""
     tz: tzinfo | None = None
 
 
@@ -309,6 +307,10 @@ def recording_failed(reason: str) -> Remark:
 def node_asr_reason(error: Exception) -> str:
     """Why recognition failed: a cloud refusal in the user's words, otherwise only where it
     failed (the engine's text may point to a terminal)."""
+    from ..core.backends import NoCloudKey
+
+    if isinstance(error, NoCloudKey):
+        return str(error)
     if classify(error) is not ErrorKind.OTHER:
         return human_reason(error)
     return _("error on the Mac") if base.processed_here() else _("error on the server")

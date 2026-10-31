@@ -215,7 +215,9 @@ def test_node_summary_uses_only_the_node_model(monkeypatch, tmp_path, model):
     if not model:
         from mnema.core.base import MediaError
 
-        with pytest.raises(MediaError, match="^На сервере не настроена модель$"):
+        with pytest.raises(
+            MediaError, match=r"^Не настроена модель\. Выберите её в настройках Mnema на Mac$"
+        ):
             summarize_on_node(folder, Connection(url="http://node:8123"))
         assert calls == []
         # refused before work: no work file with a request, the recording as it was

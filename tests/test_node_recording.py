@@ -156,7 +156,7 @@ def test_recording_result_date_part_progress_and_cleanup(tmp_path, monkeypatch, 
     assert run["part"] == {"start": 10, "end": 95}
     assert len(calls) == 1
     _clean(tmp_path)
-    assert remarks.PLACE.get().node == ""
+    assert remarks.PLACE.get() == remarks.Place()
 
 
 def test_recording_progress_is_monotonic_and_names_both_tracks(tmp_path, monkeypatch):
@@ -181,7 +181,7 @@ def test_recording_progress_is_monotonic_and_names_both_tracks(tmp_path, monkeyp
         bad in m for m in messages for bad in ("LLM", "VAD", "whisperX", "GigaAM", "Parakeet", "(")
     )
     _clean(tmp_path)
-    assert remarks.PLACE.get().node == ""
+    assert remarks.PLACE.get() == remarks.Place()
 
 
 def test_recording_without_model_and_recording_notices(tmp_path, monkeypatch):
@@ -356,7 +356,7 @@ def test_summary_without_model_refused_before_claim(tmp_path, monkeypatch):
         },
     )
     assert response.status_code == 400
-    assert "На сервере не настроена модель" in response.text
+    assert "Не настроена модель. Выберите её в настройках Mnema на Mac" in response.text
     app.state.uploads.claim(path)
     app.state.uploads.release(path, delete=False)
 

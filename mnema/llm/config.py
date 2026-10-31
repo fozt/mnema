@@ -155,23 +155,6 @@ class LLMSettings(BaseSettings):
             return None
         return self.api_key
 
-    def asr_key(self, provider: Provider) -> str | None:
-        """The provider's cloud recognition key: its own MNEMA_API_KEY (provider_key), otherwise
-        MNEMA_ASR_API_KEY if it looks like this provider's key: Groq keys always start with
-        "gsk_", an OpenAI key is any key not of another provider."""
-        from .providers import Provider, key_looks_like
-
-        own = self.provider_key(provider)
-        if own is not None:
-            return own
-        secret = self.asr_api_key
-        if not secret:
-            return None
-        looks = key_looks_like(secret)
-        if provider == Provider.GROQ:
-            return secret if looks == Provider.GROQ else None
-        return secret if looks in (None, provider) else None
-
 
 def user_settings(user: str) -> LLMSettings:
     """The model and keys of a server user's file in any mode (the model API, `users`)."""

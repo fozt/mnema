@@ -282,6 +282,7 @@ def installer(system, *args, answer: str | None = None):
             capture_output=True,
             text=True,
             stdin=terminal,
+            timeout=60,
         )
     finally:
         os.close(terminal)
@@ -418,7 +419,6 @@ def test_server_runs_in_docker_and_writes_only_its_folder(system):
     assert "http://203.0.113.7:43117#invite=one-time-code" in done.stdout
     assert "Сервер принимает подключения на порту 43117." in done.stdout
     assert "Модель задаётся в приложении: Настройки → Модель" in done.stdout
-    assert "model" not in done.stdout.split("Команды сервера")[1]
     assert f"Команды сервера, в папке {root}:" in done.stdout
     assert "./mnema.sh logs" in done.stdout
 
@@ -604,6 +604,7 @@ def host_command(
             stdout=terminal,
             stderr=subprocess.PIPE,
             text=True,
+            timeout=60,
         )
     finally:
         os.close(terminal)

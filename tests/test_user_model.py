@@ -226,7 +226,7 @@ def _hint(kind: ErrorKind | None, *, cloud: Cloud = Cloud.FAILED) -> str:
 @pytest.mark.parametrize("name", ["anna", users.OWNER, None])
 def test_every_user_fixes_her_model_in_the_mac_settings(name) -> None:
     users.set_strict(name is not None)
-    with users.as_user(name), remarks.at_place(remarks.Place(node="Дом")):
+    with users.as_user(name):
         assert _hint(ErrorKind.INVALID_KEY).startswith(
             "Замените ключ модели в настройках Mnema на Mac"
         )

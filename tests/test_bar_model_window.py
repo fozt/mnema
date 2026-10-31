@@ -1,5 +1,5 @@
 """The "Summary model" window on the Mac (bar/forms.ModelFlow through BarRuntime.handle and window
-events): the steps and texts of `mnema model`; the key lives only in the window field.
+events): its steps, here or on the server; the key lives only in the window field.
 
 Mocked boundaries: the provider network (providers.TRANSPORT), the server (MnemaClient's
 transport) and litellm.completion.
@@ -482,3 +482,31 @@ def test_deepl_key_is_set_on_the_server_tab(connected) -> None:
     assert "Живой перевод" not in [
         f.title for t in alone.tabs for s in t.sections for f in s.fields
     ]
+
+
+def test_a_key_typed_for_the_server_is_hidden_in_the_log_before_it_is_sent(connected) -> None:
+    """The server checks the key, yet the Mac's log already hides it: a refusal that quotes the
+    key never shows it whole."""
+    from mnema.llm import redact
+
+    rt, platform, server = connected
+    typed = "plain-" + "k" * 24 + "Mine"
+    rt.handle("model_setup")
+    platform.next()
+    platform.submit(provider="gemini")
+    refused = platform.submit(key=typed)
+    assert refused is not None and refused.error == "Ключ модели не подошёл"
+    assert ("POST", "/api/model/key", {"provider": "gemini", "key": typed}) in server.requests
+    assert typed not in redact.redact(f"the server refused {typed}")
+
+
+def test_deepl_key_without_a_server_is_refused_and_saved_nowhere(monkeypatch, tmp_path) -> None:
+    """DeepL translates only on the server: without one the window refuses and asks nobody."""
+    from mnema.bar.forms import KeyFlow
+
+    monkeypatch.setattr(
+        providers, "TRANSPORT", httpx.MockTransport(lambda r: pytest.fail("no network"))
+    )
+    refused = KeyFlow("deepl", None).submit({"key": DEEPL}, force=False)
+    assert refused is not None and refused.error == "Сервер не подключён"
+    assert not user_env_file().exists() or not dotenv_values(user_env_file())

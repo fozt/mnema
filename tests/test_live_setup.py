@@ -1081,7 +1081,10 @@ def test_cloud_speech_model_without_key_is_a_remark(monkeypatch, tmp_path) -> No
     _write_wav(prepared)
     result, _ = finalize_live(prepared, _live_tracks(), retitle=False)
     [remark] = [r for r in result.remarks if r.step == Step.ASR]
-    assert remark.cause == "Не удалось распознать дорожку «Микрофон»: сбой на сервере"
+    assert remark.cause == (
+        "Не удалось распознать дорожку «Микрофон»: "
+        "Нет ключа OpenAI для распознавания. Задайте его в настройках Mnema на Mac"
+    )
 
 
 def test_reprocessing_preserves_old_summary(monkeypatch, tmp_path):

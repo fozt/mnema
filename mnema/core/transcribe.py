@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from ..i18n import _
-from .backends import AUTO, NO_CLOUD_KEY, CloudBackend, engine, is_cloud, select_backend
+from .backends import AUTO, CloudBackend, NoCloudKey, engine, is_cloud, select_backend
 from .base import MediaError, Progress, noop
 from .models import Transcript
 from .probe import probe
@@ -36,7 +36,7 @@ def transcribe(
 
         payload["key"] = LLMSettings().asr_api_key
         if not payload["key"]:
-            raise MediaError(_(NO_CLOUD_KEY))
+            raise NoCloudKey
     if backend != AUTO and not select_backend(backend, model=model).available():
         found = engine(backend)
         title = found.title if found is not None else backend

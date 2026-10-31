@@ -46,6 +46,15 @@ def _isolated_server_root(monkeypatch, tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def _unknown_free_memory(monkeypatch):
+    """The server queue never reads this machine's /proc/meminfo: free memory is unknown and
+    holds no job; queue tests give their own."""
+    from mnema import job_queue
+
+    monkeypatch.setattr(job_queue, "available_memory", lambda: None)
+
+
+@pytest.fixture(autouse=True)
 def _client_platform(monkeypatch):
     """The default platform is a server client (CI on Linux, the local gate on a Mac): tests of
     the standalone Mac set base.STANDALONE = True themselves."""

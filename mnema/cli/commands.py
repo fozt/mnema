@@ -87,7 +87,7 @@ def _op_once(
 
 def _at_node(command):
     """Where the command processes, by the app's rule (node.selected_processing): runner is the
-    selected server (Connection) or None for this computer."""
+    selected server (Connection) or None for this computer; explicit_local is --local."""
 
     @functools.wraps(command)
     def run(args):
@@ -96,9 +96,15 @@ def _at_node(command):
         selected = copy.copy(args)
         selected.runner = selected_processing(args.runner, local=args.local)
         selected.local = selected.runner is None
+        selected.explicit_local = bool(args.local)
         return command(selected)
 
     return run
+
+
+def _summary_place(args) -> dict:
+    """--local summarizes on this computer too, not with the user's model on the server."""
+    return {"summary_at": None} if args.explicit_local else {}
 
 
 def _cookies_for(args, sources) -> str | None:
@@ -782,6 +788,7 @@ def _capture_live(args, prepared) -> None:
                 connection=args.runner,
                 retitle=not args.output and not no_save,
                 on=on,
+                **_summary_place(args),
             ),
             total=1.0,
             live_preview=True,
@@ -896,7 +903,9 @@ def cmd_finish(args) -> None:
     try:
         result, full = _cli.run_streaming(
             _("Processing recording"),
-            lambda on: recover_on_node(base, config, args.runner, start=start, end=end, on=on),
+            lambda on: recover_on_node(
+                base, config, args.runner, start=start, end=end, on=on, **_summary_place(args)
+            ),
             total=1.0,
         )
     except KeyboardInterrupt as e:

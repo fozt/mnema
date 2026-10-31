@@ -12,6 +12,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from .. import core as mc
+from ..core.backends import is_cloud
 from ..core.settings import asr_thread_budget, job_threads
 from ..i18n import _, current, using
 from ..jobs import (
@@ -122,12 +123,6 @@ def _is_short(root: Path, path: str | None) -> bool:
     return 0.0 < (duration or 0.0) <= SHORT_JOB_MAX_S
 
 
-def _cloud(params: dict) -> bool:
-    """The job recognizes in the cloud: its own queue lane, no engine in memory."""
-    choice = params.get("asr") or params.get("backend") or ""
-    return isinstance(choice, str) and choice.startswith("openai/")
-
-
 def _remove_outputs(app: FastAPI, job_id: str) -> None:
     outputs = app.state.root / "outputs"
     folder = outputs / job_id
@@ -201,7 +196,8 @@ def register_job_routes(app: FastAPI) -> None:
         # ready text gets its own queue lane, without ffprobe
         text = spec.input_kind == InputKind.TEXT and Path(req.path).suffix.lower() in TEXT_SUFFIXES
         inputs = tracks or {None: req.path}
-        cloud = not text and _cloud(params)
+        # cloud recognition: its own queue lane, no engine in memory
+        cloud = not text and is_cloud(params.get("asr") or params.get("backend"))
         short = (
             not text
             and not cloud

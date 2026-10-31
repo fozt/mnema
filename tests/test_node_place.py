@@ -41,7 +41,7 @@ def test_model_failure_hint_names_where_to_fix_it(monkeypatch, kind, here) -> No
     wherever the recording is processed, and the hint has no terminal commands."""
     monkeypatch.setattr(base, "STANDALONE", True)  # on a Mac too: the place decides
     note = LightNote(engine="none", cloud=Cloud.FAILED, kind=kind, cloud_detail="ошибка модели")
-    with _at(here), remarks.at_place(remarks.Place(node="Домашний")):
+    with _at(here):
         notice = remarks.light(Step.SUMMARY, note)
     assert notice is not None
     retry = "Когда модель заработает, нажмите «Составить пересказ» в меню записи"
@@ -53,7 +53,7 @@ def test_model_failure_hint_names_where_to_fix_it(monkeypatch, kind, here) -> No
 @pytest.mark.parametrize("here", [True, False])
 def test_missing_model_says_where_to_set_it(monkeypatch, here) -> None:
     monkeypatch.setattr(base, "STANDALONE", True)
-    with _at(here), remarks.at_place(remarks.Place(node="Домашний")):
+    with _at(here):
         notice = remarks.light(Step.SUMMARY, LightNote(engine="none", cloud=Cloud.NOT_SET))
         without = remarks.node_no_model()
     assert notice is not None
@@ -66,13 +66,14 @@ def test_missing_model_says_where_to_set_it(monkeypatch, here) -> None:
 
 def test_place_resets_after_nested_context_and_cancellation(tmp_path) -> None:
     assert setup.finish_command(tmp_path).startswith("mnema finish ")  # terminal only
-    with remarks.at_place(remarks.Place(node="Внешний")):
+    outer, inner = timezone(timedelta(hours=3)), timezone(timedelta(hours=5))
+    with remarks.at_place(remarks.Place(tz=outer)):
         with pytest.raises(setup.FinalizeCancelled):
-            with remarks.at_place(remarks.Place(node="Внутренний")):
-                assert remarks.PLACE.get().node == "Внутренний"
+            with remarks.at_place(remarks.Place(tz=inner)):
+                assert remarks.PLACE.get().tz == inner
                 raise setup.FinalizeCancelled
-        assert remarks.PLACE.get().node == "Внешний"
-    assert remarks.PLACE.get().node == ""
+        assert remarks.PLACE.get().tz == outer
+    assert remarks.PLACE.get().tz is None
 
 
 def test_place_isolated_between_threads() -> None:
@@ -138,21 +139,19 @@ def test_recover_keeps_recording_error_in_cancelled_history(monkeypatch, tmp_pat
         if message == "Распознаю микрофон…":
             raise setup.FinalizeCancelled
 
-    with remarks.at_place(remarks.Place(node="Сервер")):
-        with pytest.raises(setup.FinalizeCancelled):
-            setup.recover_session(
-                tmp_path,
-                setup.LiveConfig(lang="ru", summary=False, mix_audio=False),
-                retitle=False,
-                recording_error="звук оборвался",
-                on=on,
-            )
+    with pytest.raises(setup.FinalizeCancelled):
+        setup.recover_session(
+            tmp_path,
+            setup.LiveConfig(lang="ru", summary=False, mix_audio=False),
+            retitle=False,
+            recording_error="звук оборвался",
+            on=on,
+        )
     runs = json.loads((tmp_path / meta.META_FILE).read_text(encoding="utf-8"))["runs"]
     saved = meta.Run.model_validate(runs[-1])
     assert saved.notes[0].step is Step.RECORD
     assert "звук оборвался" in saved.remarks[0]
     assert saved.status == "stopped"
-    assert remarks.PLACE.get().node == ""
 
 
 @pytest.mark.parametrize(("here", "where"), [(False, "сервере"), (True, "Mac")])
@@ -168,7 +167,7 @@ def test_node_asr_failure_hides_paths_and_names_track(
 
     monkeypatch.setattr(setup, "dispatch", dispatch)
     messages = []
-    with _at(here), remarks.at_place(remarks.Place(node="Сервер")):
+    with _at(here):
         result, _ = setup.recover_session(
             tmp_path,
             setup.LiveConfig(summary=False, mix_audio=False),
@@ -192,7 +191,25 @@ def test_node_asr_error_preserves_known_provider_reason() -> None:
         status_code = 401
 
     error = Refused("Key rejected while processing /srv/x/mic.wav")
-    with remarks.at_place(remarks.Place(node="Сервер")):
-        notice = remarks.asr_failed("mic", error, live_kept=False)
+    notice = remarks.asr_failed("mic", error, live_kept=False)
     assert remarks.node_asr_reason(error) == "ключ модели не подошёл"
     assert "ключ модели не подошёл" in notice.cause and "/srv" not in notice.text
+
+
+@pytest.mark.parametrize("here", [True, False])
+def test_cloud_recognition_without_a_key_says_so_in_the_remark(monkeypatch, tmp_path, here):
+    """The OpenAI key is gone by the time the recording is recognized (removed while it waited):
+    the remark names the missing key, not a failure of the machine."""
+    monkeypatch.delenv("MNEMA_ASR_API_KEY", raising=False)
+    _wav(tmp_path / "mic.wav")
+    with _at(here):
+        result, _ = setup.recover_session(
+            tmp_path,
+            setup.LiveConfig(asr="openai/gpt-4o-transcribe", summary=False, mix_audio=False),
+            retitle=False,
+        )
+    [notice] = [r for r in result.remarks if r.step is Step.ASR]
+    no_key = "Нет ключа OpenAI для распознавания. Задайте его в настройках Mnema на Mac"
+    assert notice.cause == f"Не удалось распознать дорожку «Микрофон»: {no_key}"
+    saved = meta.last(tmp_path)
+    assert saved is not None and saved.tracks["mic"].error == no_key

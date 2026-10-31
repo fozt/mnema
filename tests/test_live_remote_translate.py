@@ -69,7 +69,9 @@ def test_phrase_route_without_node_model_is_clear_error(tmp_path, model, monkeyp
     monkeypatch.delenv("MNEMA_MODEL")
     response = TestClient(create_app(tmp_path)).post("/api/translate/phrase", json=PHRASE)
     assert response.status_code == 400
-    assert response.json()["detail"].startswith("На сервере не настроена модель")
+    assert response.json()["detail"].startswith(
+        "Не настроена модель. Выберите её в настройках Mnema на Mac"
+    )
     assert not model
 
 
