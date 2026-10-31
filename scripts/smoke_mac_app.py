@@ -141,7 +141,7 @@ from packaging.utils import canonicalize_name
 from mnema import extras, node_settings
 from mnema.core import backends
 removed = set(json.loads(sys.argv[1]))
-shipped = [e for e in backends.ENGINES if e.extra in extras.MAC]
+shipped = [e for e in backends.ENGINES if e.extra in extras.MAC and not e.cloud]
 
 def requires(dist, extra=""):
     found = []
