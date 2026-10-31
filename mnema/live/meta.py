@@ -57,6 +57,7 @@ class Run(BaseModel):
     settings: dict[str, Any] = Field(default_factory=dict)
     part: dict[str, float] | None = None  # part of the recording: start, end (s)
     tracks: dict[str, TrackRun] = Field(default_factory=dict)
+    silent: list[str] = Field(default_factory=list)  # tracks without a single sound, not recognized
     summary: LightRun | None = None
     steps: dict[str, float] = Field(default_factory=dict)  # step → seconds
     remarks: list[str] = Field(default_factory=list)

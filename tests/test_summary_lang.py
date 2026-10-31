@@ -68,19 +68,19 @@ def test_summary_request_names_chosen_language_else_conversation_language(
 @pytest.mark.parametrize(
     ("spoken", "summary", "summary_lang", "asked"),
     [
-        ("short", True, "en", "en"),
-        ("short", True, None, "ru"),
-        # The summary failed: no separate title request after the same refusal.
+        # The summary failed: no separate title request after the same refusal, short text too.
+        ("short", True, "en", None),
         ("long", True, "en", None),
+        ("short", False, "en", "ru"),
         ("long", False, "en", "ru"),
     ],
 )
 def test_fallback_title_uses_chosen_language(
     monkeypatch, tmp_path, spoken, summary, summary_lang, asked
 ) -> None:
-    """The fallback title of a short recording (no summary) is in the chosen language too; unset,
-    or summaries off (the choice is then unavailable): the language of the conversation. When the
-    model gave no summary, no separate title is requested (same refusal)."""
+    """With summaries off the title follows the language of the conversation (the choice is then
+    unavailable). When the model gave no summary, no separate title is requested (same
+    refusal), whatever the length."""
     _patch_build(monkeypatch, {})
     text = SPOKEN["ru"] if spoken == "long" else "Привет, это проверка связи."
     _fake_dispatch(

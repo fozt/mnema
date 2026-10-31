@@ -137,9 +137,7 @@ def _remarks_in_english() -> list[remarks.Remark]:
         remarks.recording_failed("disk full"),
         remarks.asr_failed("mic", "no engine", live_kept=True),
         remarks.asr_failed("system", "no engine", live_kept=False),
-        remarks.track_silent("system", "blocked"),
-        remarks.track_silent("system", "none"),
-        remarks.track_silent("mic"),
+        remarks.other_side_blocked(),
         remarks.asr_no_speech("system", live_kept=False),
         remarks.node_no_model(),
         remarks.summary_failed("runner error"),
@@ -177,7 +175,7 @@ def test_remarks_menu_and_details_render_in_english() -> None:
 
 def test_english_remarks_read_as_sentences() -> None:
     with using("en"):
-        silent = remarks.track_silent("system", "blocked")
+        silent = remarks.other_side_blocked()
         key = remarks.light(Step.SUMMARY, _failed(ErrorKind.INVALID_KEY))
         down = remarks.server_down("Home")
         summary = remarks.summary_failed("HTTP 503 from the runner")

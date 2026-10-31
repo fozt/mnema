@@ -69,13 +69,18 @@ def _prepare(base: Path, params: RecordingParams | RecordingSummaryParams) -> No
     meta.set_started(base, params.started.isoformat())
 
 
-def _silent(notes: list[remarks.Remark], params: RecordingParams) -> list[remarks.Remark]:
-    """The server decides a track is silent (track_silent of the pipeline). The phone's reason
-    (silent_reason) only refines the remark about a track the server found silent."""
-    for label, reason in params.silent_reason.items():
-        plain = remarks.track_silent(label)
-        notes = [remarks.track_silent(label, reason) if n == plain else n for n in notes]
-    return notes
+def _silent(run: meta.Run, params: RecordingParams) -> list[remarks.Remark]:
+    """The server decides a track is silent (Run.silent of the pipeline); silence alone is no
+    remark. The phone's reason "blocked" on a track the server found silent is: a call went on
+    and the other side was not recorded."""
+    note = remarks.other_side_blocked()
+    if (
+        params.silent_reason.get("system") != "blocked"
+        or "system" not in run.silent
+        or note in run.notes
+    ):
+        return run.notes
+    return [note, *run.notes]
 
 
 def _result(
@@ -159,7 +164,7 @@ def _result(
     if not summary_only:
         if isinstance(params, RecordingParams):
             run.part = params.part.model_dump() if params.part else None
-            run.notes = _silent(run.notes, params)
+            run.notes = _silent(run, params)
         # a run that asks the model for nothing (the Mac asks the server for it) needs none
         modelled = params.summary or params.retitle is not False or params.translate
         if text and not failed and modelled and not LLMSettings().cloud:

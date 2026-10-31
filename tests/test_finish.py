@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import array
+import json
 import struct
 import wave
 from pathlib import Path
@@ -60,8 +61,8 @@ def seen(monkeypatch) -> list:
         raise RuntimeError("нет LLM")
 
     monkeypatch.setattr(setup_mod, "dispatch", fake)
-    monkeypatch.setattr(setup_mod.claude, "title_ex", lambda *a, **k: ("Созвон", "cloud", None))
-    monkeypatch.setattr(setup_mod.claude, "_stream_text", lambda s, c, **k: c)
+    answer = json.dumps({"title": "Созвон", "about": "Итоги.", "summary": ["Итоги."]})
+    monkeypatch.setattr(setup_mod.claude, "_stream_text", lambda s, c, **k: answer)
     monkeypatch.setattr(cli_pkg, "run_streaming", lambda label, fn, **kw: fn(on=lambda *a: None))
     return got
 

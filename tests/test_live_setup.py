@@ -544,8 +544,8 @@ def test_finalize_progress_monotonic_across_phases(monkeypatch, tmp_path) -> Non
     assert fractions[-1] > 0.99  # finalization takes the bar to the end
     # a step is announced by a message at its start: the panel labels from it, not from the share
     # (the bar used to jump from 74 % to 90 % through a translation the bar does not have). With no
-    # dialog there is no translation and a few words get no summary, so neither is announced
-    assert steps == [_(STEP_MESSAGES[s]) for s in ("asr", "save")]
+    # dialog there is no translation, so it is not announced; a few words get a summary too
+    assert steps == [_(STEP_MESSAGES[s]) for s in ("asr", "summary", "save")]
 
 
 def test_finalize_empty_transcript_no_files_but_base_kept(monkeypatch, tmp_path) -> None:
@@ -606,7 +606,10 @@ def test_finalize_title_cloud_failure_keeps_timestamp_with_note(monkeypatch, tmp
     assert model.text.count(cause) == 1
     assert "Запись названа по времени" in model.text
     assert model.text.count("Пополните счёт у провайдера") == 1
-    assert (model.short, model.short_effect) == ("Закончились деньги на счёте", "без названия")
+    assert (model.short, model.short_effect) == (
+        "Закончились деньги на счёте",
+        "без пересказа, без названия",
+    )
 
 
 def test_finalize_two_tracks_make_recording_mp3(monkeypatch, tmp_path) -> None:
@@ -687,21 +690,28 @@ def test_finalize_summary_whole_text_names_folder_and_writes_summary_md(
     assert result.summary_md is None
 
 
-def test_finalize_short_recording_has_no_summary(monkeypatch, tmp_path) -> None:
-    """A couple of lines get no summary (the model invented "greetings" and a "friendly tone");
-    the title is made the usual way."""
+def test_finalize_short_recording_gets_title_and_summary_in_one_request(
+    monkeypatch, tmp_path
+) -> None:
+    """A couple of lines get the title and summary like any recording: one request to the model,
+    no separate title request."""
     _patch_build(monkeypatch, {})
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
     _fake_dispatch(monkeypatch)  # "Всё обдумано и решено.": one short line
-    monkeypatch.setattr(
-        setup_mod.claude, "title_summary_ex", lambda *a, **k: pytest.fail("слишком коротко")
-    )
-    monkeypatch.setattr(setup_mod.claude, "title_ex", lambda *a, **k: ("Проверка", "cloud", None))
+    systems: list[str] = []
+
+    def answer(system, content):
+        systems.append(system)
+        found = {"title": "Проверка", "about": "Всё решено.", "summary": ["Решили."]}
+        return json.dumps(found, ensure_ascii=False)
+
+    _cloud_model(monkeypatch, answer)
     prepared = build_live(LiveConfig(), base=tmp_path / "2026-09-27_18-33")
     _write_wav(prepared)
     result, _ = finalize_live(prepared, _live_tracks())
-    assert result.summary_md is None
+    assert result.summary_md is not None
+    assert result.summary_md.read_text(encoding="utf-8").startswith("Всё решено.")
     assert result.transcript_txt.parent.name == "2026-09-27_Проверка"
+    assert len(systems) == 1
 
 
 def test_finalize_cloud_failure_with_asr_runner_keeps_client_notes(monkeypatch, tmp_path):

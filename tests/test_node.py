@@ -323,4 +323,5 @@ def test_node_title_failure_is_about_title(monkeypatch, tmp_path, summary):
     )
     assert full and result.summary_md is None
     assert result.base == folder
-    assert [r.step for r in result.remarks] == [Step.TITLE]
+    # with the summary on even a short recording asks for both in one request
+    assert [r.step for r in result.remarks] == [Step.SUMMARY if summary else Step.TITLE]

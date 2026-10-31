@@ -28,7 +28,7 @@ from ..connection import Connection
 # _audio/_persist/_translate are imported up front, not at stop: a `git pull` during a
 # recording would otherwise pair a new persist.py with the old setup.py at finalization.
 from ..core import audio as _audio  # noqa: F401
-from ..core.base import LANG_NAMES, MediaError, Progress, noop, phased, unstamped
+from ..core.base import LANG_NAMES, MediaError, Progress, noop, phased
 from ..core.models import Segment, Transcript
 from ..dispatch import dispatch
 from ..i18n import _
@@ -595,9 +595,10 @@ def _refine_tracks(
             continue  # empty recording: keep the live text
         if _wav_is_silent(wav, on=on_asr):
             # A track without a single sound (system silent all call): ASR would waste minutes.
-            # The processing side decides silence; clients send the tracks as they are.
+            # The processing side decides silence; clients send the tracks as they are. Silence is
+            # normal (nobody spoke there), so it is no remark: only the history keeps it.
             logger.debug("offline pass [%s]: the whole recording is silent, skipping", track.label)
-            warnings.append(_remarks.track_silent(track.label))
+            run.silent.append(track.label)
             continue
         candidates.append((track, wav))
     if not candidates:
@@ -855,21 +856,15 @@ def _finalize_live(
     points: list[str] = []
     about = ""
     refused: LightNote | None = None  # no summary from the model: no title from it either
-    # A couple of lines are not worth a summary (the model invents "greetings" and a
-    # "positive tone"); the title is made the usual way.
-    long = prepared.config.summary and len(unstamped(full)) >= _SUMMARY_MIN_CHARS
     here = cloud_ready
-    least = _SUMMARY_MIN_CHARS if prepared.config.summary else len(unstamped(full)) + 1
-    if here and long:
+    if here and prepared.config.summary:
+        # Any text gets the title and summary in one pass; without a summary, only the title.
         p_title(None, _step(STEP_MESSAGES["summary"]))
-        lang = prepared.config.summary_lang if prepared.config.summary else None
-        # Short text only gets a title (least); without a summary, only the title.
-        summary = summarize_text(full, run, warnings, p_title, lang=lang, min_chars=least)
+        summary = summarize_text(full, run, warnings, p_title, lang=prepared.config.summary_lang)
         logger.info("summary and title: %.0f s", run.steps["summary"])
         points, about = summary.points, summary.about
         title_hint = title_hint or summary.title or None
-        # A title-only request: its refusal is already in the title remark.
-        if summary.engine == "none" and summary.note is not None and len(unstamped(full)) >= least:
+        if summary.engine == "none" and summary.note is not None:
             refused = summary.note
     chosen = chosen_title(user_title(), part_label(base.name)) if user_title is not None else None
     t0 = time.monotonic()
@@ -915,7 +910,7 @@ def _finalize_live(
         keep_transcript=early is not None,
     )
     result.refined_labels = refined
-    result.silent_labels = [t for t in prepared.writers if _remarks.track_silent(t) in warnings]
+    result.silent_labels = [t for t in prepared.writers if t in run.silent]
     result.languages = languages
     if points:
         result.summary_md = write_summary(base, about, points)
@@ -948,17 +943,13 @@ def summarize_text(
     on: Progress,
     *,
     lang: str | None = None,
-    min_chars: int = 0,
 ) -> claude.Summary:
     """The shared step: title, gist and summary by the active cloud model."""
     t0 = time.monotonic()
     summary = _summarize(text, warnings, on, lang=lang)
     model = _model_of(summary.engine, summary.note)
     run.steps["summary"] = _took(t0)
-    if len(unstamped(text)) >= min_chars:  # a summary was asked for, not only a title
-        run.summary = _meta.LightRun(
-            engine=summary.engine, model=model, lang=_lang_code(text, lang)
-        )
+    run.summary = _meta.LightRun(engine=summary.engine, model=model, lang=_lang_code(text, lang))
     return summary
 
 
@@ -990,13 +981,13 @@ def summarize_folder(
     on: Progress = noop,
     on_base: Callable[[Path], None] | None = None,
 ) -> LiveResult:
-    """ "Summarize": title and summary of the folder's transcript.txt by this process's model,
-    without the _SUMMARY_MIN_CHARS threshold; summary=False makes only the title, translate also
-    writes translation.md in that language. Renames a default name, any name with retitle=True
-    and none with False, keeping a part mark (on_base gets the new folder). Remarks: the previous
-    ones minus title and summary, plus the new ones; the history gets Run(kind="summary"). No
-    transcript.txt raises MediaError; without a model ops.admit refuses the job before this;
-    cancelling before the files are written changes nothing."""
+    """ "Summarize": title and summary of the folder's transcript.txt by this process's model;
+    summary=False makes only the title, translate also writes translation.md in that language.
+    Renames a default name, any name with retitle=True and none with False, keeping a part mark
+    (on_base gets the new folder). Remarks: the previous ones minus title and summary, plus the
+    new ones; the history gets Run(kind="summary"). No transcript.txt raises MediaError; without
+    a model ops.admit refuses the job before this; cancelling before the files are written
+    changes nothing."""
     from .persist import write_summary
     from .translate import detect_lang
 
@@ -1082,7 +1073,6 @@ def _mix_recording(
         return None
 
 
-_SUMMARY_MIN_CHARS = 600  # ~a minute of speech; shorter gets no summary.txt
 PROCESSING_MARK = ".mnema-processing"  # running work: the node request and the user's title
 
 
