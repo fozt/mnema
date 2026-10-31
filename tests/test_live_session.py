@@ -860,6 +860,48 @@ def test_stall_watchdog_quiet_while_commits_flow() -> None:
     assert not any("распознавание встало" in t for _, t in view.statuses)
 
 
+class TimedTranscriber(FakeTranscriber):
+    """Each poll moves the session clock to the time of its chunk."""
+
+    def __init__(self, timed, now):
+        super().__init__([chunk for _, chunk in timed])
+        self._times = [t for t, _ in timed]
+        self._now = now
+
+    def poll(self):
+        if self._times:
+            self._now["t"] = self._times.pop(0)
+        return super().poll()
+
+
+def _stall_statuses(timed) -> list[str]:
+    now = {"t": 0.0}
+    view = FakeView()
+    LiveSession(
+        [FakeSource("system", len(timed))],
+        lambda s: TimedTranscriber(timed, now),
+        view=view,
+        clock=lambda: now["t"],
+    ).run()
+    return [t for _, t in view.statuses if "распознавание встало" in t]
+
+
+def test_stall_watchdog_counts_from_the_draft_not_from_a_long_ago_commit() -> None:
+    """The other side spoke, then was silent for 30 s: their next speech is not a stall."""
+    said = LiveChunk(committed=[Segment(start=0, end=1, text="Привет.", speaker="system")])
+    silence = [(t, LiveChunk(draft="")) for t in (10.0, 20.0, 31.0)]
+    resumed = [(31.5, LiveChunk(draft="…")), (40.0, LiveChunk(draft="…"))]
+
+    assert _stall_statuses([(1.0, said), *silence, *resumed]) == []
+
+
+def test_stall_watchdog_reports_a_draft_without_commits_for_20_s() -> None:
+    said = LiveChunk(committed=[Segment(start=0, end=1, text="Привет.", speaker="system")])
+    hearing = [(t, LiveChunk(draft="…")) for t in (31.0, 41.0, 51.5)]
+
+    assert len(_stall_statuses([(1.0, said), (10.0, LiveChunk(draft="")), *hearing])) == 1
+
+
 def test_draft_tail_capped_on_screen() -> None:
     """A swollen draft shows as its tail (…tail), not thousands of characters."""
     big = "х" * 2000

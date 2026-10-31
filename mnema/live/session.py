@@ -152,8 +152,9 @@ class LiveSession:
             self._recorders = [recorder]
         self._on = on
         self._clock = clock
-        # stall watchdog: last ASR commit and "already announced" per source
-        self._last_commit: dict[str, float] = {}
+        # stall watchdog: since when the current draft waits for a commit, and "already
+        # announced", per source
+        self._draft_since: dict[str, float] = {}
         self._stalled: set[str] = set()
         # auto-stop on silence: seconds without committed speech; 0 turns it off
         self._stop_after_silence = stop_after_silence
@@ -574,14 +575,20 @@ class LiveSession:
             elif len(joined) >= _MAX_PENDING:
                 # no final punctuation (auto language, continuous speech): force a split
                 self._flush(track, pending, name, force=True)
-        # stall watchdog: audio flows (the draft lives) but nothing is committed for too long
+        # stall watchdog: the draft lives but nothing is committed for too long. Counted from
+        # when the draft appeared: speech after a long silence is not a stall
         if chunk.committed:
-            self._last_commit[name] = now
+            if chunk.draft:
+                self._draft_since[name] = now
+            else:
+                self._draft_since.pop(name, None)
             if name in self._stalled:
                 self._stalled.discard(name)
                 _log.info("ASR [%s] recovered after a stall", name)
-        elif chunk.draft:
-            last = self._last_commit.setdefault(name, now)
+        elif not chunk.draft:
+            self._draft_since.pop(name, None)
+        else:
+            last = self._draft_since.setdefault(name, now)
             if now - last >= _STALL_AFTER and name not in self._stalled:
                 self._stalled.add(name)
                 _log.warning(
