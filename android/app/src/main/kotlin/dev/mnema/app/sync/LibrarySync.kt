@@ -41,14 +41,16 @@ class LibrarySync(
     suspend fun resolveBulk(ids: List<String>, restore: Boolean, forever: Boolean = false): SyncStatus = lock.withLock {
         withContext(Dispatchers.IO) { run(Choice(ids.toSet(), restore, forever)) }
     }
+    /** The answer "Send" to the question about [library]: a sync as with a new server. */
+    suspend fun sendToLibrary(library: String): SyncStatus = lock.withLock { withContext(Dispatchers.IO) { run(null, send = library) } }
 
     private class Choice(val ids: Set<String>, val restore: Boolean, val forever: Boolean)
 
-    private suspend fun run(choice: Choice?): SyncStatus {
+    private suspend fun run(choice: Choice?, send: String? = null): SyncStatus {
         val status = SyncStatus()
         val connection = selected() ?: return status
         try {
-            clientFactory(connection).use { Cycle(it, connection, status).run(choice) }
+            clientFactory(connection).use { Cycle(it, connection, status).run(choice, send) }
         } catch (e: IOException) { status.errors += message(e) }
         catch (_: IllegalArgumentException) { status.errors += tr("Could not sync recordings with the server") }
         catch (_: NoSuchElementException) { status.errors += tr("Could not sync recordings with the server") }
@@ -60,9 +62,9 @@ class LibrarySync(
     private inner class Cycle(val client: LibraryClient, val connection: Connection, val status: SyncStatus) {
         val root = this@LibrarySync.root.absoluteFile.normalize()
         val loaded = loadCheckpoint(stateFile)
-        val knownRoot = loaded.server == client.server
-        var previous = if (knownRoot) loaded else Checkpoint(server = client.server)
-        val oldSections = previous.sections.toSet() // sections of the last sync as spelled, to tell who changed the case
+        var knownRoot = false // decided by library() after the server's list
+        var previous = loaded
+        var oldSections = emptySet<String>() // sections of the last sync as spelled, to tell who changed the case
         var saved = loaded
         val knownSections = loaded.sections.toSet() // about local folders, so it holds after a server change too
         var local = Scan()
@@ -115,8 +117,34 @@ class LibrarySync(
             return records
         }
 
-        suspend fun run(choice: Choice?) {
+        /** Whose library the server has (its number from the list): false — another one than the last sync's, nothing may change until "Send". */
+        fun library(number: String, send: String?): Boolean {
+            val server = client.server
+            if (send != null) {
+                if (loaded.server != server || number.isEmpty() || send != number || send != loaded.foreign) throw libraryChanged()
+                previous = Checkpoint(server = server, library = number)
+                return true
+            }
+            if (loaded.server == server && loaded.library.isNotEmpty() && number.isNotEmpty() && loaded.library != number) {
+                previous = loaded.copy(foreign = number)
+                save()
+                return false
+            }
+            knownRoot = loaded.server == server
+            if (!knownRoot) previous = Checkpoint(server = server)
+            previous = previous.copy(library = number.ifEmpty { previous.library }, foreign = "")
+            oldSections = previous.sections.toSet()
+            return true
+        }
+
+        suspend fun run(choice: Choice?, send: String?) {
             val manifest = call { client.manifest() }
+            if (!library(manifest.library, send)) {
+                local = scanLocal(busy())
+                status.otherLibrary = local.manifest.records.count { FileName.TRANSCRIPT in it.files || FileName.SUMMARY in it.files }
+                status.foreign = manifest.library
+                return
+            }
             val remote = remote(manifest)
             serverSections = manifest.sections.toSet()
             active = busy()
@@ -425,6 +453,7 @@ class LibrarySync(
             if (!fresh.complete && !fresh.missingRoot) return
             val manifest = call { client.manifest() }
             remote(manifest) // the whole second reply is checked before the first section change
+            if (manifest.library.isNotEmpty() && manifest.library != previous.library) throw libraryChanged()
             val left = fresh.manifest.sections.toMutableSet()
             val right = manifest.sections.toMutableSet()
             val old = previous.sections.toMutableSet()
@@ -464,6 +493,8 @@ class LibrarySync(
         }
     }
 }
+
+private fun libraryChanged() = SyncException(tr("The recordings library on the server changed; sync again"))
 
 /** A recording or section as the list shows it: the folder name without the date. */
 private fun shownTitle(path: String): String = path.substringAfterLast('/').let { displayTitle(it).title ?: it }

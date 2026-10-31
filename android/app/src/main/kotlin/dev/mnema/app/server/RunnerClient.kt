@@ -251,6 +251,7 @@ class RunnerClient(
         val payload = buildJsonObject {
             put("invite", code)
             put("name", name)
+            put("library", true) // this app knows library numbers: a server user's invitation needs it
         }
         val body = json.encodeToString(JsonObject.serializer(), payload).toRequestBody(JSON_TYPE)
         val reply = send(Request.Builder().url(url("api", "devices", "claim")).post(body).build())

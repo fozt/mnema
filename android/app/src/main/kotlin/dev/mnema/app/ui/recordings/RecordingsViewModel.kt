@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import dev.mnema.app.i18n.RU_MONTHS_SHORT
 import dev.mnema.app.i18n.Ui
 import dev.mnema.app.i18n.UiLang
+import dev.mnema.app.i18n.plural
 import dev.mnema.app.i18n.tr
 import dev.mnema.app.model.AUTO_ASR
 import dev.mnema.app.model.Lang
@@ -144,6 +145,17 @@ class RecordingsViewModel(
             finally { resolving.value = false; store.refresh() }
         }
     }
+
+    /** "Send": this phone's recordings go into the server's other library, and its recordings come here. */
+    fun sendToLibrary() {
+        val controller = sync ?: return
+        val status = syncStatus.value
+        if (resolving.value || status.otherLibrary == null) return
+        resolving.value = true
+        viewModelScope.launch {
+            try { controller.sendToLibrary(status.foreign) } finally { resolving.value = false; store.refresh() }
+        }
+    }
 }
 
 sealed interface CleanupDialog {
@@ -162,6 +174,11 @@ fun serverMissingAsk(status: SyncStatus): ServerMissingAsk = if (status.withoutT
         tr("Delete on the phone"),
     )
 }
+
+/** The question before syncing with another library at the same server address. */
+fun otherLibraryAsk(status: SyncStatus): String = plural(status.otherLibrary ?: 0,
+    "The server has another recordings library. Send {n} recording from this phone to it?",
+    "The server has another recordings library. Send {n} recordings from this phone to it?")
 
 /** Under the "Delete audio of N recordings?" question: how much space is freed. */
 fun cleanupAmount(cleanup: AudioCleanup): String = tr("{size} will be freed.", "size" to sizeLabel(cleanup.bytes))

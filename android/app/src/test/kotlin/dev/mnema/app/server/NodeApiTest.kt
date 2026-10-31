@@ -59,7 +59,7 @@ class NodeApiTest {
         assertEquals("POST", request.method)
         assertEquals("/api/devices/claim", request.target)
         assertNull(request.headers["Authorization"])
-        assertEquals(mapOf("invite" to "invite-code", "name" to "Pixel 9"), request.json().mapValues { it.value.toString().trim('"') })
+        assertEquals(mapOf("invite" to "invite-code", "name" to "Pixel 9", "library" to "true"), request.json().mapValues { it.value.toString().trim('"') })
     }
 
     @Test

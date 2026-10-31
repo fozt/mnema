@@ -137,6 +137,47 @@ class SyncControllerTest {
         } finally { Dispatchers.resetMain() }
     }
 
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test fun sendFromTheListPutsThePhonesRecordingsIntoTheOtherLibrary() {
+        Dispatchers.setMain(UnconfinedTestDispatcher())
+        try {
+            runBlocking {
+                val library = TestLibrary()
+                MockWebServer().use { server ->
+                    server.dispatcher = library
+                    server.start()
+                    val connection = parseConnection(server.url("/").toString().trimEnd('/') + "#token=t")
+                    val root = tmp.newFolder("client")
+                    val http = RunnerClient.defaultHttp()
+                    try {
+                        val store = FolderRecordingStore(root, CoroutineScope(Dispatchers.Unconfined), { null }, { false }, Dispatchers.Unconfined,
+                            trash = { error("unexpected trash") })
+                        val sync = SyncController(root, File(tmp.root, "sync.json"), { connection }, { emptySet() }, { error("unexpected trash") }, {},
+                            clientFactory = { LibraryClient(it, http) })
+                        library.number = "L1"
+                        val mine = library.add("Встреча")
+                        assertTrue(sync.runOnce().errors.isEmpty())
+                        library.records.clear()
+                        library.number = "L2"
+                        val theirs = library.add("Чужая")
+                        assertEquals(1, sync.runOnce().otherLibrary)
+                        assertFalse(sync.textsOnServer()!!(File(root, "Встреча")))
+
+                        val model = RecordingsViewModel(store, ZoneId.of("UTC"), sync)
+                        model.sendToLibrary()
+                        model.resolving.first { !it }
+                        assertEquals(emptyList<String>(), sync.status.value.errors)
+                        assertNull(sync.status.value.otherLibrary)
+                        assertEquals(setOf(mine, theirs), library.records.keys)
+                        assertTrue(File(root, "Чужая").isDirectory)
+                        assertTrue(sync.textsOnServer()!!(File(root, "Встреча")))
+                    } finally { http.dispatcher.executorService.shutdown(); http.connectionPool.evictAll() }
+                }
+                library.failure?.let { throw AssertionError(it) }
+            }
+        } finally { Dispatchers.resetMain() }
+    }
+
     /** Selecting a server does not wait for a running sync: the new library folder appears at once and sync goes on. */
     @Test fun choosingAServerDoesNotWaitForARunningSync(): Unit = runBlocking {
         val root = File(tmp.root, "Mnema")
