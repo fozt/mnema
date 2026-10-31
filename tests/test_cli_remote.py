@@ -794,6 +794,21 @@ def test_serve_takes_this_computers_server_token_not_the_client_token(tmp_path, 
     assert (status("own-token"), status("vps-token")) == (200, 401)
 
 
+def test_serve_start_removes_the_weights_of_the_old_engines(monkeypatch, tmp_path):
+    """The server's start clears the weights of the engines that are gone; other models stay."""
+    from mnema.cli.commands import cmd_serve
+
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    hub = tmp_path / "cache" / "huggingface" / "hub"
+    old, kept = hub / "models--moondream--parakeet-ultra", hub / "models--someone--other"
+    for folder in (old, kept):
+        folder.mkdir(parents=True)
+        (folder / "weights.bin").write_bytes(b"w")
+    with patch("uvicorn.run"):
+        cmd_serve(_serve_args("127.0.0.1", dir_=str(tmp_path / "serve")))
+    assert (old.exists(), kept.is_dir()) == (False, True)
+
+
 def test_serve_without_token_warns_even_on_loopback(monkeypatch, capsys):
     """Without MNEMA_TOKEN the warning is always printed: a proxy in front of a local bind is
     invisible to the host guard."""

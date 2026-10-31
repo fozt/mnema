@@ -217,6 +217,19 @@ def _no_real_autostart(monkeypatch, tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def _no_real_model_caches(monkeypatch):
+    """Model caches follow XDG_CACHE_HOME (tmp): the old-weights cleanup on the start of serve and
+    of the app engine never reaches the developer's real Hugging Face or torch folders. In the
+    test process it runs at once: a thread outliving the test would read the restored real
+    environment."""
+    from mnema import cleanup
+
+    for var in ("HF_HOME", "HF_HUB_CACHE", "HUGGINGFACE_HUB_CACHE", "TORCH_HOME"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setattr(cleanup, "remove_old_weights_in_background", cleanup.remove_old_weights)
+
+
+@pytest.fixture(autouse=True)
 def _no_real_cli_link(monkeypatch, tmp_path):
     """The ~/.local/bin/mnema link goes to tmp: tests never repoint the owner's real command."""
     from mnema import install_setup
