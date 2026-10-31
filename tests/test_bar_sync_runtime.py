@@ -38,6 +38,9 @@ class Controller:
     def resolve_bulk(self, ids, *, restore):
         self.choices.append((ids, restore))
 
+    def send_to_library(self, library):
+        self.choices.append(library)
+
 
 class Platform:
     def __init__(self):
@@ -453,3 +456,44 @@ def test_bulk_choice_for_records_missing_on_server(app):
     assert [b.title for b in notice.buttons] == ["Удалить на этом компьютере", "Вернуть на сервер"]
     rt.handle(notice.buttons[1].key)
     assert rt._sync.choices == [(sorted(ids), True)]
+
+
+@pytest.mark.parametrize(
+    ("mac", "count", "text"),
+    [
+        (
+            True,
+            1,
+            "На сервере другая библиотека записей. Отправить в неё 1 запись с этого Mac?",
+        ),
+        (
+            False,
+            3,
+            "На сервере другая библиотека записей. Отправить в неё 3 записи с этого компьютера?",
+        ),
+    ],
+    ids=["mac", "computer"],
+)
+def test_another_library_asks_before_sending_and_the_answer_names_it(
+    app, monkeypatch, mac, count, text
+):
+    rt, platform, root, updates = app
+    monkeypatch.setenv("MNEMA_RUNNER", "http://srv")
+    rt.start_sync()
+    rt._sync.callbacks["on_change"](
+        SyncStatus(connection="http://srv", other_library=count, foreign="L2")
+    )
+    panel = panel_model(rt.state, rt.prefs, MenuEnv(mac=mac), [], SettingsModel(tabs=[]))
+    [notice] = panel.notices
+    assert panel.status.icon == "warning"
+    assert notice.text == text
+    assert [b.title for b in notice.buttons] == ["Отправить"]  # no "Close": the question stays
+    send = notice.buttons[0].key
+    rt._sync_changed(SyncStatus(connection="http://srv", other_library=count, foreign="L3"))
+    rt.handle(send)  # the server changed its library after the notice was drawn
+    assert not rt._sync.choices
+    current = panel_model(rt.state, rt.prefs, MenuEnv(mac=mac), [], SettingsModel(tabs=[]))
+    rt.handle(current.notices[0].buttons[0].key)
+    assert rt._sync.choices == ["L3"]
+    rt._sync_changed(SyncStatus(connection="http://srv"))
+    assert not panel_model(rt.state, rt.prefs, MenuEnv(), [], SettingsModel(tabs=[])).notices

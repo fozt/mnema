@@ -43,6 +43,7 @@ class SyncController:
         self._task: asyncio.Task | None = None
         self._closed = False
         self._choice: tuple[list[str], bool, str] | None = None  # only a UI button pressed now
+        self._send: tuple[str, str] | None = None  # "Send" to another library: number, connection
         self._status = SyncStatus()
 
     @property
@@ -73,6 +74,20 @@ class SyncController:
             ):
                 return
             self._choice = (list(ids), restore, connection)
+        self.wake()
+
+    def send_to_library(self, library: str) -> None:
+        with self._lock:
+            connection = self._status.connection
+            if (
+                self._closed
+                or connection is None
+                or self.engine.selected() != connection
+                or self._status.other_library is None
+                or library != self._status.foreign
+            ):
+                return
+            self._send = (library, connection)
         self.wake()
 
     def close(self, timeout: float = 2) -> None:
@@ -107,12 +122,16 @@ class SyncController:
                 event.clear()
                 with self._lock:
                     choice, self._choice = self._choice, None
+                    send, self._send = self._send, None
                 try:
-                    status = (
-                        await self.engine.resolve_bulk(choice[0], choice[1], connection=choice[2])
-                        if choice
-                        else await self.engine.run_once()
-                    )
+                    if choice:
+                        status = await self.engine.resolve_bulk(
+                            choice[0], choice[1], connection=choice[2]
+                        )
+                    elif send:
+                        status = await self.engine.send_to_library(send[0], connection=send[1])
+                    else:
+                        status = await self.engine.run_once()
                 except Exception:  # noqa: BLE001 — a failed pass does not stop the next ones
                     logger.warning("sync with the server failed", exc_info=True)
                     status = SyncStatus(errors=[SYNC_FAILED])

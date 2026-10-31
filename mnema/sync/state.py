@@ -16,6 +16,8 @@ from ..library.models import LEGACY_SUMMARY, FileName, Record, Stamp
 
 class Checkpoint(BaseModel):
     server: str = ""
+    library: str = ""  # the server's library number of this sync; empty before 0.4
+    foreign: str = ""  # another number the server answered, not accepted yet: sync waits
     records: dict[str, Record] = Field(default_factory=dict)
     sections: list[str] = Field(default_factory=list)
 
@@ -63,13 +65,13 @@ def texts_confirmed(
 ) -> bool:
     """The texts of recording id (files: their current stamps) match the last sync with the
     server connection, so they stay there without the audio. No server selected, or the last sync
-    was with another one: not confirmed."""
+    was with another one, or the server has another library now: not confirmed."""
     try:
         server = server_key(connection) if connection else None
     except ValueError:
         return False
     known = state.records.get(id)
-    if server is None or state.server != server or known is None:
+    if server is None or state.server != server or state.foreign or known is None:
         return False
 
     def sha(stamps: Mapping[FileName, Stamp], name: FileName) -> str | None:

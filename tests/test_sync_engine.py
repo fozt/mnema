@@ -26,10 +26,15 @@ class Transport(httpx.AsyncBaseTransport):
     def __init__(self, app, hook=lambda request, response: None):
         self.inner, self.hook = httpx.ASGITransport(app), hook
         self.requests = []
+        self.library: str | None = None  # the library number the server answers; None — its own
 
     async def handle_async_request(self, request):
         self.requests.append((request.method, request.url.path))
         response = await self.inner.handle_async_request(request)
+        listed = request.method == "GET" and request.url.path == "/api/library"
+        if self.library is not None and listed and response.status_code == 200:
+            payload = json.loads(await response.aread())
+            response = httpx.Response(200, json={**payload, "library": self.library})
         self.hook(request, response)
         return response
 
@@ -709,9 +714,10 @@ def test_two_clients_keep_shared_wire_bytes_and_checkpoint_without_noop_writes(p
         trash=lambda path: pytest.fail("unexpected deletion"),
         client_factory=lambda connection: LibraryClient(connection, transport=pair.transport),
     )
+    expected = json.loads((Path(__file__).parent / "fixtures/sync-checkpoint-v1.json").read_text())
+    pair.transport.library = expected["library"]
     assert not run(pair).errors
     assert not asyncio.run(other.run_once()).errors
-    expected = json.loads((Path(__file__).parent / "fixtures/sync-checkpoint-v1.json").read_text())
     assert json.loads(pair.checkpoint.read_text()) == expected
     assert json.loads(other_checkpoint.read_text()) == expected
     pair.transport.requests.clear()
@@ -1168,12 +1174,94 @@ def test_both_sides_bulk_disappearances_are_asked_one_after_another(pair):
     assert {r.id for r in pair.app.state.library.manifest().records} == {aid, bid}
 
 
+def other_library(pair):
+    """Recordings a and b synced with library L1; then the server at the same address lost a and
+    got c, this device lost b and got d, and the server answers library L2."""
+    pair.transport.library = "L1"
+    a, aid = synced(pair, "a")
+    b, bid = synced(pair, "b")
+    lose_on_server(pair, aid)
+    remote_record(pair.app, "c")
+    shutil.rmtree(b)
+    recording(pair.root, "d")
+    pair.transport.library = "L2"
+    pair.transport.requests.clear()
+    return {aid, bid}
+
+
+def local_folders(pair):
+    return sorted(
+        p.parent.relative_to(pair.root).as_posix() for p in pair.root.rglob(FileName.META)
+    )
+
+
+def server_paths(pair):
+    return sorted(r.path for r in pair.app.state.library.manifest().records)
+
+
+def test_another_library_at_the_same_address_changes_nothing_until_the_answer(pair):
+    known = other_library(pair)
+    for _ in range(2):
+        result = run(pair)
+        assert not result.errors and not result.changed
+        assert (result.other_library, result.foreign) == (2, "L2")  # a and d are here
+    assert [method for method, _ in pair.transport.requests if method != "GET"] == []
+    assert local_folders(pair) == ["a", "d"] and server_paths(pair) == ["b", "c"]
+    assert not pair.trashed
+    checkpoint = load(pair.checkpoint)
+    assert (checkpoint.library, checkpoint.foreign) == ("L1", "L2")
+    assert set(checkpoint.records) == known
+
+    pair.transport.library = "L1"  # the own library again: the usual rules
+    result = run(pair)
+    assert not result.errors and result.other_library is None
+    assert local_folders(pair) == ["c", "d"] and server_paths(pair) == ["c", "d"]
+    assert [p.name for p in pair.trashed] == ["a"]
+    checkpoint = load(pair.checkpoint)
+    assert (checkpoint.library, checkpoint.foreign) == ("L1", "")
+
+
+def test_send_to_another_library_syncs_like_a_new_server(pair):
+    other_library(pair)
+    run(pair)
+    pair.transport.library = "L3"  # the server changed again before the answer
+    pair.transport.requests.clear()
+    stale = asyncio.run(pair.engine().send_to_library("L2"))
+    assert stale.errors and not stale.changed
+    assert [method for method, _ in pair.transport.requests if method != "GET"] == []
+    assert local_folders(pair) == ["a", "d"] and server_paths(pair) == ["b", "c"]
+    assert (load(pair.checkpoint).library, load(pair.checkpoint).foreign) == ("L1", "L2")
+
+    asked = run(pair)
+    assert (asked.other_library, asked.foreign) == (2, "L3")
+    result = asyncio.run(pair.engine().send_to_library("L3"))
+    assert not result.errors and result.changed and result.other_library is None
+    assert local_folders(pair) == ["a", "b", "c", "d"] == server_paths(pair)
+    assert not pair.trashed
+    checkpoint = load(pair.checkpoint)
+    assert (checkpoint.library, checkpoint.foreign) == ("L3", "")
+    assert len(checkpoint.records) == 4
+    assert not run(pair).changed
+
+
+def test_send_without_a_question_changes_nothing(pair):
+    pair.transport.library = "L1"
+    synced(pair, "a")
+    before = pair.checkpoint.read_bytes()
+    pair.transport.requests.clear()
+    assert asyncio.run(pair.engine().send_to_library("L1")).errors
+    assert [method for method, _ in pair.transport.requests if method != "GET"] == []
+    assert pair.checkpoint.read_bytes() == before
+
+
 DECISIONS = json.loads((Path(__file__).parent / "fixtures/sync-decisions-v1.json").read_text())
 
 
 @pytest.mark.parametrize("case", DECISIONS["cases"], ids=lambda case: case["name"])
 def test_shared_sync_decisions(pair, tmp_path, case):
-    """Deletions, copies and busy recordings: the same decisions as the phone (shared fixture)."""
+    """Deletions, copies, busy recordings and library numbers: the same decisions as the phone
+    (shared fixture)."""
+    pair.transport.library = case.get("library")
     ids = {path: synced(pair, path)[1] for path in case["synced"]}
     names = {id: path for path, id in ids.items()}
     root = pair.root
@@ -1194,6 +1282,8 @@ def test_shared_sync_decisions(pair, tmp_path, case):
     if case.get("checkpoint_lost"):
         pair.checkpoint.unlink()
     pair.busy.update(ids[path] for path in case.get("busy", []))
+    if "server_library" in case:
+        pair.transport.library = case["server_library"]
     if case.get("server_unavailable"):
         pair.transport.inner = httpx.MockTransport(
             lambda request: httpx.Response(503, json={"detail": "Библиотека недоступна"})
@@ -1233,6 +1323,10 @@ def test_shared_sync_decisions(pair, tmp_path, case):
     records = pair.app.state.library.manifest().records
     assert {r.path: names.get(r.id, "new") for r in records} == case["server"]
     assert sorted(trashed) == sorted(case.get("trashed", []))
+    assert result.other_library == case.get("other_library")
+    checkpoint = load(pair.checkpoint)
+    assert checkpoint.library == case.get("remembered", checkpoint.library)
+    assert checkpoint.foreign == case.get("foreign", "")
 
 
 def test_summary_md_of_an_earlier_version_becomes_summary_txt_without_changes(pair):

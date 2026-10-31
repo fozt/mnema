@@ -6,7 +6,7 @@ import shutil
 import threading
 
 import httpx
-from test_sync_engine import recording, remote_record
+from test_sync_engine import Transport, recording, remote_record
 
 from mnema.bar.sync_controller import SyncController
 from mnema.server import create_app
@@ -89,6 +89,46 @@ def test_worker_bulk_restore_uses_callbacks_and_stays_serial(tmp_path, monkeypat
         assert not restored.errors and not restored.bulk_missing
         assert a.exists() and b.exists()
         assert len(app.state.library.manifest().records) == 2
+    finally:
+        controller.close()
+
+
+def test_worker_sends_to_another_library_only_on_the_answer_with_its_number(tmp_path, monkeypatch):
+    monkeypatch.setenv("MNEMA_LIBRARY", "true")
+    (tmp_path / "server/library").mkdir(parents=True)  # the installer creates it
+    app = create_app(tmp_path / "server")
+    root = tmp_path / "client"
+    root.mkdir()
+    recording(root, "a")
+    transport = Transport(app)
+    transport.library = "L1"
+    results = queue.Queue()
+    controller = SyncController(
+        root,
+        tmp_path / "sync.json",
+        selected=lambda: "http://node",
+        busy=lambda: set(),
+        trash=lambda path: None,
+        on_change=results.put,
+        client_factory=lambda connection: LibraryClient(connection, transport=transport),
+    )
+    controller.start()
+    try:
+        assert not results.get(timeout=3).errors
+        [record] = app.state.library.manifest().records
+        app.state.library.remove(record.id, record.tag)
+        transport.library = "L2"  # the server was installed again at the same address
+        controller.wake()
+        asked = results.get(timeout=3)
+        assert (asked.other_library, asked.foreign) == (1, "L2")
+        controller.send_to_library("L1")  # not the number asked about
+        controller.wake()
+        assert results.get(timeout=3).other_library == 1
+        controller.send_to_library("L2")
+        sent = results.get(timeout=3)
+        assert not sent.errors and sent.other_library is None
+        assert [r.path for r in app.state.library.manifest().records] == ["a"]
+        assert (root / "a").exists()
     finally:
         controller.close()
 

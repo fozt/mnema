@@ -480,6 +480,8 @@ class BarRuntime:
         self._sync_connection_status = status.connection
         self.state.sync_missing = list(status.bulk_missing)
         self.state.sync_missing_on_server = status.bulk_on_server
+        self.state.sync_other_library = status.other_library
+        self.state.sync_foreign = status.foreign
         self.state.sync_errors = list(status.errors)
         if status.changed:
             self.library_rev += 1
@@ -577,7 +579,9 @@ class BarRuntime:
             stamp = (st.st_mtime_ns, st.st_size)
             if self._records_seen is None or self._records_seen[0] != stamp:
                 checkpoint = load(path)
-                self._records_seen = (stamp, checkpoint.server, len(checkpoint.records))
+                # another library on the server: the count is not its recordings
+                server = "" if checkpoint.foreign else checkpoint.server
+                self._records_seen = (stamp, server, len(checkpoint.records))
             _stamp, server, count = self._records_seen
             return count if server == server_key(connection) else None
         except (OSError, ValueError):
@@ -815,6 +819,17 @@ class BarRuntime:
                 and set(ids) == set(self.state.sync_missing)
             ):
                 self._sync.resolve_bulk(ids, restore=key.startswith("sync_restore:"))
+            return
+        if key.startswith("sync_send:"):
+            _kind, revision, library = key.split(":", 2)
+            if (
+                self._sync is not None
+                and revision == str(self.state.sync_revision)
+                and self.sync_connection() == self._sync_connection_status
+                and self.state.sync_other_library is not None
+                and library == self.state.sync_foreign
+            ):
+                self._sync.send_to_library(library)
             return
         if key == "cleanup_audio" and idle:
             self._cleanup_audio()
@@ -1533,6 +1548,7 @@ class BarRuntime:
         self.server_name, self.server_llm, self.server_model = None, False, None
         self.server_version = None
         self.state.sync_missing, self.state.sync_errors = [], []
+        self.state.sync_other_library, self.state.sync_foreign = None, ""
         self._library_changed()
         self._env_changed()
 
