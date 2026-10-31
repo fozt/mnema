@@ -14,7 +14,7 @@ import pytest
 from mnema.core import asr_engine, base, mac_helper
 from mnema.core.asr_engine import Word
 from mnema.core.base import MediaError
-from tests.mac_helper_stub import Helper
+from tests.mac_helper_stub import FIXTURE, Helper
 
 
 @pytest.fixture(autouse=True)
@@ -46,6 +46,55 @@ def _bundle(folder: Path, bundle_id: str = "com.mnema.bar") -> Path:
     with open(folder / "Contents" / "Info.plist", "wb") as f:
         plistlib.dump({"CFBundleIdentifier": bundle_id}, f)
     return folder
+
+
+def _shape(value):
+    """Keys and value types, nested: what the shared fixture fixes about a request."""
+    if isinstance(value, dict):
+        return {key: _shape(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_shape(item) for item in value[:1]]
+    return type(value).__name__
+
+
+def test_every_request_python_sends_is_one_the_fixture_has(helper, tmp_path) -> None:
+    """models, download, transcribe and speech as MacHelper sends them have exactly the keys
+    and value types of requests.<operation> in asr-helper-v1.json, the file the Swift side
+    decodes."""
+    contract = json.loads(FIXTURE.read_text(encoding="utf-8"))["requests"]
+    helper.configure(installed={"parakeet": False, "vad": False})
+    mac_helper.models()
+    mac_helper.download("parakeet")
+    recognizer = mac_helper.MacHelper()
+    recognizer.tracks([_wav(tmp_path / "mic.wav"), _wav(tmp_path / "system.wav")])
+    recognizer.speech(_wav(tmp_path / "system.wav"), max_s=10)
+    sent = [call["request"] for call in helper.calls()]
+    assert [r["operation"] for r in sent] == ["models", "download", "transcribe", "speech"]
+    for request in sent:
+        fixed = [_shape(r) for r in contract.values() if r["operation"] == request["operation"]]
+        assert _shape(request) in fixed, request
+
+
+def test_the_stub_refuses_a_request_the_fixture_does_not_have(helper, tmp_path) -> None:
+    """A renamed key, or the payload of another operation, gets "protocol", as from mnema-asr:
+    Python tests cannot pass with a request the helper would not read."""
+    import subprocess
+
+    lines = [
+        {"operation": "speech", "payload": {"path": str(tmp_path / "a.wav")}},
+        {"operation": "speech", "payload": {"wav": str(tmp_path / "a.wav"), "max_s": 10}},
+        {"operation": "download", "payload": {"model": "parakeet"}},
+        {"operation": "speech", "payload": {"id": "vad"}},  # the payload of download
+    ]
+    answer = subprocess.run(
+        [str(helper.path)],
+        input="".join(json.dumps(line) + "\n" for line in lines),
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    replies = [json.loads(line) for line in answer.stdout.splitlines()]
+    assert [(r["type"], r["code"]) for r in replies] == [("error", "protocol")] * 4
 
 
 def test_words_of_a_track_come_with_their_times_and_progress(helper, tmp_path) -> None:

@@ -1,7 +1,9 @@
 """A stand-in for mnema-asr: a real process that speaks the protocol of the shared fixture
 (tests/fixtures/asr-helper-v1.json). Its behaviour is a JSON file next to it (what is
 installed, which operation fails with which code or gives which result, the protocol version);
-every request is logged there with the helper's environment and parent pid.
+every request is logged there with the helper's environment and parent pid. A request whose
+keys or value types differ from every fixture request of its operation gets "protocol", as
+the real helper answers a request it cannot read.
 """
 
 from __future__ import annotations
@@ -18,7 +20,24 @@ from pathlib import Path
 
 here = Path(__file__)
 config_file, log = here.with_name("helper.json"), here.with_name("helper.log")
-replies = json.loads(Path({fixture!r}).read_text(encoding="utf-8"))["replies"]
+contract = json.loads(Path({fixture!r}).read_text(encoding="utf-8"))
+replies = contract["replies"]
+
+
+def shape(value):  # keys and value types, nested: what the fixture fixes about a request
+    if isinstance(value, dict):
+        return {{key: shape(item) for key, item in value.items()}}
+    if isinstance(value, list):
+        return [shape(item) for item in value[:1]]
+    return type(value).__name__
+
+
+known = [(r["operation"], shape(r)) for r in contract["requests"].values()]
+
+
+def readable(request):  # the keys and types of a fixture request of the same operation
+    operation = request.get("operation") if isinstance(request, dict) else None
+    return any(operation == op and shape(request) == fixed for op, fixed in known)
 
 
 def config():
@@ -45,6 +64,9 @@ for line in sys.stdin:
     with log.open("a", encoding="utf-8") as f:
         f.write(json.dumps(entry) + "\n")
     c = config()
+    if not readable(request):
+        error("protocol")
+        continue
     operation, payload = request["operation"], request["payload"]
     if operation in c.get("fail", {{}}):
         error(c["fail"][operation])
@@ -60,6 +82,7 @@ for line in sys.stdin:
             time.sleep(300)
         while c.get("wait_for") and not Path(c["wait_for"]).exists():  # the test lets it go on
             time.sleep(0.05)
+        progress("download", 1.0)
         progress("load", None)
         c["installed"][payload["id"]] = True
         if payload["id"] == "parakeet":
@@ -72,8 +95,8 @@ for line in sys.stdin:
             continue
         progress("load", None)
         progress("recognize", 0.5)
-        known = replies["transcribe"]["value"]["tracks"]
-        tracks = [known[i] if i < len(known) else {{"words": []}}
+        given = replies["transcribe"]["value"]["tracks"]
+        tracks = [given[i] if i < len(given) else {{"words": []}}
                   for i in range(len(payload["wavs"]))]
         send({{"type": "result", "value": {{"tracks": tracks}}}})
     elif operation == "speech":

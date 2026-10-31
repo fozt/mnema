@@ -9,6 +9,7 @@ import mnema.cli as cli_pkg
 from mnema.client import MnemaClient
 from mnema.core import base
 from mnema.core.base import MediaError
+from tests.mac_helper_stub import install
 
 
 @pytest.mark.parametrize("fails", [False, True])
@@ -122,6 +123,8 @@ def test_app_cli_and_mcp_process_in_one_place(
     from mnema.mcp import tools
 
     monkeypatch.setattr(base, "STANDALONE", standalone)
+    if standalone:  # Mnema.app with its mnema-asr
+        install(monkeypatch, tmp_path / "Mnema.app")
     monkeypatch.setenv("MNEMA_LIVE_DIR", str(tmp_path / "notes"))
     monkeypatch.setenv("MNEMA_RUNNER", server)
     monkeypatch.setenv("MNEMA_TOKEN", "vps-token" if server else "")

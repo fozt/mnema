@@ -73,7 +73,8 @@ _FILLER_DROP = {"uh", "um", "ah", "er", "erm"}
 
 
 class Emitted(NamedTuple):
-    """A greedy TDT token: id, encoder frame, duration in frames (≥ 1 for the end time)."""
+    """A greedy TDT token: id, encoder frame, predicted duration in frames (0: the next token
+    is on the same frame)."""
 
     token: int
     frame: int
@@ -175,7 +176,7 @@ def greedy_tdt(
             t += max(d, 1)
             symbols = 0
             continue
-        out.append(Emitted(token=token, frame=t, duration=max(d, 1)))
+        out.append(Emitted(token=token, frame=t, duration=d))
         step(token)
         symbols += 1
         if d > 0 or symbols >= max_symbols:
@@ -248,6 +249,7 @@ def available() -> bool:
 
 DOWNLOAD_FAILED = "Could not download the recognition model. Check the connection and try again"
 NO_SPACE = "Not enough disk space for the recognition model"
+DOWNLOADING = "Downloading the recognition model, only the first time…"
 
 
 def model_dir(on: Progress = noop) -> Path:
@@ -266,7 +268,16 @@ def model_dir(on: Progress = noop) -> Path:
     folder = _cached()
     if all((folder / name).is_file() for name in ONNX_FILES):
         return folder
-    on(None, _("Downloading the recognition model, only the first time…"))
+    on(None, _(DOWNLOADING))
+    try:
+        _fetch(folder)
+    except OSError as e:  # the cache: no space, read-only, another owner after a reinstall
+        logger.warning("could not place the recognition model in %s: %s", folder, e)
+        raise MediaError(_(NO_SPACE) if e.errno == errno.ENOSPC else _(DOWNLOAD_FAILED)) from e
+    return folder
+
+
+def _fetch(folder: Path) -> None:
     staging = folder.with_name(f".{folder.name}.partial")
     staging.mkdir(parents=True, exist_ok=True)
     with (staging.parent / f".{folder.name}.lock").open("w") as lock:
@@ -281,7 +292,6 @@ def model_dir(on: Progress = noop) -> Path:
             folder.mkdir(parents=True, exist_ok=True)
             path.replace(folder / name)
         shutil.rmtree(staging, ignore_errors=True)
-    return folder
 
 
 def _cached() -> Path:
@@ -372,9 +382,8 @@ class OnnxModel:
         )
         frames = min(enc.shape[2], int(enc_len[0]))
         emitted = self._decode(enc[0, :, :frames])
-        return _words(
-            [(self.pieces[e.token], e.frame, e.frame + e.duration) for e in emitted], offset
-        )
+        times = token_times([(self.pieces[e.token], e.frame, e.duration) for e in emitted])
+        return timed_words(times, offset)
 
     def _decode(self, enc: Any) -> list[Emitted]:
         """Greedy TDT on decoder_joint: it starts from blank and zero states, and its new
@@ -414,24 +423,54 @@ class OnnxModel:
         )
 
 
-def _words(pieces: list[tuple[str, int, int]], offset: float) -> list[Word]:
-    """SentencePiece pieces (piece, first frame, end frame) → words: a word starts at "▁";
-    service tokens (<unk>, <|…|>) are dropped."""
+# One word-time rule with the Mac (mnema-asr, FluidAudio with TDT_EMISSION_DELAY_FRAMES=0),
+# pinned by tests/fixtures/word-timings-v1.json on both sides.
+
+
+def token_times(tokens: list[tuple[str, int, int]]) -> list[tuple[str, float, float]]:
+    """Greedy TDT tokens (piece, frame, duration in frames) → (piece, start, end) in seconds, as
+    FluidAudio times them: <unk> emissions are dropped first; a token ends after its duration,
+    one of zero duration at the next token's start (at least a frame later)."""
+    kept = sorted((t for t in tokens if t[0] != "<unk>"), key=lambda t: t[1])
+    times: list[tuple[str, float, float]] = []
+    for i, (piece, frame, duration) in enumerate(kept):
+        start = frame * FRAME_S
+        if duration > 0:
+            end = start + duration * FRAME_S
+        elif i + 1 < len(kept):
+            end = max(kept[i + 1][1] * FRAME_S, start + FRAME_S)
+        else:
+            end = start + FRAME_S
+        times.append((piece, start, end))
+    return times
+
+
+def timed_words(times: list[tuple[str, float, float]], offset: float = 0.0) -> list[Word]:
+    """Timed SentencePiece pieces → words, from offset (seconds): a word starts at "▁" (or a
+    leading space) and spans its pieces; service tokens (<unk>, <|…|>) are not words."""
     words: list[Word] = []
-    fresh = True
-    for piece, start, end in pieces:
+    text, start, end = "", 0.0, 0.0
+
+    def flush() -> None:
+        if word := text.strip(" \t"):
+            words.append(Word(text=word, start=offset + start, end=offset + end))
+
+    for piece, s, e in times:
         if piece.startswith("<") and piece.endswith(">"):
             continue
-        fresh = fresh or piece.startswith("▁")
-        text = piece.replace("▁", "")
-        if not text:
+        token = piece.replace("▁", " ")
+        if not token:
             continue
-        if fresh:
-            words.append(Word(text=text, start=offset + start * FRAME_S, end=0.0))
-            fresh = False
+        new = token.startswith(" ") or not text
+        if new and text:
+            flush()
+            text = ""
+        if new:
+            text, start = token.removeprefix(" "), s
         else:
-            words[-1].text += text
-        words[-1].end = offset + end * FRAME_S
+            text += token
+        end = e
+    flush()
     return words
 
 

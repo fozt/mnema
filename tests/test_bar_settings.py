@@ -766,9 +766,12 @@ def test_mac_switches_where_recognition_runs(monkeypatch, tmp_path) -> None:
     engines, In the cloud the cloud models with "Set the OpenAI key…" while the user has no key;
     the choice goes to bar.json and does not change while recording. The Model row is the
     user's model on the connected server in every place."""
+    from mnema import node_settings
     from mnema.core import base
+    from tests.mac_helper_stub import install
 
-    monkeypatch.setattr(base, "STANDALONE", True)  # without Mnema.app: no engine of its own
+    monkeypatch.setattr(base, "STANDALONE", True)
+    install(monkeypatch, tmp_path / "Mnema.app")
     monkeypatch.setenv("MNEMA_LIVE_DIR", str(tmp_path / "notes"))
     monkeypatch.setenv("MNEMA_RUNNER", "http://srv:8123")
     _home_server(monkeypatch)
@@ -782,7 +785,8 @@ def test_mac_switches_where_recognition_runs(monkeypatch, tmp_path) -> None:
     ]
     assert (rows["Модель"].value, rows["Модель"].tone) == ("deepseek/deepseek-chat", Tone.OK)
     assert "Выбрать модель…" in rows and "Задать ключ OpenAI…" not in rows
-    assert "asr:parakeet" not in [c.key for c in rows["Движок"].choices]  # the server's engine
+    own = [f"asr:{c['id']}" for c in node_settings.local_asr_choices()]
+    assert own and [c.key for c in rows["Движок"].choices] == own
     assert rt.processing_connection() is None and rt.summary_connection() is not None
 
     rt.state.phase = Phase.RECORDING
@@ -815,6 +819,24 @@ def test_mac_switches_where_recognition_runs(monkeypatch, tmp_path) -> None:
     assert rows["Распознавание"].value == "на этом Mac" and "Выбрать модель…" in rows
     assert rt.prefs.asr == "auto"  # a cloud model is not an engine of this Mac
     assert rt.processing_connection() is None
+
+
+def test_a_mac_without_mnema_asr_processes_on_the_connected_server(monkeypatch, tmp_path):
+    """Without mnema-asr of Mnema.app, On this Mac still goes to the connected server, with the
+    server's engines."""
+    from mnema.core import base
+
+    monkeypatch.setattr(base, "STANDALONE", True)
+    monkeypatch.setenv("MNEMA_ASR", str(tmp_path / "none" / "mnema-asr"))
+    monkeypatch.setenv("MNEMA_LIVE_DIR", str(tmp_path / "notes"))
+    monkeypatch.setenv("MNEMA_RUNNER", "http://srv:8123")
+    _home_server(monkeypatch)
+    rt = BarRuntime(prefs_file=tmp_path / "bar.json")
+    _settled()
+    rows = _processing(rt)
+    assert rt.prefs.recognition == "mac"
+    assert [c.key for c in rows["Движок"].choices] == ["asr:auto", "asr:parakeet"]
+    assert rt.processing_connection() is not None and rt.summary_connection() is not None
 
 
 def test_old_where_on_the_server_reads_as_recognition_on_the_server(tmp_path) -> None:

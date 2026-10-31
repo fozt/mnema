@@ -166,9 +166,8 @@ struct Engine: Sendable {
             } catch ASRError.invalidAudioData {
                 throw ASRFailure(.badAudio, "\(track.url.lastPathComponent): no audio samples")
             }
-            let words = buildWordTimings(from: asr.tokenTimings ?? []).map {
-                Word(text: $0.word, start: $0.startTime, end: $0.endTime)
-            }
+            let words = WordTimes.words(
+                (asr.tokenTimings ?? []).map { TokenTime(piece: $0.token, start: $0.startTime, end: $0.endTime) })
             Log.info(
                 "\(track.url.lastPathComponent): \(words.count) words, \(String(format: "%.1f", track.duration)) s "
                     + "in \(String(format: "%.1f", Date().timeIntervalSince(started))) s")

@@ -289,15 +289,18 @@ def test_folder_in_processing_is_not_processed_again(monkeypatch, tmp_path, sour
     assert [run["status"] for run in runs] == ["ok"]
 
 
-def test_mac_refuses_unavailable_recognition_before_work(monkeypatch, tmp_path, sources, engines):
-    """The chosen recognition is not installed: refused before work, the recording as it was."""
+@pytest.mark.parametrize("asr", ["parakeet", "auto", "openai/gpt-4o-transcribe"])
+def test_mac_without_mnema_asr_refuses_before_work(monkeypatch, tmp_path, sources, engines, asr):
+    """No mnema-asr of Mnema.app and no server: refused before work with what to do, the
+    recording as it was; the cloud needs the helper's speech search too."""
     engines.remove()
+    monkeypatch.setenv("MNEMA_ASR_API_KEY", "sk-asr")
     _asr(monkeypatch)
     folder = _recording(tmp_path / "notes")
     before = _files(folder)
     with pytest.raises(MediaError) as refused:
-        recording_client.recover_on_node(folder, LiveConfig(asr="parakeet", mix_audio=False), None)
-    assert str(refused.value) == "Выбранное распознавание недоступно. Выберите другое"
+        recording_client.recover_on_node(folder, LiveConfig(asr=asr, mix_audio=False), None)
+    assert str(refused.value) == "Установите Mnema или подключите сервер"
     assert not (folder / PROCESSING_MARK).exists() and meta.last(folder) is None
     assert set(_files(folder)) <= {*before, meta.META_FILE}
     assert sources == []
@@ -407,7 +410,13 @@ def test_refused_part_leaves_only_the_original_recording(
         recording_client.recover_on_node(
             folder, LiveConfig(asr="parakeet", mix_audio=False), connection, start=0.2, end=0.8
         )
-    assert str(refused.value) == "Выбранное распознавание недоступно. Выберите другое"
+    assert (
+        str(refused.value)
+        == {
+            "mac": "Установите Mnema или подключите сервер",
+            "server": "Выбранное распознавание недоступно. Выберите другое",
+        }[where]
+    )
     assert [p.name for p in root.iterdir()] == [NAME] and _files(folder) == before
 
 
@@ -643,3 +652,115 @@ def test_mac_recognizes_through_mnema_asr_and_fetches_the_model_first(
     assert helper.config()["installed"]["parakeet"]
     run = meta.last(result.base)
     assert run is not None and {t.engine for t in run.tracks.values()} == {"parakeet"}
+
+
+def _mac_helper(monkeypatch, tmp_path, **config):
+    """mnema-asr of Mnema.app (the stub) with the model downloaded; ffprobe and ffmpeg stubbed."""
+    import importlib
+
+    from mnema.core import backends, mac_helper
+    from mnema.core.probe import MediaInfo
+    from tests.mac_helper_stub import Helper
+
+    transcribe_mod = importlib.import_module("mnema.core.transcribe")
+    monkeypatch.setattr(mac_helper.platform, "machine", lambda: "arm64")
+    helper = Helper(tmp_path / "app")
+    helper.configure(**config)
+    monkeypatch.setenv("MNEMA_ASR", str(helper.path))
+    monkeypatch.setattr(
+        transcribe_mod,
+        "probe",
+        lambda p: MediaInfo(path=p, duration=1.0, size=1, audio_codec="pcm", video_codec=None),
+    )
+    monkeypatch.setattr(backends, "extract_audio", lambda s, d, **kw: Path(shutil.copyfile(s, d)))
+    return helper
+
+
+_TWO_TRACKS = {
+    "tracks": [
+        {"words": [{"text": "Привет,", "start": 0.0, "end": 0.4}]},
+        {"words": [{"text": "Здравствуйте.", "start": 0.5, "end": 0.9}]},
+    ]
+}
+
+
+def test_mac_recognizes_both_tracks_with_one_model_load(monkeypatch, tmp_path, sources) -> None:
+    """Both tracks of a recording go to mnema-asr in one request; each gets its own words,
+    language, engine and progress line."""
+    helper = _mac_helper(monkeypatch, tmp_path, result={"transcribe": _TWO_TRACKS})
+    _model(monkeypatch)
+    steps: list[str] = []
+    folder = _recording(tmp_path / "mac")
+    result, _full = recording_client.recover_on_node(
+        folder,
+        LiveConfig(mix_audio=False),
+        None,
+        on=lambda fraction, message: steps.append(message),
+    )
+    [call] = helper.calls()
+    assert call["request"]["operation"] == "transcribe"
+    assert len(call["request"]["payload"]["wavs"]) == 2
+    transcript = (result.base / "transcript.txt").read_text(encoding="utf-8")
+    assert "Привет," in transcript and "Здравствуйте." in transcript
+    run = meta.last(result.base)
+    assert run is not None and set(run.tracks) == {"mic", "system"}
+    assert {(t.engine, t.lang) for t in run.tracks.values()} == {("parakeet", "ru")}
+    assert {"Распознаю микрофон…", "Распознаю системный звук…"} <= set(steps)
+
+
+def test_the_first_model_download_does_not_fill_the_recognition_bar(
+    monkeypatch, tmp_path, sources
+) -> None:
+    """The model downloads to the end before both tracks are recognized: recognition goes on
+    from where the download left the bar instead of sitting at the end of the step."""
+    helper = _mac_helper(monkeypatch, tmp_path, installed={"parakeet": False})
+    _model(monkeypatch)
+    seen: list[tuple[float, str]] = []
+    recording_client.recover_on_node(
+        _recording(tmp_path / "mac"),
+        LiveConfig(mix_audio=False),
+        None,
+        on=lambda fraction, message: fraction is not None and seen.append((fraction, message)),
+    )
+    assert helper.operations() == ["transcribe", "download", "transcribe"]
+    downloads = [f for f, m in seen if m.startswith("Скачиваю модель распознавания")]
+    recognized = [f for f, m in seen if m.startswith("Распознаю ")]
+    assert len(downloads) == 2 and downloads[0] < downloads[1]  # the download shows its share
+    assert recognized and downloads[-1] < min(recognized)
+
+
+def test_a_failed_request_of_both_tracks_is_told_per_track(monkeypatch, tmp_path, sources):
+    """The helper could not read the audio: each track has its own remark (the second one tried
+    alone), the recording keeps its audio."""
+    helper = _mac_helper(monkeypatch, tmp_path, fail={"transcribe": "bad_audio"})
+    _model(monkeypatch)
+    result, _full = recording_client.recover_on_node(
+        _recording(tmp_path / "mac"), LiveConfig(mix_audio=False), None
+    )
+    assert [len(c["request"]["payload"]["wavs"]) for c in helper.calls()] == [2, 1]
+    causes = [r.cause for r in result.remarks if r.step == "asr"]
+    assert causes == [
+        "Не удалось распознать дорожку «Микрофон»: не удалось прочитать звук записи",
+        "Не удалось распознать дорожку «Системный звук»: не удалось прочитать звук записи",
+    ]
+
+
+def test_stopping_the_request_of_both_tracks_stops_the_helper(monkeypatch, tmp_path, sources):
+    """Stopping while the one request downloads the model: the stop propagates as is and no
+    helper is left running."""
+    import os
+
+    helper = _mac_helper(monkeypatch, tmp_path, installed={"parakeet": False}, hang=True)
+
+    def on(fraction: float | None, message: str) -> None:
+        if message.startswith("Скачиваю модель распознавания"):
+            raise FinalizeCancelled
+
+    with pytest.raises(FinalizeCancelled):
+        recording_client.recover_on_node(
+            _recording(tmp_path / "mac"), LiveConfig(mix_audio=False), None, on=on
+        )
+    assert [c["request"]["operation"] for c in helper.calls()] == ["transcribe", "download"]
+    for call in helper.calls():
+        with pytest.raises(ProcessLookupError):
+            os.kill(call["pid"], 0)

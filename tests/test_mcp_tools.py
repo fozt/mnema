@@ -18,6 +18,7 @@ import mnema.mcp.tools as tools
 from mnema.core import base
 from mnema.sync.scan import scan
 from mnema.sync.state import Checkpoint, checkpoint_path, save
+from tests.mac_helper_stub import install
 
 NODE = "http://node:8123"
 
@@ -90,6 +91,8 @@ def test_without_server_or_on_mac_works_here(local_root, monkeypatch, tool, stan
     (translation needs the user's model there: test_cli_node); Linux without a server processes
     here, like the CLI."""
     monkeypatch.setattr(base, "STANDALONE", standalone)
+    if standalone:  # Mnema.app with its mnema-asr
+        install(monkeypatch, local_root / "Mnema.app")
     monkeypatch.setenv("MNEMA_RUNNER", server)
     calls = []
 
