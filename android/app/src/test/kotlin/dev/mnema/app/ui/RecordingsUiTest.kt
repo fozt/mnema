@@ -28,6 +28,7 @@ import dev.mnema.app.recordings.FolderRecordingStore
 import dev.mnema.app.recordings.ProcessingState
 import dev.mnema.app.recordings.RecordingDetail
 import dev.mnema.app.recordings.RecordingItem
+import dev.mnema.app.recordings.RecordingStore
 import dev.mnema.app.recordings.inProgress
 import dev.mnema.app.recordings.outcomeKey
 import dev.mnema.app.transcript.WavFixture
@@ -40,6 +41,7 @@ import kotlinx.coroutines.runBlocking
 import java.io.IOException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.MutableStateFlow
 import dev.mnema.app.ui.components.durationLabel
 import dev.mnema.app.ui.recordings.CleanupDialog
 import dev.mnema.app.ui.recordings.DetailAction
@@ -720,6 +722,39 @@ class RecordingsUiTest {
                 WavFixture.write(File(File(root, "2026-10-21_14-35").apply { mkdirs() }, "mic.wav"), WavFixture.samples(1.0))
                 store.refresh()
                 assertEquals(listOf("2026-10-21_14-35"), model.groups.first { !it.isNullOrEmpty() }!!.flatMap { it.items }.map { it.dir.name })
+            }
+        } finally { Dispatchers.resetMain() }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun recordingsTheFirstScanAlreadyReadAreShownBeforeItEnds() {
+        Dispatchers.setMain(UnconfinedTestDispatcher())
+        try {
+            runTest {
+                val items = MutableStateFlow<List<RecordingItem>>(emptyList())
+                val loaded = MutableStateFlow(false)
+                val store = object : RecordingStore {
+                    override val items = items
+                    override val loaded = loaded
+                    override fun refresh() = Unit
+                    override suspend fun detail(dir: File): RecordingDetail? = null
+                    override suspend fun delete(dir: File, forever: Boolean) = false
+                }
+                val model = RecordingsViewModel(store, zone, compute = Dispatchers.Unconfined)
+                backgroundScope.launch { model.groups.collect {} }
+                runCurrent()
+                val read = RecordingItem(File("2026-10-21_Дейли"), "Дейли", 0, 60.0, "", ProcessingState.Done, recordingNow = false)
+                items.value = listOf(read)
+                runCurrent()
+                assertEquals(listOf(read), model.groups.value!!.flatMap { it.items })
+                // a search the part read so far does not match: still no "Nothing found" until the scan ends
+                model.query.value = "Планёрка"
+                runCurrent()
+                assertNull(model.groups.value)
+                loaded.value = true
+                runCurrent()
+                assertEquals(emptyList<DayGroup>(), model.groups.value)
             }
         } finally { Dispatchers.resetMain() }
     }

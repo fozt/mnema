@@ -80,11 +80,17 @@ class FolderRecordingStore(
     private fun refresh(clearFailure: Boolean) {
         scope.launch {
             scanning.withLock {
+                val before = scanned.value
+                // the first scan shows the recordings read so far; later ones keep the previous list until they finish
+                val part: ((List<RecordingItem>) -> Unit)? = if (scannedOnce.value) null else { found -> scanned.value = found; publish() }
                 try {
-                    scanned.value = withContext(io) { scan() }
+                    scanned.value = withContext(io) { scan(part) }
                     if (clearFailure) problem.value = null
-                    publish()
-                } catch (e: IOException) { problem.value = e.message ?: tr("Could not read the recordings") }
+                } catch (e: IOException) {
+                    scanned.value = before
+                    problem.value = e.message ?: tr("Could not read the recordings")
+                }
+                publish()
                 scannedOnce.value = true
             }
         }
@@ -270,7 +276,7 @@ class FolderRecordingStore(
     private fun withLive(item: RecordingItem): RecordingItem =
         live.value[item.dir.absoluteFile]?.takeIf { !item.recordingNow }?.let { item.copy(state = it) } ?: item
 
-    private fun scan(): List<RecordingItem> {
+    private fun scan(part: ((List<RecordingItem>) -> Unit)? = null): List<RecordingItem> {
         checkTrash()
         var layout = libraryFolders(root, knownSections())
         // an interrupted case change: the recording returns under its name instead of vanishing from the list
@@ -281,7 +287,14 @@ class FolderRecordingStore(
         groups.value = layout.sections
         layout.records.forEach { dir -> synchronized(filesLock) { ensureIdentity(dir); migrateSummary(dir) } }
         if (!syncing()) separateCopies(layout.records)
-        return layout.records.mapNotNull(::item).sortedByDescending { it.startedAt }
+        val writing = recordingNow()
+        val found = mutableListOf<RecordingItem>()
+        // names start with the date: the newest recordings come first and later parts add below them
+        layout.records.sortedByDescending { it.name }.forEachIndexed { index, dir ->
+            item(dir, writing)?.let(found::add)
+            if (part != null && (index + 1) % SCAN_PART == 0) part(found.sortedByDescending { it.startedAt })
+        }
+        return found.sortedByDescending { it.startedAt }
     }
 
     /** Like the desktop: a folder copy with the same id becomes a new recording; the folder created first keeps the id. */
@@ -309,11 +322,13 @@ class FolderRecordingStore(
 
     // not while the recording is processed: the result applies its own summary
     private fun migrateSummary(dir: File) {
+        // busy() walks the whole library: asked only for a folder that has something to rename
+        if (!File(dir, RecordingFolder.LEGACY_SUMMARY).isFile) return
         val occupied = try { isBusy(dir) } catch (_: IOException) { true }
         if (!occupied) RecordingFolder.migrateSummary(dir)
     }
 
-    private fun item(dir: File): RecordingItem? {
+    private fun item(dir: File, writing: String? = recordingNow()): RecordingItem? {
         val files = dir.listFiles()?.filter { it.isFile } ?: return null
         val names = files.map { it.name }.toSet()
         // like the desktop _card: audio of any format or a text makes a card
@@ -321,7 +336,6 @@ class FolderRecordingStore(
         if (audio.isEmpty() && RecordingFolder.TRANSCRIPT !in names && RecordingFolder.SUMMARY !in names) return null
         val seconds = audio.filter { it.extension.lowercase() == "wav" }.maxOfOrNull(Wav::seconds) ?: 0.0
         val summary = if (RecordingFolder.SUMMARY in names) read(File(dir, RecordingFolder.SUMMARY))?.let(::parseSummaryFile) else null
-        val writing = recordingNow()
         val relative = dir.relativeTo(root.canonicalFile).invariantSeparatorsPath
         val recording = relative == writing || dir.absolutePath == writing
         val zone = ZoneId.systemDefault()
@@ -389,6 +403,8 @@ class FolderRecordingStore(
 
     private companion object {
         val TRACKS = listOf("mic.wav", "system.wav")
+        // recordings read before the first scan shows them: about one screen
+        const val SCAN_PART = 10
         val FAILED: String get() = tr("Processing failed")
         val CLEANUP_FAILED: String get() = tr("Could not delete the audio")
         val NOT_CLEANABLE: String get() = tr("The audio of this recording can't be deleted yet")

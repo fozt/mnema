@@ -77,9 +77,9 @@ class RecordingsViewModel(
     val failure = combine(store.failure, syncStatus, serverNotice) { local, remote, notice ->
         (listOfNotNull(local, notice) + remote.errors).distinct().joinToString("\n").ifBlank { null }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), null)
-    // null until the first scan of the folders: the list shows nothing rather than "No recordings yet"
+    // null while the first scan has found nothing yet: no cards rather than "No recordings yet"; what it found shows at once
     val groups: StateFlow<List<DayGroup>?> = combine(store.items, store.loaded, query, section) { items, loaded, text, group ->
-        if (loaded) groupByDay(filterRecordings(items, text, group), LocalDate.now(zone), zone) else null
+        filterRecordings(items, text, group).takeIf { loaded || it.isNotEmpty() }?.let { groupByDay(it, LocalDate.now(zone), zone) }
     }.flowOn(compute)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), null)
 
