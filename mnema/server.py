@@ -18,7 +18,7 @@ from .api.devices import register_device_routes
 from .api.files import register_file_routes
 from .api.jobs import register_job_routes
 from .api.lang import add_language_middleware
-from .api.library import register_library_routes
+from .api.library import Libraries, register_library_routes
 from .api.live import register_live_routes
 from .api.live_translate import register_live_translate_routes
 from .api.node import register_node_routes
@@ -86,6 +86,7 @@ def create_app(root: Path) -> FastAPI:
     app = FastAPI(title="mnema", docs_url=None, redoc_url=None, openapi_url=None)
     app.state.root = root.resolve()
     app.state.library = LibraryFiles(app.state.root / "library") if settings.library else None
+    app.state.libraries = Libraries(app.state.root, app.state.library)
     mnema_dir = app.state.root / ".mnema"
     mnema_dir.mkdir(parents=True, exist_ok=True)
     work = mnema_dir / "work"

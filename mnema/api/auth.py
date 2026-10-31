@@ -12,6 +12,7 @@ from starlette.concurrency import run_in_threadpool
 from ..i18n import _
 from ..install_setup import server_token
 from ..jobs import NODE_OWNER
+from ..users import OWNER, Caller
 
 # The only way in without a token: exchanging an invitation for a device token.
 CLAIM_PATH = "/api/devices/claim"
@@ -21,15 +22,15 @@ def bearer(header: str) -> str:
     return header[7:].strip() if header.lower().startswith("bearer ") else ""
 
 
-async def caller(app: FastAPI, provided: str, node_token: str) -> str | None:
-    """Who is asking: NODE_OWNER for the node token (MNEMA_TOKEN), a device id for a device
-    that is not revoked, None when the token is not accepted."""
+async def caller(app: FastAPI, provided: str, node_token: str) -> Caller | None:
+    """Who is asking: NODE_OWNER (the owner's) for the node token (MNEMA_TOKEN), the device and
+    its user for a device that is not revoked, None when the token is not accepted."""
     if not provided:
         return None
     if hmac.compare_digest(provided.encode(), node_token.encode()):
-        return NODE_OWNER
+        return Caller(device=NODE_OWNER, user=OWNER)
     found = await run_in_threadpool(app.state.devices.verify, provided, now=time.time())
-    return found.device if found is not None else None
+    return found
 
 
 async def authorized(app: FastAPI, provided: str, node_token: str) -> bool:
@@ -43,19 +44,21 @@ def add_auth_middleware(app: FastAPI) -> None:
         of the node or of a device.
 
         Without a token the server is open (local development). The caller goes to
-        request.state.owner: a device sees only its own jobs.
+        request.state.owner and its user to request.state.user: a device sees only its own jobs.
         """
         token = server_token()
         path = request.scope["path"]
         claim = request.method == "POST" and path == CLAIM_PATH
         if not token:
             request.state.owner = NODE_OWNER
+            request.state.user = OWNER
         elif path.startswith("/api/") and not claim:
             provided = bearer(request.headers.get("authorization", ""))
-            owner = await caller(request.app, provided, token)
-            if owner is None:
+            who = await caller(request.app, provided, token)
+            if who is None:
                 return JSONResponse(
                     {"detail": _("A new invitation from the server is needed")}, status_code=401
                 )
-            request.state.owner = owner
+            request.state.owner = who.device
+            request.state.user = who.user
         return await call_next(request)
