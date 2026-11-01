@@ -1,8 +1,9 @@
 """The panel's recordings list: recording folders → cards.
 
-Everything comes from the folder's files: the length from WAV, the gist from summary.txt, the date
-and history from meta. Folders without meta are read by their audio and text files. The cache
-tracks every file's changes; this walk is for display only, never for sync deletions.
+Everything comes from the folder's files: the length from WAV or the history, the gist from
+summary.txt, the date and history from meta. Folders without meta are read by their audio and text
+files. The cache tracks every file's changes; this walk is for display only, never for sync
+deletions.
 """
 
 from __future__ import annotations
@@ -43,7 +44,7 @@ class RecordingCard(BaseModel):
     part: str = ""  # part mark of a time-named folder: " (0.10–1.35)"
     started: datetime
     time_known: bool = True  # False: only the date is known (from the folder name)
-    seconds: float  # 0: unknown length (no WAV)
+    seconds: float  # meta.recording_seconds; 0: unknown
     gist: str  # from summary.txt
     has_text: bool
     has_summary: bool
@@ -158,14 +159,11 @@ def _card(folder: Path, files: dict[str, os.stat_result]) -> RecordingCard | Non
     has_summary = FileName.SUMMARY in files
     if not audio and not has_text and not has_summary:
         return None  # not a recording
-    seconds = max(
-        (
-            wav_seconds(folder / name, st.st_size)
-            for name, st in files.items()
-            if name.lower().endswith(".wav")
-        ),
-        default=0.0,
-    )
+    wav = [
+        wav_seconds(folder / name, st.st_size)
+        for name, st in files.items()
+        if name.lower().endswith(".wav")
+    ]
     when, time_known = recording_start(folder, files)
 
     def read(name: str) -> str:
@@ -198,7 +196,7 @@ def _card(folder: Path, files: dict[str, os.stat_result]) -> RecordingCard | Non
         part=shown.part,
         started=when,
         time_known=time_known,
-        seconds=seconds,
+        seconds=meta.recording_seconds(wav, data),
         gist=_gist(read(FileName.SUMMARY)),
         has_text=has_text,
         has_summary=has_summary,

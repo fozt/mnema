@@ -242,22 +242,25 @@ class RecordingsUiTest {
     }
 
     @Test
-    fun subtitleIsTheStateAfterDayAndTimeOfANamedRecording() {
-        assertEquals("готово", recordingSubtitle(item(), today, zone))
-        assertEquals("распознаётся · 40 %", recordingSubtitle(item(state = ProcessingState.Recognizing(0.4, "")), today, zone))
-        assertEquals("распознаётся", recordingSubtitle(item(state = ProcessingState.Recognizing(null, "")), today, zone))
-        assertEquals("отправляется · 60 %", recordingSubtitle(item(state = ProcessingState.Uploading(0.6)), today, zone))
-        assertEquals("не расшифрована", recordingSubtitle(item(state = ProcessingState.AudioOnly("Сервер не задан")), today, zone))
-        assertEquals("ждёт сети", recordingSubtitle(item(state = ProcessingState.WaitingNetwork), today, zone))
-        assertEquals("ошибка", recordingSubtitle(item(state = ProcessingState.Failed("Сервер недоступен")), today, zone))
-        assertEquals("идёт запись", recordingSubtitle(item(state = ProcessingState.Unprocessed, recordingNow = true), today, zone))
-        assertEquals("Сегодня, 9:05 · готово", recordingSubtitle(named(), today, zone))
+    fun subtitleIsTheLengthAndStateAfterDayAndTimeOfANamedRecording() {
+        assertEquals("1 мин · готово", recordingSubtitle(item(), today, zone))
+        assertEquals("1 мин · распознаётся · 40 %", recordingSubtitle(item(state = ProcessingState.Recognizing(0.4, "")), today, zone))
+        assertEquals("1 мин · распознаётся", recordingSubtitle(item(state = ProcessingState.Recognizing(null, "")), today, zone))
+        assertEquals("1 мин · отправляется · 60 %", recordingSubtitle(item(state = ProcessingState.Uploading(0.6)), today, zone))
+        assertEquals("1 мин · не расшифрована", recordingSubtitle(item(state = ProcessingState.AudioOnly("Сервер не задан")), today, zone))
+        assertEquals("1 мин · ждёт сети", recordingSubtitle(item(state = ProcessingState.WaitingNetwork), today, zone))
+        assertEquals("1 мин · ошибка", recordingSubtitle(item(state = ProcessingState.Failed("Сервер недоступен")), today, zone))
+        assertEquals("1 мин · идёт запись", recordingSubtitle(item(state = ProcessingState.Unprocessed, recordingNow = true), today, zone))
+        assertEquals("Сегодня, 9:05 · 1 мин · готово", recordingSubtitle(named(), today, zone))
         assertEquals(
-            "Вчера, 9:05 · распознаётся · 40 %",
+            "Вчера, 9:05 · 1 мин · распознаётся · 40 %",
             recordingSubtitle(named(at("2026-10-20T09:05:00"), ProcessingState.Recognizing(0.4, "")), today, zone),
         )
         // Midnight is a recording time like any other, it is not hidden.
-        assertEquals("28 сент., 0:00 · без пересказа", recordingSubtitle(named(at("2026-09-28T00:00:00"), ProcessingState.NoSummary("")), today, zone))
+        assertEquals("28 сент., 0:00 · 1 мин · без пересказа", recordingSubtitle(named(at("2026-09-28T00:00:00"), ProcessingState.NoSummary("")), today, zone))
+        // unknown length: nothing in its place
+        assertEquals("Сегодня, 9:05 · готово", recordingSubtitle(named(seconds = 0.0), today, zone))
+        assertEquals("готово", recordingSubtitle(item(seconds = 0.0), today, zone))
     }
 
     @Test
@@ -269,18 +272,21 @@ class RecordingsUiTest {
         assertNull("запись без раздела — без тега", sectionTag(root, filter = null))
         assertNull("выбран раздел — у всех строк он один", sectionTag(work, filter = "Работа"))
         assertNull("«Без раздела»", sectionTag(root, filter = ""))
-        assertEquals("Работа · Сегодня, 9:05 · готово", recordingSubtitle(work, today, zone, sectionTag(work, null)))
-        assertEquals("Сегодня, 9:05 · готово", recordingSubtitle(work, today, zone, sectionTag(work, "Работа")))
-        assertEquals("Сегодня, 9:05 · готово", recordingSubtitle(root, today, zone, sectionTag(root, null)))
+        assertEquals("Работа · Сегодня, 9:05 · 1 мин · готово", recordingSubtitle(work, today, zone, sectionTag(work, null)))
+        assertEquals("Сегодня, 9:05 · 1 мин · готово", recordingSubtitle(work, today, zone, sectionTag(work, "Работа")))
+        assertEquals("Сегодня, 9:05 · 1 мин · готово", recordingSubtitle(root, today, zone, sectionTag(root, null)))
         val unnamed = item().copy(section = "Работа")
-        assertEquals("Работа · готово", recordingSubtitle(unnamed, today, zone, sectionTag(unnamed, null)))
+        assertEquals("Работа · 1 мин · готово", recordingSubtitle(unnamed, today, zone, sectionTag(unnamed, null)))
     }
 
     @Test
     fun detailHeaderNamesDayAndTimeOnlyWhenTheTitleDoesNot() {
-        assertEquals("1:05", whenLabel(item(), today, zone))
-        assertEquals("Сегодня, 9:05 · 1:05", whenLabel(named(), today, zone))
+        assertEquals("1 мин", whenLabel(item(), today, zone))
+        assertEquals("Сегодня, 9:05 · 1 мин", whenLabel(named(), today, zone))
+        assertEquals("Сегодня, 9:05 · 1 ч 10 мин", whenLabel(named(seconds = 4200.3), today, zone))
         assertEquals("28 сент., 0:00", whenLabel(named(at("2026-09-28T00:00:00"), seconds = 0.0), today, zone))
+        // synced without audio: the length from the history
+        assertEquals("Сегодня, 9:05 · 21 мин", whenLabel(named(seconds = 0.0).copy(lengthS = 1290.0), today, zone))
     }
 
     @Test

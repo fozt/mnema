@@ -32,7 +32,7 @@ import dev.mnema.app.server.AsrOption
 import dev.mnema.app.server.ConnectionException
 import dev.mnema.app.server.parseConnection
 import dev.mnema.app.settings.Settings
-import dev.mnema.app.ui.components.durationLabel
+import dev.mnema.app.ui.components.lengthLabel
 import dev.mnema.app.ui.components.progressOf
 import java.io.File
 import java.io.IOException
@@ -447,12 +447,12 @@ fun recordingStart(item: RecordingItem, today: LocalDate, zone: ZoneId): String?
 }
 
 /**
- * Under the title: the state in lower case, for a titled one after the day and time: "Yesterday, 9:05 · recognizing · 40%";
- * [section] goes first: "Work · Yesterday, 9:05 · done".
+ * Under the title, like the desktop panel: the day and time of a titled one, the length, the state in lower case:
+ * "Yesterday, 9:05 · 21 min · recognizing · 40%"; [section] goes first: "Work · Yesterday, 9:05 · 21 min · done".
  */
 fun recordingSubtitle(item: RecordingItem, today: LocalDate, zone: ZoneId, section: String? = null): String {
     val state = if (item.recordingNow) RECORDING_NOW else stateLabel(item.state)
-    return listOfNotNull(section, recordingStart(item, today, zone), state.replaceFirstChar { it.lowercaseChar() },
+    return listOfNotNull(section, whenLabel(item, today, zone).ifEmpty { null }, state.replaceFirstChar { it.lowercaseChar() },
         pendingLabel(item)?.replaceFirstChar { it.lowercaseChar() }).joinToString(SEPARATOR)
 }
 
@@ -465,12 +465,9 @@ fun pendingLabel(item: RecordingItem): String? = item.pendingTitle?.let { tr("Wi
 /** The recording's section in the All sections feed; with a section or No section chosen it is the same for all rows, so null. */
 fun sectionTag(item: RecordingItem, filter: String?): String? = item.section?.takeIf { filter == null && it.isNotEmpty() }
 
-/** Length to the right of the title: "2:41", "1:05:12"; under a second gives null. */
-fun recordingLength(item: RecordingItem): String? = length(item.durationS)
-
-/** Above the title on the screen: "Today, 14:35 · 1:05"; an untitled one has the day and time in its title already. */
+/** Day, time and length, as on the desktop panel: "Today, 14:35 · 21 min"; an untitled one has the day and time in its title already. */
 fun whenLabel(item: RecordingItem, today: LocalDate, zone: ZoneId): String =
-    listOfNotNull(recordingStart(item, today, zone), length(item.durationS)).joinToString(SEPARATOR)
+    listOfNotNull(recordingStart(item, today, zone), item.lengthS.takeIf { it > 0 }?.let(::lengthLabel)).joinToString(SEPARATOR)
 
 enum class DetailAction {
     PROCESS,
@@ -676,7 +673,5 @@ private fun hourMinute(epochMs: Long, zone: ZoneId): String {
     val time = Instant.ofEpochMilli(epochMs).atZone(zone).toLocalTime()
     return "${time.hour}:${pad(time.minute.toLong())}"
 }
-
-private fun length(seconds: Double): String? = if (seconds >= 1) durationLabel(seconds) else null
 
 private fun pad(value: Long): String = value.toString().padStart(2, '0')

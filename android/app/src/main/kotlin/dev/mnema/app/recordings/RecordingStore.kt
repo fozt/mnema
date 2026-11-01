@@ -38,6 +38,7 @@ data class RecordingItem(
     val dir: File,
     val title: String,
     val startedAt: Long,
+    // the longest WAV track on the phone, 0 — no audio: playing and processing need it
     val durationS: Double,
     val about: String,
     val state: ProcessingState,
@@ -50,6 +51,8 @@ data class RecordingItem(
     val pendingTitle: String? = null,
     // warning from the last processing: the other side's voice was not recorded
     val warning: String? = null,
+    // the length shown, by the shared rule Meta.recordingSeconds: without audio from the history; 0 — unknown
+    val lengthS: Double = durationS,
 )
 
 data class RecordingDetail(

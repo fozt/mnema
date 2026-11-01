@@ -10,6 +10,7 @@ import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.double
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -44,6 +45,18 @@ class MetaTest {
             val runs = case.getValue("runs").jsonArray
             val shown = case.getValue("shown").takeUnless { it is JsonNull }?.jsonPrimitive?.int
             assertEquals(case.getValue("name").jsonPrimitive.content, shown?.let { runs[it] }, Meta.lastRun(JsonObject(mapOf("runs" to runs))))
+        }
+    }
+
+    /** Fixture shared with the desktop recording-length-v1: the WAV tracks, without them the history. */
+    @Test
+    fun wavAndHistoryGiveTheSharedLength() {
+        val cases = Json.parseToJsonElement(resource("recording-length-v1.json")).jsonObject.getValue("cases").jsonArray
+        for (case in cases.map { it.jsonObject }) {
+            val wav = case.getValue("wav").jsonArray.map { it.jsonPrimitive.double }
+            val runs = case.getValue("runs").takeUnless { it is JsonNull }
+            val data = runs?.let { JsonObject(mapOf("version" to JsonPrimitive(1), "runs" to it)) }
+            assertEquals(case.getValue("name").jsonPrimitive.content, case.getValue("seconds").jsonPrimitive.double, Meta.recordingSeconds(wav, data), 0.0)
         }
     }
 

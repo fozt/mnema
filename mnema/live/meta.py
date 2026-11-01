@@ -215,6 +215,29 @@ def record_state(sizes: Mapping[str, int], data: Any, work: Work = Work.NONE) ->
     return RecordState.UNPROCESSED if sound else RecordState.NO_SPEECH  # nothing to process
 
 
+def recording_seconds(wav: Sequence[float], data: Any) -> float:
+    """The one rule for a recording's length (fixture recording-length-v1): wav — lengths of the
+    folder's WAV tracks, data — parsed meta. The longest WAV track; without WAV (sync carries the
+    texts and the history, not the audio) the longest track of the last run that measured its
+    tracks: a "Summarize" run measures none. 0 — unknown."""
+    if wav:
+        return max(wav)
+    runs = data.get("runs") if isinstance(data, dict) else None
+    for run in reversed(runs if isinstance(runs, list) else []):
+        tracks = run.get("tracks") if isinstance(run, dict) else None
+        found = [
+            t["seconds"]
+            for t in (tracks.values() if isinstance(tracks, dict) else ())
+            if isinstance(t, dict)
+            and isinstance(t.get("seconds"), int | float)
+            and not isinstance(t["seconds"], bool)
+            and t["seconds"] > 0
+        ]
+        if found:
+            return float(max(found))
+    return 0.0
+
+
 def _shown(data: Any) -> dict | None:
     """The last processing in the history except a stopped one (nothing to say about it): the
     remarks are about it, and "Summarize" takes it as the previous one (fixture shown-run-v1)."""

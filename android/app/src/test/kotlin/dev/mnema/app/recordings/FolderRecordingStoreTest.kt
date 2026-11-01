@@ -254,6 +254,25 @@ class FolderRecordingStoreTest {
     }
 
     @Test
+    fun syncedRecordingWithoutAudioTakesItsLengthFromTheHistory() {
+        val dir = File(root, "2026-10-21_Созвон").apply { mkdirs() }
+        File(dir, RecordingFolder.TRANSCRIPT).writeText("mic: привет\n")
+        File(dir, Meta.FILE).writeText(
+            """{"version":1,"runs":[{"status":"ok","tracks":{"mic":{"seconds":4200.3},"system":{"seconds":4199.0}}},""" +
+                """{"kind":"summary","status":"ok","tracks":{}}]}""",
+        )
+        folder("2026-10-21_Дейли", seconds = 3.0)
+
+        val items = store().byName()
+        val synced = items.getValue("2026-10-21_Созвон")
+        val local = items.getValue("2026-10-21_Дейли")
+
+        assertEquals(0.0, synced.durationS, 0.0)
+        assertEquals(4200.3, synced.lengthS, 0.001)
+        assertEquals(3.0, local.lengthS, 0.001)
+    }
+
+    @Test
     fun detailHasSummaryDialogTracksAndRemarks() = runBlocking {
         val dir = folder(
             "2026-10-21_Дейли",

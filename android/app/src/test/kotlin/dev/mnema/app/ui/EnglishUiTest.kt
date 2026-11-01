@@ -95,7 +95,7 @@ class EnglishUiTest {
         assertEquals("Oct 3", dayLabel(LocalDate.of(2026, 10, 3), today))
         assertEquals("Dec 31, 2025", dayLabel(LocalDate.of(2025, 12, 31), today))
         val recognizing = item(ProcessingState.Recognizing(0.4, ""))
-        assertEquals("Yesterday, 9:05 · recognizing · 40%", recordingSubtitle(recognizing, today, zone))
+        assertEquals("Yesterday, 9:05 · 1 min · recognizing · 40%", recordingSubtitle(recognizing, today, zone))
         assertEquals("Daily · Oct 21", recordingLabel(recognizing, today, zone, relative = false))
         assertEquals("Yesterday, 9:05", recordingTitle(item(ProcessingState.Done, "09:05", timeTitle = true), today, zone))
         val states = listOf(ProcessingState.Unprocessed, ProcessingState.WaitingNetwork, ProcessingState.Preparing, ProcessingState.Uploading(0.5),

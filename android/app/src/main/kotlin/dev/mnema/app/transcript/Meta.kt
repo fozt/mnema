@@ -64,6 +64,23 @@ object Meta {
     fun lastRun(data: JsonObject?): JsonObject? = (data?.get("runs") as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }
         .lastOrNull { string(it["status"]) != "stopped" }
 
+    /**
+     * Desktop meta.recording_seconds (recording-length-v1): the longest of the folder's [wav] tracks; without WAV (sync
+     * carries the texts and the history, not the audio) the longest track of the last run that measured its tracks: a
+     * summary run measures none. 0 — unknown.
+     */
+    fun recordingSeconds(wav: List<Double>, data: JsonObject?): Double {
+        wav.maxOrNull()?.let { return it }
+        for (run in runsOf(data).orEmpty().asReversed()) {
+            val tracks = ((run as? JsonObject)?.get("tracks") as? JsonObject)?.values.orEmpty()
+            val found = tracks.mapNotNull { track ->
+                ((track as? JsonObject)?.get("seconds") as? JsonPrimitive)?.takeIf { !it.isString }?.doubleOrNull?.takeIf { it > 0 }
+            }
+            found.maxOrNull()?.let { return it }
+        }
+        return 0.0
+    }
+
     fun hasJob(dir: File, job: String): Boolean =
         (read(dir)?.get("runs") as? JsonArray).orEmpty().any { string((it as? JsonObject)?.get("job")) == job }
 

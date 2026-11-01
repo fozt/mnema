@@ -81,8 +81,8 @@ def _when(t: datetime, now: datetime, *, clock: bool = True) -> str:
     return f"{day}, {t.hour}:{t.minute:02d}" if clock else day
 
 
-def _length(seconds: float) -> str:
-    """A length: "1 h 12 min", "2 h", "14 min", "40 s"."""
+def length_label(seconds: float) -> str:
+    """A recording's length (fixture length-labels-v1): "1 h 12 min", "2 h", "14 min", "40 s"."""
     s = int(seconds)
     if s < 60:
         return _("{n} s", n=s)
@@ -180,7 +180,7 @@ def _card(
     job — the recording in the processing queue: running shows the step and a bar, waiting
     "Queued"."""
     when = _when(c.started, now, clock=c.time_known)
-    length = _length(c.seconds) if c.seconds else ""
+    length = length_label(c.seconds) if c.seconds else ""
 
     def key(action: str) -> str:
         return f"record:{c.id}:{action}"

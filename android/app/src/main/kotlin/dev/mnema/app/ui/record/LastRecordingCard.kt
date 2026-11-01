@@ -20,8 +20,6 @@ import androidx.compose.ui.unit.dp
 import dev.mnema.app.i18n.tr
 import dev.mnema.app.recordings.RecordingItem
 import dev.mnema.app.ui.components.StateShape
-import dev.mnema.app.ui.recordings.TitleWithLength
-import dev.mnema.app.ui.recordings.recordingLength
 
 private val LAST: String get() = tr("Last recording")
 
@@ -53,7 +51,7 @@ internal fun LastRecordingCard(
             StateShape(item.state, 48.dp)
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(LAST, style = MaterialTheme.typography.labelMedium, color = LocalContentColor.current.copy(alpha = LABEL_ALPHA))
-                TitleWithLength(title, recordingLength(item), MaterialTheme.typography.titleMediumEmphasized)
+                Text(title, style = MaterialTheme.typography.titleMediumEmphasized, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(subtitle, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 warning?.let {
                     Text(it, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.error, maxLines = 2, overflow = TextOverflow.Ellipsis)
