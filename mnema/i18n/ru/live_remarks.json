@@ -88,5 +88,18 @@
   "Translating…": "Перевожу…",
   "Writing the summary…": "Составляю пересказ…",
   "Saving…": "Сохраняю…",
-  "Coming up with a title…": "Придумываю название…"
+  "Coming up with a title…": "Придумываю название…",
+  "No permission to record the screen": "Нет разрешения на запись экрана",
+  "The recording has no video": "Видео не записано",
+  "Allow Mnema to record the screen in System Settings, Privacy & Security, and restart Mnema": "Разрешите Mnema запись экрана в Системных настройках, раздел «Конфиденциальность и безопасность», и перезапустите Mnema",
+  "No screen recording permission": "Нет разрешения на запись экрана",
+  "Less than 2 GB of free disk space": "На диске свободно меньше 2 ГБ",
+  "Free up disk space": "Освободите место на диске",
+  "Not enough disk space": "Мало места на диске",
+  "The recorded screen was disconnected": "Записываемый экран отключился",
+  "The video stops at that point": "Видео обрывается на этом месте",
+  "Screen disconnected": "Экран отключился",
+  "Screen recording failed": "Запись экрана не удалась",
+  "The video may be missing or incomplete": "Видео может отсутствовать или быть неполным",
+  "no video": "нет видео"
 }

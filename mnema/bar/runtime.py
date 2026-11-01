@@ -200,6 +200,11 @@ class Platform(Protocol):
         """The settings window on tab ``tab`` (a SettingsModel tab id)."""
         ...
 
+    def screen(self, op: str, path: Path | None = None) -> None:
+        """The screen video (Mac app): start into path, pause, resume, stop; the app answers
+        through BarRuntime.screen_event. Raises when there is no app to record it."""
+        ...
+
 
 class _NullPlatform:
     def notify(self, title: str, message: str, path: Path | None) -> None: ...
@@ -244,6 +249,9 @@ class _NullPlatform:
 
     def open_settings(self, tab: str) -> None: ...
 
+    def screen(self, op: str, path: Path | None = None) -> None:
+        raise OSError("no app to record the screen")
+
 
 def _system_available() -> bool:
     try:
@@ -252,6 +260,42 @@ def _system_available() -> bool:
         return bool(system_source().available())
     except Exception:  # noqa: BLE001 - no pyobjc/pactl: microphone only
         return False
+
+
+def _video_history(prepared: Any) -> None:
+    """The screen video for the history of the recording's processing: its offset, and a remark
+    when it did not start or broke off."""
+    screen = getattr(prepared, "screen", None)
+    if screen is None:
+        return
+    from ..live.remarks import video_failed
+
+    prepared.run.video = meta.VideoRun(offset=screen.offset, error=screen.error)
+    if screen.error:
+        prepared.run.notes.append(video_failed(screen.error))
+
+
+def _keep_video(prepared: Any) -> None:
+    """The video facts go into the recording's history at once: a processing that comes later
+    (or never: the server was down, Mnema quit) does not lose them."""
+    video = prepared.run.video
+    if video is None:
+        return
+    notes = [n for n in prepared.run.notes if n.code.startswith("video")]
+    try:
+        with FILES_LOCK:
+            meta.set_video(prepared.base, meta.RecordedVideo(**video.model_dump(), notes=notes))
+    except OSError:  # the history is not writable: the recording stays as it is
+        logger.warning("the video of %s is not in its history", prepared.base, exc_info=True)
+
+
+def _carry_video(folder: Path) -> None:
+    """A processing appended its run: the recording's video and its remarks go into it."""
+    try:
+        with FILES_LOCK:
+            meta.carry_video(folder)
+    except OSError:
+        logger.warning("the video of %s is not in its last processing", folder, exc_info=True)
 
 
 def _drop_unused_tracks(prepared: Any, tracks: list[Any]) -> list[Any]:
@@ -1028,6 +1072,8 @@ class BarRuntime:
             self.prefs.mic = not self.prefs.mic
         elif key == "toggle_system" and idle:
             self.prefs.system = not self.prefs.system
+        elif key == "toggle_screen" and idle and _base.STANDALONE:
+            self.prefs.screen = not self.prefs.screen
         elif key.startswith("record_section:") and idle:
             name = key.removeprefix("record_section:")
             if name and name not in self.record_sections():
@@ -1153,6 +1199,11 @@ class BarRuntime:
             return
         for w in prepared.writers.values():
             w.paused = paused
+        if (screen := getattr(prepared, "screen", None)) is not None:  # the video with them
+            if paused:
+                screen.pause()
+            else:
+                screen.resume()
         now = time.monotonic()
         if paused:
             self._paused_at = now
@@ -2136,6 +2187,7 @@ class BarRuntime:
                             title=... if whole else part.title, auto_name=auto_name,
                             replace=part.replace, lang=job.lang, asr=task.asr, tracks=chosen,
                         )  # fmt: skip
+                    _carry_video(done)
                     self._finish(result, done, retry)
                     # never reached the server: no part, so the full one gets no part title
                     return None if result.defer_command else self.state.last_result
@@ -2151,6 +2203,7 @@ class BarRuntime:
 
                         with FILES_LOCK:
                             (folder / PROCESSING_MARK).unlink(missing_ok=True)
+                        _carry_video(folder)
                         self.state.last_result = recognized.transcript_txt or folder
                         self.state.last_warnings = list(recognized.remarks)
                         self.state.last_summary = None
@@ -2269,6 +2322,7 @@ class BarRuntime:
 
         cancel_active_job()  # a step was running on the server: free it
         keep_audio_only(base, started=task.began)
+        _carry_video(base)
         self.state.last_result = base
         self.state.last_warnings = []
         self.state.last_summary = None
@@ -2378,6 +2432,7 @@ class BarRuntime:
             summary=self.prefs.summary,
             summary_lang=self.prefs.summary_lang,
             stream=False,  # recording only: the text comes from an offline pass after stop
+            screen=_base.STANDALONE and self.prefs.screen,
             runner=runner,
         )
 
@@ -2389,7 +2444,10 @@ class BarRuntime:
         with FILES_LOCK:
             base = live_base(None, section=self._record_section())
             self._active = base
-        prepared = build_live(config, base=base)
+        if config.screen:
+            prepared = build_live(config, base=base, screen=self._platform.screen)
+        else:
+            prepared = build_live(config, base=base)
         for label, w in prepared.writers.items():  # sources off in the settings write silence
             w.muted = not (self.prefs.mic if label == "mic" else self.prefs.system)
         try:
@@ -2400,6 +2458,7 @@ class BarRuntime:
                     session.stop()
             self._on_change()
             tracks = session.run()
+            _video_history(prepared)
             prepared.recording_error = getattr(session, "recording_error", None)
             if prepared.recording_error:
                 self.state.notice = _(
@@ -2456,6 +2515,7 @@ class BarRuntime:
                     _("Recording deleted"), _("The audio and the transcript were not saved"), None
                 )
                 return
+            self._finish_video(prepared)
             if not self.quit_requested:  # quitting: the recording is saved, process it later
                 with FILES_LOCK:
                     job = Job(id=self._identity(prepared.base), folder=prepared.base)
@@ -2509,6 +2569,38 @@ class BarRuntime:
 
         self._ask_title(f"result:{task.job.id}", current, named, cancel=_("Skip"), when=wanted)
 
+    def screen_event(self, state: str, reason: str = "", offset: float | None = None) -> None:
+        """The app's answer about the screen video of the current recording; a late one after the
+        recording ended goes nowhere."""
+        prepared = self._prepared
+        screen = getattr(prepared, "screen", None) if prepared is not None else None
+        if screen is not None:
+            screen.event(state, reason, offset)
+        if state == "failed":
+            self._on_change()
+
+    def _finish_video(self, prepared: Any) -> None:
+        """The video with the recording's sound, before processing is queued: the folder may be
+        renamed once it is processed."""
+        if getattr(prepared, "screen", None) is None:
+            return
+        from ..live import video
+
+        notice = self.state.notice
+
+        def shown(_fraction: float | None, message: str) -> None:
+            self.state.notice = message
+            self._on_change()
+
+        try:
+            video.finish(prepared.base, prepared.run, on=shown)
+        except Exception:  # noqa: BLE001 - the recording and its sound stay as they are
+            logger.exception("the video of %s was not assembled", prepared.base)
+        finally:
+            self.state.notice = notice
+            self._on_change()
+        _keep_video(prepared)
+
     # ── GUI timer ──────────────────────────────────────────────────────────────
 
     def tick(self) -> None:
@@ -2547,4 +2639,6 @@ class BarRuntime:
             history = (prev.history + [float(getattr(w, "level", 0.0))])[-_HISTORY:]
             muted = bool(getattr(w, "muted", False))
             meters.append(SourceMeter(label=label, history=history, muted=muted))
+        if (screen := getattr(prepared, "screen", None)) is not None:  # off once it failed
+            meters.append(SourceMeter(label="screen", muted=bool(screen.error)))
         self.state.meters = meters

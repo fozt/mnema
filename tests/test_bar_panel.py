@@ -244,6 +244,7 @@ def test_idle_panel_start_sources_footer_notices() -> None:
     assert [(s.key, s.title, s.symbol, s.on) for s in p.idle.sources] == [
         ("toggle_mic", "Микрофон", "mic.fill", True),
         ("toggle_system", "Системный звук", "speaker.wave.2.fill", True),
+        ("toggle_screen", "Экран", "display", False),  # the Mac: the screen video, off at first
     ]
     # the "More" menu: library commands, a separator, quit
     assert [(b.key, b.divider) for b in p.footer] == [
@@ -254,7 +255,7 @@ def test_idle_panel_start_sources_footer_notices() -> None:
     assert p.settings.tabs[0].id == "record"
 
     off = _panel(prefs=BarPrefs(mic=False, system=False))
-    assert not off.idle.start.enabled and [s.on for s in off.idle.sources] == [False, False]
+    assert not off.idle.start.enabled and [s.on for s in off.idle.sources] == [False, False, False]
     notices = _panel(BarState(error="нет доступа к папке", notice="сервер недоступен")).notices
     assert [n.text for n in notices] == ["Нет доступа к папке", "Сервер недоступен"]
 

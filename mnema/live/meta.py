@@ -48,10 +48,17 @@ class LightRun(BaseModel):
 
 
 class VideoRun(BaseModel):
-    """The screen video of the recording."""
+    """The screen video of the recording (Mac)."""
 
-    offset: float | None = None  # seconds from the sound's start to the first frame
-    error: str = ""  # why there is no video.mp4
+    offset: float | None = None  # seconds from the audio start to the first frame; None — none
+    error: str = ""  # why there is no full video: permission, no_space, display_lost, writer…
+
+
+class RecordedVideo(VideoRun):
+    """The video as the recording left it, kept in the history apart from any processing: a
+    processing that comes later (stopped, after a server was down, after quitting) gets it."""
+
+    notes: list[Remark] = Field(default_factory=list)
 
 
 class Run(BaseModel):
@@ -72,6 +79,7 @@ class Run(BaseModel):
     notes: list[Remark] = Field(default_factory=list)  # remarks with their steps, before merging
     info: list[str] = Field(default_factory=list)
     error: str | None = None
+    video: VideoRun | None = None  # the screen video written with the recording
 
 
 def now() -> str:
@@ -282,11 +290,17 @@ def remarks_of(data: Any) -> list[str]:
     return result
 
 
-def amend(base: Path, *, notes: Sequence[Remark] = (), info: Sequence[str] = ()) -> None:
+def amend(
+    base: Path,
+    *,
+    notes: Sequence[Remark] = (),
+    info: Sequence[str] = (),
+    video: VideoRun | None = None,
+) -> None:
     """Add to the last processing in the history what the client learned after the node's
-    result: remarks (the combined mp3 failed) and info (part of a recording, full one in the
-    Trash)."""
-    if not notes and not info:
+    result: remarks (the combined mp3 failed), info (part of a recording, full one in the
+    Trash) and the screen video written with the recording."""
+    if not notes and not info and video is None:
         return
     data = _for_write(base)
     if data is None or not data["runs"] or not isinstance(data["runs"][-1], dict):
@@ -295,7 +309,30 @@ def amend(base: Path, *, notes: Sequence[Remark] = (), info: Sequence[str] = ())
     last["notes"] = [*last.get("notes", []), *(r.model_dump(mode="json") for r in notes)]
     last["remarks"] = [*last.get("remarks", []), *(r.text for r in notes)]
     last["info"] = list(dict.fromkeys([*last.get("info", []), *info]))
+    if video is not None:
+        last["video"] = video.model_dump(mode="json")
     _write(base, data)
+
+
+def set_video(base: Path, video: RecordedVideo) -> None:
+    """The screen video of a just-stopped recording, before any processing."""
+    data = _for_write(base)
+    if data is not None:
+        data["video"] = video.model_dump(mode="json")
+        _write(base, data)
+
+
+def carry_video(base: Path) -> None:
+    """The last processing gets the recording's video (set_video) and its remarks, once."""
+    try:
+        data = json.loads((base / META_FILE).read_text(encoding="utf-8"))
+        video = RecordedVideo.model_validate(data["video"])
+        runs = data["runs"]
+    except (OSError, ValueError, LookupError, TypeError):
+        return
+    if not runs or not isinstance(runs[-1], dict) or runs[-1].get("video") is not None:
+        return
+    amend(base, notes=video.notes, video=VideoRun(offset=video.offset, error=video.error))
 
 
 def last(base: Path) -> Run | None:

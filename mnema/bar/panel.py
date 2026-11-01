@@ -65,6 +65,7 @@ from .state import (
 _SYMBOLS = {
     "mic": ("mic.fill", "mic.slash.fill"),
     "system": ("speaker.wave.2.fill", "speaker.slash.fill"),
+    "screen": ("display", "rectangle.slash"),
 }
 _SENTENCE_END = re.compile(r"(?<=[.!?…])\s")
 OPEN_VIDEO = "Open video"
@@ -101,9 +102,14 @@ def _source(label: str, *, on: bool, key: str) -> Source:
 
 
 def _live_source(m: SourceMeter) -> Source:
-    """A source while recording: its level and whether it is off."""
-    source = _source(m.label, on=not m.muted, key=f"source:{m.label}")
-    source.levels = [round(v, 3) for v in m.history]
+    """A source while recording: its level and whether it is off; the screen has no level and
+    is not switched mid-recording."""
+    if m.label == "screen":
+        source = _source(m.label, on=not m.muted, key="")
+        source.enabled = False
+    else:
+        source = _source(m.label, on=not m.muted, key=f"source:{m.label}")
+        source.levels = [round(v, 3) for v in m.history]
     source.status = _("Off") if m.muted else ""
     return source
 
@@ -410,6 +416,7 @@ def panel_model(
         meters = state.meters or [  # before the first tick — from the settings
             SourceMeter(label="mic", muted=not prefs.mic),
             SourceMeter(label="system", muted=not prefs.system),
+            *([SourceMeter(label="screen")] if env.mac and prefs.screen else []),
         ]
         pause = (
             Button(key="resume", title=_("Resume"), symbol="play.fill")
@@ -447,6 +454,7 @@ def panel_model(
             sources=[
                 _source("mic", on=prefs.mic, key="toggle_mic"),
                 _source("system", on=prefs.system, key="toggle_system"),
+                *([_source("screen", on=prefs.screen, key="toggle_screen")] if env.mac else []),
             ],
             section=_section(prefs, sorted(set(sections or []))),
         )

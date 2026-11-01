@@ -1,7 +1,7 @@
 {
   "type": "state",
   "panel": {
-    "version": 1,
+    "version": 2,
     "screen": "idle",
     "status": {
       "icon": "warning",
@@ -65,6 +65,17 @@
           "enabled": true,
           "levels": [],
           "status": ""
+        },
+        {
+          "label": "screen",
+          "title": "Экран",
+          "symbol": "display",
+          "symbol_off": "rectangle.slash",
+          "on": false,
+          "key": "toggle_screen",
+          "enabled": true,
+          "levels": [],
+          "status": ""
         }
       ],
       "section": null
@@ -118,7 +129,7 @@
           "symbol": "mic",
           "sections": [
             {
-              "title": "Источники звука",
+              "title": "Источники",
               "fields": [
                 {
                   "kind": "toggle",
@@ -140,6 +151,21 @@
                   "title": "Системный звук",
                   "key": "toggle_system",
                   "checked": true,
+                  "enabled": true,
+                  "value": "",
+                  "detail": "",
+                  "placeholder": "",
+                  "error": "",
+                  "role": "normal",
+                  "choices": [],
+                  "tone": "none",
+                  "progress": null
+                },
+                {
+                  "kind": "toggle",
+                  "title": "Экран",
+                  "key": "toggle_screen",
+                  "checked": false,
                   "enabled": true,
                   "value": "",
                   "detail": "",

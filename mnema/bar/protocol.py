@@ -1,11 +1,11 @@
 """Protocol between the Mnema macOS app (Swift) and the Python engine.
 
 The engine is Python inside the Mnema.app process (`mnema.bar --headless`, headless.py): it
-writes one JSON message per line to fd 1 (state / ask / form / notify / settings / quit) and
-reads fd 0 (action / answer / form_event / panel). Every text the user sees arrives as a finished
-string in these models, already in the interface language; Swift only lays it out. The Swift
-mirror is macos/Sources/Mnema/Protocol.swift; samples for Swift tests and snapshots are
-macos/Fixtures (`python -m mnema.bar.protocol`).
+writes one JSON message per line to fd 1 (state / ask / form / notify / settings / screen / quit)
+and reads fd 0 (action / answer / form_event / panel / screen_event). Every text the user sees
+arrives as a finished string in these models, already in the interface language; Swift only lays
+it out. The Swift mirror is macos/Sources/Mnema/Protocol.swift; samples for Swift tests and
+snapshots are macos/Fixtures (`python -m mnema.bar.protocol`).
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field, TypeAdapter
 from ..i18n import _, using
 from .range_pick import LANGS
 
-VERSION = 1
+VERSION = 2
 FIXTURES = Path(__file__).parent / "macos" / "Fixtures"
 
 
@@ -64,7 +64,7 @@ class Notice(BaseModel):
 class Source(BaseModel):
     """An audio source: a toggle when idle, a row with its level while recording."""
 
-    label: str  # mic | system
+    label: str  # mic | system | screen
     title: str
     symbol: str
     symbol_off: str
@@ -343,6 +343,14 @@ class SettingsMsg(BaseModel):
     tab: str
 
 
+class ScreenMsg(BaseModel):
+    """Engine → app: the screen video of the recording (the app captures and writes it)."""
+
+    type: Literal["screen"] = "screen"
+    op: Literal["start", "pause", "resume", "stop"]
+    path: str = ""  # start only: the absolute path of screen.mov
+
+
 class QuitMsg(BaseModel):
     type: Literal["quit"] = "quit"
 
@@ -383,10 +391,23 @@ class PanelMsg(BaseModel):
     open: bool
 
 
+class ScreenEventMsg(BaseModel):
+    """App → engine: the screen video started (its first frame), failed with a reason or stopped
+    (the file is closed)."""
+
+    type: Literal["screen_event"] = "screen_event"
+    state: Literal["started", "failed", "stopped"]
+    reason: Literal["", "permission", "no_space", "display_lost", "writer"] = ""
+    offset: float | None = None  # started: host-time seconds from ScreenMsg(start) to the frame
+
+
 Outgoing = Annotated[
-    StateMsg | AskMsg | FormMsg | NotifyMsg | SettingsMsg | QuitMsg, Field(discriminator="type")
+    StateMsg | AskMsg | FormMsg | NotifyMsg | SettingsMsg | ScreenMsg | QuitMsg,
+    Field(discriminator="type"),
 ]
-Incoming = Annotated[ActionMsg | AnswerMsg | FormEventMsg | PanelMsg, Field(discriminator="type")]
+Incoming = Annotated[
+    ActionMsg | AnswerMsg | FormEventMsg | PanelMsg | ScreenEventMsg, Field(discriminator="type")
+]
 OUTGOING: TypeAdapter[Any] = TypeAdapter(Outgoing)
 INCOMING: TypeAdapter[Any] = TypeAdapter(Incoming)
 
@@ -396,7 +417,9 @@ def encode(msg: BaseModel) -> str:
     return msg.model_dump_json() + "\n"
 
 
-def decode_incoming(line: str) -> ActionMsg | AnswerMsg | FormEventMsg | PanelMsg:
+def decode_incoming(
+    line: str,
+) -> ActionMsg | AnswerMsg | FormEventMsg | PanelMsg | ScreenEventMsg:
     """A line from the app → a message; ValueError for a broken line."""
     return INCOMING.validate_json(line)
 
@@ -433,7 +456,7 @@ def _settings_sample(*, idle: bool = True, update: SettingsField = _UPDATE_FOUND
                 symbol="mic",
                 sections=[
                     SettingsSection(
-                        title="Источники звука",
+                        title="Источники",
                         fields=[
                             f(
                                 kind=FieldKind.TOGGLE,
@@ -447,6 +470,7 @@ def _settings_sample(*, idle: bool = True, update: SettingsField = _UPDATE_FOUND
                                 key="toggle_system",
                                 checked=True,
                             ),
+                            f(kind=FieldKind.TOGGLE, title="Экран", key="toggle_screen"),
                         ],
                     ),
                     SettingsSection(
@@ -732,6 +756,14 @@ def _sources(*, recording: bool, paused: bool = False) -> list[Source]:
                 on=True,
                 key="toggle_system",
             ),
+            Source(
+                label="screen",
+                title="Экран",
+                symbol="display",
+                symbol_off="rectangle.slash",
+                on=False,
+                key="toggle_screen",
+            ),
         ]
     return [
         Source(
@@ -751,6 +783,15 @@ def _sources(*, recording: bool, paused: bool = False) -> list[Source]:
             on=True,
             key="source:system",
             levels=[] if paused else [0.0] * 6,
+        ),
+        Source(  # the video: no level, not switched mid-recording
+            label="screen",
+            title="Экран",
+            symbol="display",
+            symbol_off="rectangle.slash",
+            on=True,
+            key="",
+            enabled=False,
         ),
     ]
 
@@ -1057,6 +1098,9 @@ def _samples() -> dict[str, BaseModel]:
             open_key=f"open:{_HOME}/2026-09-30_Дейли/transcript.txt",
         ),
         "out-settings": SettingsMsg(tab="server"),
+        "out-screen-start": ScreenMsg(op="start", path=f"{_HOME}/2026-09-30_10-05/screen.mov"),
+        "out-screen-pause": ScreenMsg(op="pause"),
+        "out-screen-stop": ScreenMsg(op="stop"),
         "out-quit": QuitMsg(),
         "in-action": ActionMsg(key="start"),
         "in-form-submit": FormEventMsg(id=7, rev=3, op=FormOp.SUBMIT, values=_SUBMITTED),
@@ -1066,6 +1110,9 @@ def _samples() -> dict[str, BaseModel]:
         ),
         "in-answer-cancel": AnswerMsg(id=2, value=None),
         "in-panel": PanelMsg(open=True),
+        "in-screen-started": ScreenEventMsg(state="started", offset=0.42),
+        "in-screen-failed": ScreenEventMsg(state="failed", reason="permission"),
+        "in-screen-stopped": ScreenEventMsg(state="stopped"),
     }
 
 

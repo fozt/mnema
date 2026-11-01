@@ -1,0 +1,6 @@
+{
+  "type": "screen_event",
+  "state": "failed",
+  "reason": "permission",
+  "offset": null
+}

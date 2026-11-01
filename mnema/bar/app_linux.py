@@ -180,6 +180,9 @@ class LinuxPlatform:
         if out.returncode != 0:
             raise OSError(out.stderr.strip() or _("The Trash is unavailable"))
 
+    def screen(self, op: str, path: Path | None = None) -> None:
+        raise OSError("no screen video on Linux")
+
     def open_form(self, ask: Any, on_event: Any) -> Any:
         """A live GTK form in the same GLib loop as the settings window."""
         from .linux_forms import open_form

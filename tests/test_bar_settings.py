@@ -93,7 +93,7 @@ def test_record_tab_and_server_buttons_locked_while_busy() -> None:
     assert [f.key for f in idle if not f.enabled] == []
     busy = _fields(settings_model(prefs, HOME, idle=False))
     assert [f.title for f in busy if not f.enabled] == [
-        "Микрофон", "Системный звук", "Распознавание", "Движок", "Выбрать модель…",
+        "Микрофон", "Системный звук", "Экран", "Распознавание", "Движок", "Выбрать модель…",
         "Составлять пересказ", "Язык пересказа", "Подключить другой…", "Отключить",
         "Задать ключ DeepL…",
     ]  # fmt: skip

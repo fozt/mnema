@@ -1,6 +1,8 @@
-"""WavTrackWriter: the tee track of a source."""
+"""WavTrackWriter: the tee track of a source; ScreenRecorder: the screen video the app writes."""
 
 from __future__ import annotations
+
+import time
 
 
 def test_wav_track_writer_writes_valid_wav_with_all_fed_bytes(tmp_path) -> None:
@@ -76,3 +78,121 @@ def test_close_failure_is_reported(monkeypatch, tmp_path) -> None:
     assert writer.error == "файлы записи не сохранились до конца"
     writer.stop()
     disk.close.assert_called_once()
+
+
+class _App:
+    """Mnema.app's side of the screen recorder: every message the engine sent, and the app's
+    answer to it right away (None — no answer)."""
+
+    def __init__(self, recorder_answers: dict[str, tuple[str, str, float | None] | None]) -> None:
+        self.sent: list[tuple[str, str | None]] = []
+        self.answers = recorder_answers
+        self.recorder = None
+
+    def send(self, op: str, path=None) -> None:
+        self.sent.append((op, None if path is None else str(path)))
+        answer = self.answers.get(op)
+        if answer is not None and self.recorder is not None:
+            self.recorder.event(*answer)
+
+
+def _screen(tmp_path, answers, **kw):
+    from mnema.live.record import ScreenRecorder
+
+    app = _App(answers)
+    recorder = ScreenRecorder(tmp_path / "screen.mov", app.send, **kw)
+    app.recorder = recorder
+    return recorder, app
+
+
+def test_screen_starts_pauses_and_stops_through_the_app(tmp_path) -> None:
+    """start sends the file path and waits for the first frame: offset counts from the audio
+    start; pause and resume go to the app; stop waits until the app has closed the file."""
+    recorder, app = _screen(
+        tmp_path, {"start": ("started", "", 0.25), "stop": ("stopped", "", None)}
+    )
+    recorder.origin = time.monotonic() - 1.0  # the audio started a second before
+    recorder.start()
+    assert recorder.running and recorder.error == ""
+    recorder.pause()
+    recorder.resume()
+    recorder.stop()
+    assert app.sent == [
+        ("start", str(tmp_path / "screen.mov")),
+        ("pause", None),
+        ("resume", None),
+        ("stop", None),
+    ]
+    assert not recorder.running and recorder.error == ""
+    assert recorder.offset is not None and 1.25 <= recorder.offset < 60
+
+
+def test_screen_refused_keeps_the_reason_and_sends_nothing_more(tmp_path) -> None:
+    """No permission: the reason stays for the remark, pause and stop do not reach the app."""
+    recorder, app = _screen(tmp_path, {"start": ("failed", "permission", None)})
+    recorder.start()
+    recorder.pause()
+    recorder.stop()
+    assert app.sent == [("start", str(tmp_path / "screen.mov"))]
+    assert recorder.error == "permission" and recorder.offset is None
+
+
+def test_screen_lost_mid_recording_is_not_stopped_again(tmp_path) -> None:
+    recorder, app = _screen(tmp_path, {"start": ("started", "", 0.0)})
+    recorder.start()
+    recorder.event("failed", "display_lost", None)
+    recorder.stop()
+    assert [op for op, _ in app.sent] == ["start"]
+    assert recorder.error == "display_lost" and not recorder.running
+
+
+def test_screen_without_free_space_does_not_start(tmp_path, monkeypatch) -> None:
+    """Under 2 GiB free the video does not start: the audio has the disk."""
+    import shutil
+    from collections import namedtuple
+
+    usage = namedtuple("usage", "total used free")
+    monkeypatch.setattr(shutil, "disk_usage", lambda p: usage(10 * 2**30, 9 * 2**30, 2**31 - 1))
+    recorder, app = _screen(tmp_path, {"start": ("started", "", 0.0)})
+    recorder.start()
+    recorder.stop()
+    assert app.sent == [] and recorder.error == "no_space"
+
+
+def test_screen_app_silent_at_start_is_a_writer_failure(tmp_path) -> None:
+    """The app never answered start: a failure, and stop still tells the app, without waiting."""
+    recorder, app = _screen(tmp_path, {}, start_wait=0.0, stop_wait=0.0)
+    recorder.start()
+    recorder.stop()
+    assert [op for op, _ in app.sent] == ["start", "stop"]
+    assert recorder.error == "writer"
+
+
+def test_screen_app_gone_at_start_is_a_writer_failure(tmp_path) -> None:
+    from mnema.live.record import ScreenRecorder
+
+    def gone(op, path=None):
+        raise OSError("broken pipe")
+
+    recorder = ScreenRecorder(tmp_path / "screen.mov", gone)
+    recorder.start()
+    recorder.stop()
+    assert recorder.error == "writer" and not recorder.running
+
+
+def test_screen_paused_while_starting_is_paused_once_it_runs(tmp_path) -> None:
+    """Paused before the first frame came: the video is paused as soon as it runs, in step with
+    the audio."""
+    from mnema.live.record import ScreenRecorder
+
+    sent: list[str] = []
+
+    def app(op, path=None):
+        sent.append(op)
+        if op == "start":
+            recorder.pause()  # the user paused while the app was starting the video
+            recorder.event("started", "", 0.0)
+
+    recorder = ScreenRecorder(tmp_path / "screen.mov", app)
+    recorder.start()
+    assert sent == ["start", "pause"]

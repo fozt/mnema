@@ -94,6 +94,7 @@ class LiveConfig(BaseModel):
     # the offline pass at stop (batch quality, the GPU stays free during the call)
     record: bool = True
     mix_audio: bool = True  # the final MP3; --no-save skips it
+    screen: bool = False  # the screen video too (the Mac app writes it, build_live(screen=))
     runner: str | None = None  # resolved runner URL (resolve_runner), or None for local
 
     @field_validator("translate")
@@ -254,11 +255,13 @@ class PreparedLive:
         transcribers: dict[str, Any],
         lang: str | None,
         status: str,
+        screen: Any = None,
     ) -> None:
         self.config = config
         self.base = base
         self.sources = sources
         self.writers = writers  # label → WavTrackWriter (tee of the source PCM)
+        self.screen = screen  # record.ScreenRecorder | None: the Mac app's screen video
         self.dialog = dialog  # LiveDialog | None, for the final translation
         self.session_dialog = session_dialog  # Dialog | Mapping | None, as passed to LiveSession
         self.transcribers = transcribers  # label → transcriber, one per source
@@ -296,6 +299,7 @@ class PreparedLive:
                     ensure_identity(self.base)
 
         transcribers = self.transcribers
+        video = {"screen": self.screen} if self.screen is not None else {}
         return LiveSession(
             self.sources,
             lambda s: transcribers[s.name],
@@ -305,6 +309,7 @@ class PreparedLive:
             on_copy=on_copy,
             stop_after_silence=stop_after_silence,
             on_started=started,
+            **video,
         )
 
     def close(self) -> None:
@@ -315,12 +320,17 @@ class PreparedLive:
 
 
 def build_live(
-    config: LiveConfig, *, base: Path, connection: Connection | None = None
+    config: LiveConfig,
+    *,
+    base: Path,
+    connection: Connection | None = None,
+    screen: Callable[[str, Path | None], None] | None = None,
 ) -> PreparedLive:
     """Build the sources, WAV tracks, dialog and transcribers from the configuration.
 
     The cmd_live contract: MediaError when sounddevice, the microphone or system audio is
-    unavailable; speakers and the ASR language are per source.
+    unavailable; speakers and the ASR language are per source. screen sends the screen video
+    commands to the Mac app (Platform.screen); config.screen without it records no video.
     """
     try:
         import sounddevice  # noqa: F401  # a clear error before a source is created
@@ -415,6 +425,11 @@ def build_live(
             "Recognition on the server {url}, connecting in the background", url=connection.url
         )
 
+    video = None
+    if config.screen and config.record and screen is not None:
+        from .record import SCREEN_FILE, ScreenRecorder
+
+        video = ScreenRecorder(base / SCREEN_FILE, screen)
     prepared = PreparedLive(
         config=config,
         base=base,
@@ -425,6 +440,7 @@ def build_live(
         transcribers=transcribers,
         lang=lang,
         status=status,
+        screen=video,
     )
     return prepared
 
