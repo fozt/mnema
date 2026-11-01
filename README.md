@@ -95,8 +95,9 @@ is recorded, macOS shows its recording icon in the menu bar, and Mnema cannot hi
 window rather than the whole screen in a call to keep the menu bar out of the share. *Hide
 recording in the menu bar* (*Settings → General*, or the panel during a recording) makes Mnema's
 own icon look idle. The video is assembled and kept on this Mac, even when the server recognizes
-the speech: it is not sent anywhere and does not sync. *Delete audio and video of processed
-recordings…* removes it with the audio.
+the speech: it is not sent anywhere and does not sync. A recording's menu has *Delete audio* and
+*Delete video*; *⋯ → Delete audio and video…* asks which of the two to remove from all processed
+recordings (audio is ticked, video is not). Deleted files go to the Trash; the texts stay.
 
 The speech model (about 630 MB) is not in the app: Mnema downloads it once, when you choose
 recognition *On this Mac* or make the first recording without it, and shows the progress in the
