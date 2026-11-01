@@ -103,6 +103,33 @@ class LinuxPlatform:
 
         threading.Thread(target=ask, daemon=True, name="mnema-bar-folder").start()
 
+    def choose_cleanup(self, ask: Any, on_done: Any) -> None:
+        """ "Delete audio and video…": GTK (cleanup_pick in its own process); without GTK the
+        zenity checklist; neither — nothing is deleted."""
+        import json
+
+        from .cleanup_pick import CANCELLED, zenity_answer, zenity_command
+
+        def run() -> None:
+            cmd = [sys.executable, "-m", "mnema.bar.cleanup_pick", ask.model_dump_json()]
+            try:
+                out = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
+                if out.returncode == 0:
+                    on_done(json.loads(out.stdout))
+                    return
+                if out.returncode == CANCELLED:
+                    on_done(None)
+                    return
+                out = subprocess.run(
+                    zenity_command(ask), capture_output=True, text=True, timeout=600
+                )
+                answer = zenity_answer(ask, out.returncode, out.stdout)
+            except Exception:  # noqa: BLE001 - an hour open, or neither GTK nor zenity
+                answer = None
+            on_done(answer)
+
+        threading.Thread(target=run, daemon=True, name="mnema-bar-cleanup").start()
+
     def ask_range(self, req: Any, on_done: Any) -> None:
         """The process recording window: GTK (range_pick in its own process); without GTK, zenity
         fields one by one (start, end, title, sources), and the Trash checkbox as last time."""

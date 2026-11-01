@@ -114,5 +114,6 @@
   "Download again": "Скачать ещё раз",
   "Not downloaded": "Не скачана",
   "Download": "Скачать",
-  "Video quality": "Качество видео"
+  "Video quality": "Качество видео",
+  "Could not delete the video of “{name}”": "Не удалось удалить видео записи «{name}»"
 }

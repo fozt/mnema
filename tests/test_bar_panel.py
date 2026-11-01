@@ -563,16 +563,15 @@ def test_card_of_unreachable_server_offers_retry_and_choice(tmp_path) -> None:
 
 
 def test_cleanup_shown_while_library_has_records(tmp_path) -> None:
-    """Delete audio of processed recordings… is in the More menu while there are
-    recordings, even without audio: with nothing to delete a notice says so; available when
-    idle."""
+    """Delete audio and video… is in the More menu while there are recordings, even without
+    audio, under one label: with nothing to delete a notice says so; available when idle."""
     texts_only = [_card(tmp_path / "a", has_audio=False), _card(tmp_path / "b", has_audio=False)]
     assert _panel().cleanup is None  # no recordings
     assert _panel(cards=texts_only).cleanup is not None
     mixed = [*texts_only, _card(tmp_path / "c")]
     cleanup = _panel(cards=mixed).cleanup
     assert (cleanup.key, cleanup.title, cleanup.enabled) == (
-        "cleanup_audio", "Удалить звук обработанных записей…", True,
+        "cleanup", "Удалить звук и видео…", True,
     )  # fmt: skip
     assert not _panel(BarState(phase=Phase.RECORDING), cards=mixed).cleanup.enabled
 

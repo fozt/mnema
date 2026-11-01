@@ -8,12 +8,20 @@ enum Dialogs {
     typealias Prepared = (alert: NSAlert, read: (_ ok: Bool) -> JSONValue)
 
     static func answer(_ ask: Ask) -> JSONValue {
+        if case .folder(let a) = ask { return folder(a) }
+        guard let window = prepared(ask) else { return .null }
+        return run(window, escape: ask.cancelsOnReturn)
+    }
+
+    /// The alert of a window drawn as NSAlert; nil for the others (a form is a FormSheet through
+    /// Store.openForm, a folder an NSOpenPanel, an unknown kind is answered as closed).
+    static func prepared(_ ask: Ask) -> Prepared? {
         switch ask {
-        case .title(let a): return run(title(a))
-        case .confirm(let a): return run(confirm(a), escape: true)
-        case .form: return .null  // handled elsewhere: a live form is a FormSheet (AppDelegate → Store.openForm)
-        case .range(let a): return run(range(a))
-        case .folder(let a): return folder(a)
+        case .title(let a): return title(a)
+        case .confirm(let a): return confirm(a)
+        case .range(let a): return range(a)
+        case .cleanup(let a): return cleanup(a)
+        case .form, .folder, .unknown: return nil
         }
     }
 
@@ -47,6 +55,21 @@ enum Dialogs {
         ok.keyEquivalent = ""
         cancel.keyEquivalent = "\r"  // Return picks the safe choice, not the deletion
         return (alert, { .bool($0) })
+    }
+
+    /// Delete audio and video: a checkbox per kind, a line with nothing to delete is disabled and
+    /// may say why under it; Delete is disabled while nothing is checked. Return cancels, as in confirm.
+    static func cleanup(_ a: CleanupAsk) -> Prepared {
+        let alert = alert(a.title, message: a.message, ok: a.ok, cancel: a.cancel)
+        let (ok, cancel) = (alert.buttons[0], alert.buttons[1])
+        ok.hasDestructiveAction = true
+        ok.keyEquivalent = ""
+        cancel.keyEquivalent = "\r"
+        let checks = CleanupChecks(a.choices, ok: ok)
+        alert.accessoryView = fitted(checks.stack)
+        return (alert, { pressed in
+            pressed ? .array(checks.chosen.map { .string($0) }) : .null
+        })
     }
 
     /// Process recording: which part (sliders and time fields), title, language, tracks, and
@@ -164,6 +187,16 @@ enum Dialogs {
     }
 }
 
+extension Ask {
+    /// Return picks Cancel, the safe choice, so Esc must close the window itself.
+    var cancelsOnReturn: Bool {
+        switch self {
+        case .confirm, .cleanup: return true
+        default: return false
+        }
+    }
+}
+
 /// A window with a required name (New section): OK is enabled once something of the name survives
 /// as a folder name, like the engine's naming.folder_title: forbidden and control characters,
 /// spaces and dots do not count.
@@ -187,6 +220,58 @@ final class NameRequired: NSObject, NSTextFieldDelegate {
     func controlTextDidChange(_ note: Notification) {
         guard let field = note.object as? NSTextField else { return }
         ok.isEnabled = Self.usable(field.stringValue)
+    }
+}
+
+/// The lines of Delete audio and video: at least one must be checked, or Delete is disabled.
+@MainActor
+final class CleanupChecks: NSObject {
+    private let choices: [Choice]
+    let boxes: [NSButton]
+    private let ok: NSButton
+    let stack: NSStackView
+
+    init(_ choices: [Choice], ok: NSButton) {
+        self.choices = choices
+        self.ok = ok
+        boxes = choices.map { NSButton(checkboxWithTitle: $0.title, target: nil, action: nil) }
+        stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 6
+        super.init()
+        for (box, choice) in zip(boxes, choices) {
+            box.state = choice.checked && choice.enabled ? .on : .off
+            box.isEnabled = choice.enabled
+            box.target = self
+            box.action = #selector(toggled(_:))
+            stack.addArrangedSubview(box)
+            if !choice.detail.isEmpty {
+                let detail = NSTextField(wrappingLabelWithString: choice.detail)
+                detail.textColor = .secondaryLabelColor
+                detail.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+                detail.preferredMaxLayoutWidth = 260
+                let indented = NSStackView(views: [detail])  // under the checkbox title, not its box
+                indented.edgeInsets = NSEdgeInsets(top: 0, left: 20, bottom: 0, right: 0)
+                stack.addArrangedSubview(indented)
+                stack.setCustomSpacing(10, after: indented)
+                box.setAccessibilityHelp(choice.detail)
+            }
+        }
+        update()
+    }
+
+    /// The checked keys, in the window's order.
+    var chosen: [String] {
+        zip(choices, boxes).filter { $0.0.enabled && $0.1.state == .on }.map { $0.0.key }
+    }
+
+    @objc private func toggled(_ sender: NSButton) {
+        update()
+    }
+
+    private func update() {
+        ok.isEnabled = !chosen.isEmpty
     }
 }
 

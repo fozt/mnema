@@ -1,0 +1,27 @@
+{
+  "type": "ask",
+  "id": 11,
+  "ask": {
+    "kind": "cleanup",
+    "title": "Что удалить?",
+    "message": "Тексты останутся.",
+    "choices": [
+      {
+        "key": "audio",
+        "title": "Звук",
+        "detail": "Звук можно удалить после синхронизации с сервером",
+        "checked": false,
+        "enabled": false
+      },
+      {
+        "key": "video",
+        "title": "Видео — 1 запись, 650 МБ",
+        "detail": "",
+        "checked": false,
+        "enabled": true
+      }
+    ],
+    "ok": "Удалить",
+    "cancel": "Отменить"
+  }
+}

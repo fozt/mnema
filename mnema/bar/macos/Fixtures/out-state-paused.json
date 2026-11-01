@@ -214,6 +214,28 @@
             "children": []
           },
           {
+            "key": "record:00000000-0000-4000-8000-000000000001:delete_audio",
+            "title": "Удалить звук",
+            "role": "destructive",
+            "enabled": true,
+            "symbol": "",
+            "checked": null,
+            "compact": false,
+            "divider": true,
+            "children": []
+          },
+          {
+            "key": "record:00000000-0000-4000-8000-000000000001:delete_video",
+            "title": "Удалить видео",
+            "role": "destructive",
+            "enabled": true,
+            "symbol": "",
+            "checked": null,
+            "compact": false,
+            "divider": false,
+            "children": []
+          },
+          {
             "key": "record:00000000-0000-4000-8000-000000000001:trash",
             "title": "Удалить запись",
             "role": "destructive",
@@ -221,7 +243,7 @@
             "symbol": "",
             "checked": null,
             "compact": false,
-            "divider": true,
+            "divider": false,
             "children": []
           }
         ],

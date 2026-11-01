@@ -252,12 +252,23 @@ struct FormAsk: Codable, Hashable {
     var clear: [String]  // ids of fields whose input is cleared; only in a check reply, not while busy
 }
 
+/// Delete audio and video: what to delete as checkboxes; the answer is the checked keys.
+struct CleanupAsk: Codable, Hashable {
+    var title: String
+    var message: String
+    var choices: [Choice]  // key audio | video; checked at first, enabled when there is something
+    var ok: String
+    var cancel: String
+}
+
 enum Ask: Decodable, Hashable {
     case title(TitleAsk)
     case confirm(ConfirmAsk)
     case folder(FolderAsk)
     case range(RangeAsk)
     case form(FormAsk)
+    case cleanup(CleanupAsk)
+    case unknown(String)  // a window of a newer engine: answered as closed, so it never waits
 
     private enum Keys: String, CodingKey { case kind }
 
@@ -269,9 +280,8 @@ enum Ask: Decodable, Hashable {
         case "folder": self = .folder(try FolderAsk(from: decoder))
         case "range": self = .range(try RangeAsk(from: decoder))
         case "form": self = .form(try FormAsk(from: decoder))
-        default:
-            throw DecodingError.dataCorrupted(
-                .init(codingPath: decoder.codingPath, debugDescription: "unknown window \(kind)"))
+        case "cleanup": self = .cleanup(try CleanupAsk(from: decoder))
+        default: self = .unknown(kind)
         }
     }
 }

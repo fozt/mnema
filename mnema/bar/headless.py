@@ -33,6 +33,7 @@ from .protocol import (
     Ask,
     AskMsg,
     Choice,
+    CleanupAsk,
     ConfirmAsk,
     FolderAsk,
     FormAsk,
@@ -165,6 +166,19 @@ class ProtocolPlatform:
             FolderAsk(start=str(start), message=_("Choose the recording folder"), ok=_("Choose")),
             lambda v: on_done(Path(v) if isinstance(v, str) and v else None),
         )
+
+    def choose_cleanup(self, ask: CleanupAsk, on_done: Callable[[list[str] | None], None]) -> None:
+        """The answer is the checked keys, only those the window offered; anything else counts
+        as closed."""
+        offered = {c.key for c in ask.choices if c.enabled}
+
+        def got(value: Any) -> None:
+            if not isinstance(value, list):
+                on_done(None)
+                return
+            on_done([k for k in value if isinstance(k, str) and k in offered])
+
+        self._ask(ask, got)
 
     def ask_range(self, req: RangeRequest, on_done: Callable[[RangeAnswer | None], None]) -> None:
         def got(value: Any) -> None:

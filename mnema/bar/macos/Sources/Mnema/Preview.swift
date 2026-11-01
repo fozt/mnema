@@ -1,15 +1,15 @@
 import AppKit
 import SwiftUI
 
-/// `Mnema --preview panel|settings|form <file.json> <out.png> [--dark] [--tab <id>]
+/// `Mnema --preview panel|settings|form|ask <file.json> <out.png> [--dark] [--tab <id>]
 /// [--search <text>] [--section <name>]` renders the panel or the settings window from a sample
-/// state, or a form window from an AskMsg or FormMsg (Fixtures/ or engine output), without the menu
+/// state, a system window (NSAlert) from an AskMsg, or a form window from an AskMsg or FormMsg (Fixtures/ or engine output), without the menu
 /// bar and without Python. --search opens the panel in search, --section selects a list section
 /// ("" means no section). The app's own texts follow `MNEMA_UI_LANG`.
 enum Preview {
     @MainActor static func run(_ args: [String]) -> Int32 {
         guard args.count >= 3 else {
-            fail("Usage: Mnema --preview panel|settings|form <file.json> <out.png> [--dark] [--tab id] [--search text] [--section name]")
+            fail("Usage: Mnema --preview panel|settings|form|ask <file.json> <out.png> [--dark] [--tab id] [--search text] [--section name]")
             return 2
         }
         let dark = args.contains("--dark")
@@ -22,6 +22,11 @@ enum Preview {
             case "form":
                 let store = Store()
                 try Snapshot.png(FormSheet(form: try loadForm(input), store: store), dark: dark, to: out)
+            case "ask":
+                guard case .ask(_, let ask) = try Wire.decode(line: Data(contentsOf: input)),
+                    let window = Dialogs.prepared(ask)
+                else { throw PreviewError.notAlert }
+                try Snapshot.png(alert: window.alert, dark: dark, to: out)
             case "panel", "settings":
                 let store = Store(panel: try loadPanel(input))
                 if let i = args.firstIndex(of: "--tab"), i + 1 < args.count {
@@ -71,4 +76,5 @@ enum Preview {
 enum PreviewError: Error {
     case unknown(String)
     case notForm
+    case notAlert
 }

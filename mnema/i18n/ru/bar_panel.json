@@ -3,7 +3,6 @@
   "Choose server…": "Выбрать сервер…",
   "Close": "Закрыть",
   "Connect…": "Подключить…",
-  "Delete audio of processed recordings…": "Удалить звук обработанных записей…",
   "Delete everywhere": "Удалить везде",
   "Delete recording": "Удалить запись",
   "Details": "Подробности",
@@ -93,5 +92,7 @@
   ],
   "Send": "Отправить",
   "Screen": "Экран",
-  "Delete audio and video of processed recordings…": "Удалить звук и видео обработанных записей…"
+  "Delete audio and video…": "Удалить звук и видео…",
+  "Delete audio": "Удалить звук",
+  "Delete video": "Удалить видео"
 }

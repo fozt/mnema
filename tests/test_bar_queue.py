@@ -536,7 +536,9 @@ def test_waiting_and_running_records_are_left_alone(setup, tmp_path, monkeypatch
     assert _id(b) in busy and _id(a) not in busy and _id(c) not in busy
     assert rt.state.unfinished == []
     app.yes = True
-    rt.handle("cleanup_audio")
+    rt.handle("cleanup")
+    for record in (a, b, c):  # a card action with a stale menu
+        rt.handle(f"record:{_id(record)}:delete_audio")
     assert app.questions == [] and app.trashed == []  # nothing to delete
 
 

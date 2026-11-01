@@ -31,7 +31,8 @@ func fixture(_ name: String) throws -> Data {
     #expect(panel.cards.count == 4)
     #expect(panel.cards.allSatisfy { $0.openKey?.hasSuffix(":folder") == true })  // a click opens the folder
     #expect(panel.cards[0].menu.prefix(3).map(\.title) == ["Открыть пересказ", "Открыть расшифровку", "Открыть папку"])
-    #expect(panel.cards[0].menu.filter(\.divider).map(\.title) == ["Переименовать…", "Удалить запись"])
+    #expect(panel.cards[0].menu.filter(\.divider).map(\.title) == ["Переименовать…", "Удалить звук"])
+    #expect(panel.cards[0].menu.suffix(3).map(\.role) == [.destructive, .destructive, .destructive])
     #expect(panel.cards[0].tooltip.hasSuffix("Язык: русский"))
     #expect(panel.cards[1].detail == "Без пересказа" && panel.cards[1].detailWarn)  // the reason is in the tooltip
     #expect(panel.cards[3].buttons.map(\.title) == ["Обработать…"])
@@ -542,4 +543,44 @@ private func placeholders(_ text: String) -> [String] {
     #expect(!SettingsWindow.isSettings(identifier: nil, title: "Mnema", tabs: english))
     #expect(!SettingsWindow.isSettings(identifier: nil, title: "", tabs: [""]))
     #expect(SettingsWindow.isSettings(identifier: "com_apple_SwiftUI_Settings_window", title: "", tabs: []))
+}
+
+/// Delete audio and video: audio starts checked, video not; the answer is the checked keys and
+/// Delete is disabled while nothing is checked; a line with nothing to delete cannot be checked.
+@MainActor @Test func cleanupWindowAnswersCheckedKeys() throws {
+    guard case .ask(10, .cleanup(let ask)) = try Wire.decode(line: fixture("out-ask-cleanup")) else {
+        Issue.record("not a cleanup window")
+        return
+    }
+    #expect(ask.choices.map(\.key) == ["audio", "video"])
+    let window = Dialogs.cleanup(ask)
+    let ok = window.alert.buttons[0]
+    #expect(ok.title == "Удалить" && ok.isEnabled)
+    #expect(window.read(true) == .array([.string("audio")]))
+    let checks = try #require(window.alert.accessoryView as? NSStackView)
+    let boxes = checks.arrangedSubviews.compactMap { $0 as? NSButton }
+    boxes[0].performClick(nil)
+    #expect(!ok.isEnabled && window.read(true) == .array([]))
+    boxes[1].performClick(nil)
+    #expect(ok.isEnabled && window.read(true) == .array([.string("video")]))
+    #expect(window.read(false) == .null)
+
+    guard case .ask(_, .cleanup(let videoOnly)) = try Wire.decode(line: fixture("out-ask-cleanup-video")) else {
+        Issue.record("not a cleanup window")
+        return
+    }
+    let second = Dialogs.cleanup(videoOnly)
+    let audio = try #require((second.alert.accessoryView as? NSStackView)?.arrangedSubviews.first as? NSButton)
+    #expect(!audio.isEnabled && audio.state == .off && !second.alert.buttons[0].isEnabled)
+}
+
+/// A window kind this app does not know (a newer engine) decodes, so it can be answered as closed
+/// instead of leaving the engine waiting.
+@Test func unknownWindowKindDecodes() throws {
+    let line = Data(#"{"type": "ask", "id": 5, "ask": {"kind": "someday", "title": "x"}}"#.utf8)
+    guard case .ask(5, .unknown(let kind)) = try Wire.decode(line: line) else {
+        Issue.record("not an unknown window")
+        return
+    }
+    #expect(kind == "someday")
 }

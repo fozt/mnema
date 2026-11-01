@@ -1,0 +1,27 @@
+{
+  "type": "ask",
+  "id": 10,
+  "ask": {
+    "kind": "cleanup",
+    "title": "Что удалить?",
+    "message": "Тексты останутся только на этом Mac.",
+    "choices": [
+      {
+        "key": "audio",
+        "title": "Звук — 12 записей, 2,3 ГБ",
+        "detail": "",
+        "checked": true,
+        "enabled": true
+      },
+      {
+        "key": "video",
+        "title": "Видео — 3 записи, 4,1 ГБ",
+        "detail": "",
+        "checked": false,
+        "enabled": true
+      }
+    ],
+    "ok": "Удалить",
+    "cancel": "Отменить"
+  }
+}

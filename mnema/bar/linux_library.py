@@ -43,8 +43,12 @@ class LibraryWindow:
         body.pack_start(self.scroll, True, True, 0)
         self.cleanup = Gtk.Button()  # label and visibility come from the model
         self.cleanup.set_no_show_all(True)
-        self.cleanup.connect("clicked", lambda *_args: self._on_action("cleanup_audio"))
+        self.cleanup.connect("clicked", lambda *_args: self._cleanup_clicked())
         body.pack_start(self.cleanup, False, False, 0)
+
+    def _cleanup_clicked(self) -> None:
+        if self._model is not None and self._model.cleanup is not None:
+            self._on_action(self._model.cleanup.key)
 
     def _hide(self, *_args: Any) -> bool:
         self.visible = False
