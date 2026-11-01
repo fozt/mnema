@@ -253,6 +253,16 @@ def test_catalog_files_must_agree_on_a_shared_key(ru_catalog) -> None:
         i18n.catalog()
 
 
+def test_a_key_twice_in_one_catalog_file_is_an_error(ru_catalog) -> None:
+    """json keeps the last of two equal keys silently: the catalog refuses the file instead."""
+    (ru_catalog / "c.json").write_text(
+        '{"no video": "без видео", "no video": "нет видео"}', encoding="utf-8"
+    )
+    i18n.catalog.cache_clear()
+    with pytest.raises(ValueError, match="no video"):
+        i18n.catalog()
+
+
 @pytest.mark.parametrize(
     ("n", "russian"),
     [
