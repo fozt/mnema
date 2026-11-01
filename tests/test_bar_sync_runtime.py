@@ -47,6 +47,7 @@ class Platform:
     def __init__(self):
         self.opened, self.trashed = [], []
         self.answer = None
+        self.cleanup = None
 
     def open(self, path):
         self.opened.append(path)
@@ -64,6 +65,10 @@ class Platform:
         self.answer = on_done
 
     def ask_range(self, request, on_done):
+        self.answer = on_done
+
+    def choose_cleanup(self, ask, on_done):
+        self.cleanup = ask
         self.answer = on_done
 
 
@@ -213,7 +218,7 @@ def test_cleanup_confirms_then_rechecks_current_busy_state_and_keeps_text(
     rt, platform, root, updates = app
     folder, id = record(root, audio=True, processed=True)
     monkeypatch.setenv("MNEMA_RUNNER", "http://node")
-    rt.handle("cleanup_audio")  # texts not on the server yet: nothing to delete, and why
+    rt.handle("cleanup")  # texts not on the server yet: nothing to delete, and why
     assert platform.answer is None
     assert rt.state.notice == "Звук можно удалить после синхронизации с сервером"
     monkeypatch.setenv("MNEMA_LIBRARY", "true")
@@ -228,22 +233,28 @@ def test_cleanup_confirms_then_rechecks_current_busy_state_and_keeps_text(
         client_factory=lambda c: LibraryClient(c, transport=httpx.ASGITransport(server)),
     )
     assert not asyncio.run(engine.run_once()).errors
-    rt.handle("cleanup_audio")
+    rt.handle("cleanup")
     rt.state.phase = Phase.RECORDING
-    platform.answer(True)
+    platform.answer(["audio"])
     assert not platform.trashed
     rt.state.phase = Phase.IDLE
-    rt.handle("cleanup_audio")
-    assert platform.asked == (
-        "Удалить звук 1 записи?",
-        "Освободится 0,0 МБ. Тексты останутся.",
-        "Удалить",
+    rt.handle("cleanup")
+    assert shown(platform.cleanup) == (
+        "Что удалить?",
+        "Тексты останутся.",
+        [("audio", "Звук — 1 запись, 0,0 МБ", True, True), ("video", "Видео", False, False)],
     )
-    platform.answer(True)
+    platform.answer(["audio"])
     assert platform.trashed == [folder / "mic.wav"]
     assert rt.state.notice == "Звук удалён у записей: 1"
     assert (folder / "transcript.txt").read_text() == "Hello"
     assert (folder / ".mnema-meta.json").exists()
+
+
+def shown(ask):
+    """The cleanup window: title, message, lines as (key, title, checked, enabled)."""
+    lines = [(c.key, c.title, c.checked, c.enabled) for c in ask.choices]
+    return ask.title, ask.message, lines
 
 
 @pytest.mark.parametrize(
@@ -256,14 +267,10 @@ def test_cleanup_without_server_says_texts_stay_only_here(app, monkeypatch, mac,
     rt, platform, root, _ = app
     monkeypatch.setattr(base, "STANDALONE", mac)
     folder, _ = record(root, audio=True, processed=True)
-    rt.handle("cleanup_audio")
-    assert platform.asked == (
-        "Удалить звук 1 записи?",
-        f"Освободится 0,0 МБ. Тексты останутся только {place}.",
-        "Удалить",
-    )
+    rt.handle("cleanup")
+    assert platform.cleanup.message == f"Тексты останутся только {place}."
     monkeypatch.setenv("MNEMA_RUNNER", "http://node")
-    platform.answer(True)
+    platform.answer(["audio"])
     assert platform.trashed == [folder / "mic.wav"]
     assert (folder / "transcript.txt").read_text() == "Hello"
 
@@ -293,45 +300,117 @@ def test_disconnect_question_is_english_in_english(app, monkeypatch, name, title
 
 
 @pytest.mark.parametrize(
-    ("count", "title"),
-    [(1, "Delete audio of 1 recording?"), (2, "Delete audio of 2 recordings?")],
+    ("count", "line"),
+    [(1, "Audio — 1 recording, 0.0 MB"), (2, "Audio — 2 recordings, 0.0 MB")],
 )
-def test_cleanup_question_is_english_in_english(app, monkeypatch, count, title):
+def test_cleanup_window_is_english_in_english(app, monkeypatch, count, line):
     set_language("en")
     rt, platform, root, _ = app
     monkeypatch.setattr(base, "STANDALONE", True)
     for i in range(count):
         record(root, f"Call {i}", audio=True, processed=True)
-    rt.handle("cleanup_audio")
-    asked_title, message, ok = platform.asked
-    assert (asked_title, ok) == (title, "Delete")
-    assert message.startswith("This frees ")
-    assert message.endswith(". The texts stay only on this Mac.")
-    platform.answer(True)
+    rt.handle("cleanup")
+    ask = platform.cleanup
+    assert (ask.title, ask.message, ask.ok, ask.cancel) == (
+        "What to delete?", "The texts stay only on this Mac.", "Delete", "Cancel",
+    )  # fmt: skip
+    assert [c.title for c in ask.choices] == [line, "Video"]
+    platform.answer(["audio"])
     assert rt.state.notice == f"Audio deleted from recordings: {count}"
 
 
-def test_cleanup_with_video_says_audio_and_video(app, monkeypatch):
-    """A processed recording with the screen video: the button, the question and the notice
-    after it name the video too, and the size counts it."""
+@pytest.mark.parametrize(
+    ("answer", "notice", "audio", "video"),
+    [
+        (["audio"], "Звук удалён у записей: 2", False, True),
+        (["video"], "Видео удалено у записей: 1", True, False),
+        (["audio", "video"], "Звук и видео удалены у записей: 2", False, False),
+        (None, "", True, True),
+        (["screen"], "", True, True),  # not a line of the window
+    ],
+    ids=["audio", "video", "both", "cancel", "unknown"],
+)
+def test_cleanup_window_deletes_what_is_checked(app, monkeypatch, answer, notice, audio, video):
+    """One label whether or not there is video; the window counts audio and video apart, audio
+    checked at first; what is checked goes, the notice names it."""
     rt, platform, root, _ = app
     monkeypatch.setattr(base, "STANDALONE", True)
     folder, _id = record(root, "Собеседование", audio=True, processed=True)
-    record(root, "Звонок", audio=True, processed=True)
+    other, _ = record(root, "Звонок", audio=True, processed=True)
     cards = library(root, connection=None).cards
     cleanup = panel_model(rt.state, rt.prefs, MenuEnv(), cards, SettingsModel(tabs=[])).cleanup
-    assert cleanup is not None and cleanup.title == "Удалить звук обработанных записей…"
+    assert cleanup is not None and cleanup.title == "Удалить звук и видео…"
     (folder / "video.mp4").write_bytes(b"v" * 2_000_000)
     cards = library(root, connection=None).cards
-    cleanup = panel_model(rt.state, rt.prefs, MenuEnv(), cards, SettingsModel(tabs=[])).cleanup
-    assert cleanup is not None and cleanup.title == "Удалить звук и видео обработанных записей…"
-    rt.handle("cleanup_audio")
-    title, message, ok = platform.asked
-    assert (title, ok) == ("Удалить звук и видео 2 записей?", "Удалить")
-    assert "МБ" in message
+    again = panel_model(rt.state, rt.prefs, MenuEnv(), cards, SettingsModel(tabs=[])).cleanup
+    assert again == cleanup
+    rt.handle("cleanup")
+    assert shown(platform.cleanup)[2] == [
+        ("audio", "Звук — 2 записи, 0,0 МБ", True, True),
+        ("video", "Видео — 1 запись, 1,9 МБ", False, True),
+    ]
+    platform.answer(answer)
+    assert rt.state.notice == notice
+    assert (folder / "mic.wav").exists() == audio and (other / "mic.wav").exists() == audio
+    assert (folder / "video.mp4").exists() == video
+
+
+def test_only_video_to_delete_opens_the_window_with_audio_unavailable(app, monkeypatch):
+    """Audio waits for sync but the video can go: the audio line is unavailable and says why."""
+    rt, platform, root, _ = app
+    monkeypatch.setattr(base, "STANDALONE", True)
+    folder, _id = record(root, "Собеседование", audio=True, processed=True)
+    (folder / "video.mp4").write_bytes(b"v" * 2_000_000)
+    monkeypatch.setenv("MNEMA_RUNNER", "http://node")
+    rt.handle("cleanup")
+    [audio, video] = platform.cleanup.choices
+    assert (audio.title, audio.enabled, audio.checked) == ("Звук", False, False)
+    assert audio.detail == "Звук можно удалить после синхронизации с сервером"
+    assert (video.title, video.enabled, video.checked) == ("Видео — 1 запись, 1,9 МБ", True, False)
+    platform.answer(["audio", "video"])  # the audio line could not be checked
+    assert (folder / "mic.wav").exists() and not (folder / "video.mp4").exists()
+    assert rt.state.notice == "Видео удалено у записей: 1"
+
+
+def test_card_deletes_its_audio_or_video_after_a_question(app, monkeypatch):
+    """A card's "Delete video" and "Delete audio": the question names the recording, the size
+    and what stays; only that recording loses it, no notice on success."""
+    rt, platform, root, _ = app
+    monkeypatch.setattr(base, "STANDALONE", True)
+    folder, id = record(root, "2026-11-01_Собеседование", audio=True, processed=True)
+    other, _ = record(root, "Звонок", audio=True, processed=True)
+    (folder / "video.mp4").write_bytes(b"v" * 2_000_000)
+    (other / "video.mp4").write_bytes(b"v" * 10)
+    rt.handle(f"record:{id}:delete_video")
+    assert platform.asked == (
+        "Удалить видео записи «Собеседование»?",
+        "1,9 МБ. Звук и тексты останутся.",
+        "Удалить видео",
+    )
+    platform.answer(False)
+    assert (folder / "video.mp4").exists()
+    rt.handle(f"record:{id}:delete_video")
     platform.answer(True)
-    assert not (folder / "video.mp4").exists()
-    assert rt.state.notice == "Звук и видео удалены у записей: 2"
+    assert not (folder / "video.mp4").exists() and (other / "video.mp4").exists()
+    assert (folder / "mic.wav").exists() and rt.state.notice == ""
+    rt.handle(f"record:{id}:delete_audio")
+    assert platform.asked == (
+        "Удалить звук записи «Собеседование»?",
+        "0,0 МБ. Тексты останутся только на этом Mac.",
+        "Удалить звук",
+    )
+    platform.answer(True)
+    assert not (folder / "mic.wav").exists() and (other / "mic.wav").exists()
+    assert (folder / "transcript.txt").read_text() == "Hello"
+
+
+def test_card_audio_question_says_the_video_stays(app, monkeypatch):
+    rt, platform, root, _ = app
+    monkeypatch.setattr(base, "STANDALONE", True)
+    folder, id = record(root, "2026-11-01_Собеседование", audio=True, processed=True)
+    (folder / "video.mp4").write_bytes(b"v" * 10)
+    rt.handle(f"record:{id}:delete_audio")
+    assert platform.asked[1] == "0,0 МБ. Тексты и видео останутся только на этом Mac."
 
 
 def test_missing_record_id_never_deletes_replacement_at_old_path(app):

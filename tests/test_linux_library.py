@@ -20,13 +20,13 @@ model = PanelModel(screen="idle", status=StatusItem(icon="idle"), settings=Setti
              menu=[Button(key="record:a:folder", title="Открыть папку"),
                    Button(key="record:a:trash", title="Удалить запись", divider=True)]),
         Card(id="b", title="Звонок", subtitle="Вчера", open_key="open:b"),
-    ], cleanup=Button(key="cleanup_audio", title="Удалить звук обработанных записей…"))
+    ], cleanup=Button(key="cleanup", title="Удалить звук и видео…"))
 window = LibraryWindow(events.append)
 assert not window.window.get_visible()
 window.show(model)
 assert window.visible
 assert window.cleanup.get_visible()
-assert window.cleanup.get_label() == "Удалить звук обработанных записей…"
+assert window.cleanup.get_label() == "Удалить звук и видео…"
 def labels():
     return [w.get_text() for w in walk(window.scroll) if isinstance(w, Gtk.Label)]
 # All sections: an empty section shows only when it is selected itself
@@ -54,7 +54,7 @@ button = next(w for w in walk(window.scroll)
               if isinstance(w, Gtk.Button) and w.get_label() == "План")
 button.clicked()
 window.cleanup.clicked()
-assert events == ["open:a", "cleanup_audio"]
+assert events == ["open:a", "cleanup"]
 window.search.set_text("Невидимое")
 window.search.emit("search-changed")
 assert "Ничего не найдено" in labels()

@@ -47,6 +47,27 @@ enum Snapshot {
     }
 }
 
+extension Snapshot {
+    /// An alert window (Dialogs.prepared) off screen, its frame with the buttons included.
+    @MainActor static func png(alert: NSAlert, dark: Bool, to url: URL) throws {
+        NSApp.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+        alert.layout()
+        let window = alert.window
+        window.setFrameOrigin(NSPoint(x: -10_000, y: -10_000))
+        window.orderFront(nil)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.5))
+        guard let view = window.contentView?.superview ?? window.contentView,
+            let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds)
+        else { throw SnapshotError.noBitmap }
+        view.cacheDisplay(in: view.bounds, to: rep)
+        window.orderOut(nil)
+        guard let data = rep.representation(using: .png, properties: [:]) else {
+            throw SnapshotError.noBitmap
+        }
+        try data.write(to: url)
+    }
+}
+
 enum SnapshotError: Error {
     case noBitmap
 }

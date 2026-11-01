@@ -26,7 +26,7 @@ from .protocol import (
     Source,
     StatusItem,
 )
-from .recordings import RecordingCard
+from .recordings import Media, RecordingCard, removable
 from .settings_model import server_label
 from .state import (
     MOVE_TO_SECTION,
@@ -70,6 +70,8 @@ _SYMBOLS = {
 }
 _SENTENCE_END = re.compile(r"(?<=[.!?…])\s")
 OPEN_VIDEO = "Open video"
+DELETE_AUDIO = "Delete audio"
+DELETE_VIDEO = "Delete video"
 
 
 def _when(t: datetime, now: datetime, *, clock: bool = True) -> str:
@@ -214,7 +216,15 @@ def _card(
     rename = item("rename", _("Rename…"))
     # a recording being processed (here or by another process) is not moved
     move = _move_menu(c, sections or [], enabled=c.state is not RecordState.PROCESSING)
-    trash = Button(key=key("trash"), title=_(TRASH), role=Role.DESTRUCTIVE, divider=True)
+    # the destructive group after a separator: the audio, the video, the whole recording
+    deletes = [
+        Button(key=key(f"delete_{media}"), title=_(title), role=Role.DESTRUCTIVE)
+        for media, title in ((Media.AUDIO, DELETE_AUDIO), (Media.VIDEO, DELETE_VIDEO))
+        if removable(c, media)
+    ]
+    trash = Button(key=key("trash"), title=_(TRASH), role=Role.DESTRUCTIVE)
+    deletes.append(trash)
+    deletes[0] = deletes[0].model_copy(update={"divider": True})
     redo = c.has_audio and c.has_sound
     inline: list[Button] = []
     if c.has_sound and (c.state in UNFINISHED or c.state is RecordState.AUDIO_ONLY):
@@ -223,7 +233,7 @@ def _card(
         detail, detail_warn = status, True
         process = item("process", _("Process…"), divider=True)
         inline.append(process.model_copy(update={"divider": False}))
-        menu = [*opens, process, rename, move, trash]
+        menu = [*opens, process, rename, move, *deletes]
     else:
         status = "" if c.has_text or c.has_summary else _("No speech")
         rename.divider = True
@@ -232,7 +242,7 @@ def _card(
             menu.append(item("summarize", _(SUMMARIZE)))
         if redo:
             menu.append(item("process", _("Process again…")))
-        menu.append(trash)
+        menu.extend(deletes)
         if status:
             detail, detail_warn = status, False
         elif c.gist:
@@ -259,6 +269,7 @@ def _card(
             menu = _running_menu(c, job)
         else:
             unqueue = Button(key=key("stop"), title=_(UNQUEUE))
+            trash = trash.model_copy(update={"divider": True})
             menu = [*opens, rename.model_copy(update={"divider": True}), move, unqueue, trash]
     # the language of the last processing, for reference
     tooltip = [c.gist, *remarks, languages_label(c.languages)]
@@ -494,10 +505,8 @@ def panel_model(
         # shown whenever there are recordings: with nothing to delete a notice says why
         # (cleanup_plan)
         cleanup=Button(
-            key="cleanup_audio",
-            title=_("Delete audio and video of processed recordings…")
-            if any(c.cleanable and c.has_video for c in cards)
-            else _("Delete audio of processed recordings…"),
+            key="cleanup",
+            title=_("Delete audio and video…"),
             symbol="waveform",
             enabled=idle,
         )

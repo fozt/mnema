@@ -106,6 +106,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         case .ask(let id, .form(let ask)):
             store.openForm(id, ask)  // a live form is a sheet over settings, not a modal NSAlert
+        case .ask(let id, .unknown):
+            store.answer(id, .null)  // a window this app cannot draw: closed, nothing happens
         case .ask(let id, let ask):
             // Not from a main-queue block: otherwise engine messages stall while the window is open.
             RunLoop.main.perform(inModes: [.common]) {

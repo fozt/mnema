@@ -272,6 +272,19 @@ class RangeAsk(BaseModel):
     cancel: str = Field(default_factory=lambda: _("Cancel"))
 
 
+class CleanupAsk(BaseModel):
+    """ "Delete audio and video…": what to delete, as checkboxes (choices: key audio | video,
+    checked at first, enabled when there is something, detail why there is nothing). The answer
+    is the list of checked keys; "ok" is unavailable while nothing is checked."""
+
+    kind: Literal["cleanup"] = "cleanup"
+    title: str
+    message: str = ""
+    choices: list[Choice]
+    ok: str = Field(default_factory=lambda: _("Delete"))
+    cancel: str = Field(default_factory=lambda: _("Cancel"))
+
+
 class FormFieldKind(StrEnum):
     SECRET = "secret"  # input is hidden; the engine never sends a value
     CHOICE = "choice"  # one of choices; the chosen one is Choice.checked
@@ -307,7 +320,10 @@ class FormAsk(BaseModel):
     clear: list[str] = Field(default_factory=list)
 
 
-Ask = Annotated[TitleAsk | ConfirmAsk | FolderAsk | RangeAsk | FormAsk, Field(discriminator="kind")]
+Ask = Annotated[
+    TitleAsk | ConfirmAsk | FolderAsk | RangeAsk | FormAsk | CleanupAsk,
+    Field(discriminator="kind"),
+]
 
 
 class StateMsg(BaseModel):
@@ -363,8 +379,8 @@ class ActionMsg(BaseModel):
 
 class AnswerMsg(BaseModel):
     """A window answer: title a string, confirm a bool, folder a path, range the RangeAnswer
-    fields; None: closed without an answer (always None for a form: its actions are
-    FormEventMsg)."""
+    fields, cleanup the list of checked keys; None: closed without an answer (always None for a
+    form: its actions are FormEventMsg)."""
 
     type: Literal["answer"] = "answer"
     id: int
@@ -630,13 +646,16 @@ def _settings_sample(*, idle: bool = True, update: SettingsField = _UPDATE_FOUND
     return model
 
 
+_DELETES = ("delete_audio", "delete_video", "trash")
+
+
 def _menu(d: str, *items: tuple[str, str], divider: tuple[str, ...] = ()) -> list[Button]:
     """A card menu of (action, title); divider: the actions with a separator before them."""
     return [
         Button(
             key=f"record:{d}:{action}",
             title=title,
-            role=Role.DESTRUCTIVE if action == "trash" else Role.NORMAL,
+            role=Role.DESTRUCTIVE if action in _DELETES else Role.NORMAL,
             divider=action in divider,
         )
         for action, title in items
@@ -684,8 +703,10 @@ def _cards_sample() -> list[Card]:
                     folder,
                     rename,
                     ("process", "Обработать заново…"),
+                    ("delete_audio", "Удалить звук"),
+                    ("delete_video", "Удалить видео"),
                     trash,
-                    divider=("rename", "trash"),
+                    divider=("rename", "delete_audio"),
                 ),
                 a,
                 "Работа",
@@ -1006,8 +1027,8 @@ def _samples() -> dict[str, BaseModel]:
                 idle=idle.model_copy(update={"section": section}),
                 sections=["Работа"],
                 cleanup=Button(
-                    key="cleanup_audio",
-                    title="Удалить звук обработанных записей…",
+                    key="cleanup",
+                    title="Удалить звук и видео…",
                     symbol="waveform",
                 ),
                 notices=[
@@ -1082,6 +1103,33 @@ def _samples() -> dict[str, BaseModel]:
             ),
         ),
         "out-ask-folder": AskMsg(id=3, ask=FolderAsk(start=_HOME)),
+        "out-ask-cleanup": AskMsg(
+            id=10,
+            ask=CleanupAsk(
+                title="Что удалить?",
+                message="Тексты останутся только на этом Mac.",
+                choices=[
+                    Choice(key="audio", title="Звук — 12 записей, 2,3 ГБ", checked=True),
+                    Choice(key="video", title="Видео — 3 записи, 4,1 ГБ"),
+                ],
+            ),
+        ),
+        "out-ask-cleanup-video": AskMsg(  # no audio can go yet: the line says why
+            id=11,
+            ask=CleanupAsk(
+                title="Что удалить?",
+                message="Тексты останутся.",
+                choices=[
+                    Choice(
+                        key="audio",
+                        title="Звук",
+                        detail="Звук можно удалить после синхронизации с сервером",
+                        enabled=False,
+                    ),
+                    Choice(key="video", title="Видео — 1 запись, 650 МБ"),
+                ],
+            ),
+        ),
         "out-ask-range": AskMsg(
             id=4,
             ask=RangeAsk(

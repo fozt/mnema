@@ -13,8 +13,9 @@ import os
 import re
 import textwrap
 from collections import defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from datetime import datetime
+from enum import StrEnum
 from pathlib import Path
 
 from pydantic import BaseModel, Field
@@ -66,17 +67,29 @@ class LibraryView(BaseModel):
     sections: list[str] = Field(default_factory=list)
 
 
+class Media(StrEnum):
+    """What "Delete audio and video…" and a card's "Delete audio" / "Delete video" remove."""
+
+    AUDIO = "audio"  # mic.wav, system.wav and other audio of the folder
+    VIDEO = "video"  # the screen video: video.mp4 and screen.mov
+
+
 class CleanupResult(BaseModel):
-    removed: int = 0  # recordings whose audio went to the Trash
-    video: bool = False  # a screen video went with it
+    audio: int = 0  # recordings whose audio went to the Trash
+    video: int = 0  # recordings whose video went to the Trash
+    removed: int = 0  # recordings that lost anything
     errors: list[str] = Field(default_factory=list)
 
 
-class CleanupPlan(BaseModel):
+class Amount(BaseModel):
     records: int = 0
     bytes: int = 0
-    reason: str = ""  # records == 0: why there is nothing to delete, as a notice
-    video: bool = False  # the screen video goes too: the question says "audio and video"
+
+
+class CleanupPlan(BaseModel):
+    audio: Amount = Field(default_factory=Amount)
+    video: Amount = Field(default_factory=Amount)
+    reason: str = ""  # audio.records == 0: why no audio can be deleted, as a notice
 
 
 AFTER_SYNC = "Audio can be deleted after syncing with the server"
@@ -97,9 +110,11 @@ def _no_audio() -> str:
 _DONE = (RecordState.PROCESSED, RecordState.NO_SPEECH)  # processing reached the end
 
 
-def _cleaned(name: str) -> bool:
-    """A file "Delete audio of processed recordings" removes: audio and the screen video."""
-    return Path(name).suffix.lower() in AUDIO_EXT or name in VIDEOS
+def media_of(name: str) -> Media | None:
+    """Audio by extension, the screen video by its two names; texts and the rest stay."""
+    if Path(name).suffix.lower() in AUDIO_EXT:
+        return Media.AUDIO
+    return Media.VIDEO if name in VIDEOS else None
 
 
 def _waiting_for_server(card: RecordingCard) -> bool:
@@ -189,7 +204,7 @@ def _card(folder: Path, files: dict[str, os.stat_result]) -> RecordingCard | Non
         data = {}
     shown = display_title(folder.name)
     sizes = {name: st.st_size for name, st in files.items()}
-    id = data.get("id")  # cleanup_audio compares it with the list snapshot
+    id = data.get("id")  # cleanup_media compares it with the list snapshot
     texts: dict[FileName, Stamp] = {}
     try:
         for name in sorted(TEXTS):
@@ -222,13 +237,25 @@ def _card(folder: Path, files: dict[str, os.stat_result]) -> RecordingCard | Non
 
 
 def cleanable(card: RecordingCard, checkpoint: Checkpoint, connection: str | None) -> bool:
-    """The one rule of "Delete audio of processed recordings" (fixture audio-cleanup-v1): the
-    recording has audio, is processed (meta.record_state), its last processing, a stopped one
-    too, reached the end (meta.processed) and no new one runs. With a connected server the texts
-    must also be confirmed by the last sync with it: without audio the recording lives on them."""
+    """The one rule of deleting a recording's audio (fixture audio-cleanup-v1): the recording
+    has audio, is processed (meta.record_state), its last processing, a stopped one too, reached
+    the end (meta.processed) and no new one runs. With a connected server the texts must also be
+    confirmed by the last sync with it: without audio the recording lives on them."""
     return _waiting_for_server(card) and (
         not connection or texts_confirmed(checkpoint, connection, card.id, card.texts)
     )
+
+
+def video_cleanable(card: RecordingCard) -> bool:
+    """The screen video can go whenever the recording has one and is not being processed: sync
+    never carries it and the texts do not depend on it."""
+    return card.has_video and card.state is not RecordState.PROCESSING
+
+
+def removable(card: RecordingCard, media: Media) -> bool:
+    """Whether the card offers "Delete audio" / "Delete video" (card.cleanable is set by
+    library())."""
+    return card.cleanable if media is Media.AUDIO else video_cleanable(card)
 
 
 def library(
@@ -367,14 +394,26 @@ def find_recording(root: Path, id: str) -> Path | None:
     return matches[0] if len(matches) == 1 else None
 
 
+def _busy(card: RecordingCard, root: Path, busy: Callable[[], set[str]]) -> bool:
+    relative = card.path.relative_to(root).as_posix()
+    return bool({card.id, str(card.path), relative} & busy())
+
+
 def cleanup_plan(
-    root: Path, *, connection: str | None, busy: Callable[[], set[str]]
+    root: Path,
+    *,
+    connection: str | None,
+    busy: Callable[[], set[str]],
+    record: str | None = None,
 ) -> CleanupPlan:
-    """How many recordings and bytes of audio and video cleanup_audio would remove now, for the
-    question before deleting; with nothing to remove, reason says why."""
+    """How many recordings and bytes of audio and of video cleanup_media would remove now, for
+    the question before deleting; with no audio to remove, reason says why. record — only the
+    recording with this id (a card's "Delete audio" / "Delete video")."""
     plan = CleanupPlan()
     root = root.absolute()
     cards = library(root, connection=connection).cards
+    if record is not None:
+        cards = [c for c in cards if c.id == record]
     audio = [c for c in cards if c.has_audio]
     if connection and any(_waiting_for_server(c) for c in cards):
         plan.reason = _(AFTER_SYNC)
@@ -387,57 +426,81 @@ def cleanup_plan(
     else:  # mixed reasons, or text without history: a general reason never contradicts a card
         plan.reason = _(NOTHING)
     for card in cards:
-        if not card.cleanable:
+        wanted = [m for m in Media if removable(card, m)]
+        if not wanted:
             continue
         try:
-            relative = card.path.relative_to(root).as_posix()
-            if {card.id, str(card.path), relative} & busy():
+            if _busy(card, root, busy):
                 continue
-            files = [f for f in card.path.iterdir() if _cleaned(f.name) and f.is_file()]
-            sizes = [f.stat().st_size for f in files]
+            sizes: dict[Media, list[int]] = defaultdict(list)
+            for f in card.path.iterdir():
+                media = media_of(f.name)
+                if media in wanted and f.is_file():
+                    sizes[media].append(f.stat().st_size)
         except (OSError, ValueError):
             continue
-        plan.records += 1
-        plan.bytes += sum(sizes)
-        plan.video = plan.video or any(f.name in VIDEOS for f in files)
+        for media, found in sizes.items():
+            amount = plan.audio if media is Media.AUDIO else plan.video
+            amount.records += 1
+            amount.bytes += sum(found)
     return plan
 
 
-def cleanup_audio(
+def _failed(media: Media, name: str) -> str:
+    if media is Media.AUDIO:
+        return _("Could not delete the audio of “{name}”", name=name)
+    return _("Could not delete the video of “{name}”", name=name)
+
+
+def cleanup_media(
     root: Path,
     *,
+    what: Collection[Media],
     connection: str | None,
     busy: Callable[[], set[str]],
     trash: Callable[[Path], None],
+    record: str | None = None,
 ) -> CleanupResult:
-    """ "Delete audio of processed recordings": the audio and the screen video of every
-    cleanable() recording go to the Trash, the texts stay. Each folder is read again by the same
-    rule first: it may have been replaced in Finder or changed since the snapshot."""
+    """ "Delete audio and video…": the audio of every cleanable() recording and the video of
+    every video_cleanable() one, as chosen in what, go to the Trash; the texts stay. record —
+    only the recording with this id. Each folder is read again by the same rule first: it may
+    have been replaced in Finder or changed since the snapshot."""
     result = CleanupResult()
     root = root.absolute()
     checkpoint = current()
     for card in library(root, connection=connection).cards:
-        if not card.cleanable:
+        if record is not None and card.id != record:
             continue
-        try:
-            with FILES_LOCK:
-                relative = card.path.relative_to(root).as_posix()
-                if {card.id, str(card.path), relative} & busy():
+        if not any(removable(card, m) for m in what):
+            continue
+        name = card.title or card.path.name
+        with FILES_LOCK:
+            try:
+                if _busy(card, root, busy):
                     continue
+                relative = card.path.relative_to(root).as_posix()
                 found = read_folder(root, relative, known=set(checkpoint.sections))
                 fresh = _card(found.path, found.files) if found.kind is Kind.RECORD else None
-                if (
-                    fresh is None
-                    or fresh.id != card.id
-                    or not cleanable(fresh, checkpoint, connection)
-                ):
+            except (OSError, ValueError, LibraryError):
+                result.errors.extend(_failed(m, name) for m in what if removable(card, m))
+                continue
+            if fresh is None or fresh.id != card.id:
+                continue
+            fresh.cleanable = cleanable(fresh, checkpoint, connection)
+            touched = False
+            for media in (m for m in Media if m in what and removable(fresh, m)):
+                files = [n for n in sorted(found.files) if media_of(n) is media]
+                try:
+                    for file in files:
+                        trash(found.path / file)
+                except OSError:
+                    result.errors.append(_failed(media, name))
                     continue
-                audio = [n for n in sorted(found.files) if _cleaned(n)]
-                for name in audio:
-                    trash(found.path / name)
-                    result.video = result.video or name in VIDEOS
-                result.removed += bool(audio)
-        except (OSError, ValueError, LibraryError):
-            name = card.title or card.path.name
-            result.errors.append(_("Could not delete the audio of “{name}”", name=name))
+                if files:
+                    touched = True
+                    if media is Media.AUDIO:
+                        result.audio += 1
+                    else:
+                        result.video += 1
+            result.removed += touched
     return result

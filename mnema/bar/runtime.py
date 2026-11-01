@@ -39,9 +39,9 @@ from ..sync.engine import SyncStatus
 from ..sync.scan import FILES_LOCK
 from ..sync.state import checkpoint_path
 from .forms import FormEvent, KeyFlow, ModelFlow, ServerFlow
-from .protocol import FormAsk, FormOp
+from .protocol import CleanupAsk, FormAsk, FormOp
 from .range_pick import LANGS, RangeAnswer, RangeRequest, SourceChoice
-from .recordings import find_recording, record_sections
+from .recordings import Media, find_recording, record_sections
 from .settings_model import HOTKEY_BUSY, HOTKEY_INVALID, recognition_at, server_label
 from .state import (
     STEP_AT,
@@ -183,6 +183,11 @@ class Platform(Protocol):
         """Pick a recording folder (any, not only ~/mnema); None when cancelled."""
         ...
 
+    def choose_cleanup(self, ask: CleanupAsk, on_done: Callable[[list[str] | None], None]) -> None:
+        """The "Delete audio and video…" window: on_done(checked choice keys), or None when
+        cancelled."""
+        ...
+
     def ask_range(self, req: RangeRequest, on_done: Callable[[RangeAnswer | None], None]) -> None:
         """The "Process recording" window (range_pick): part, title, full recording to the
         Trash; None when cancelled."""
@@ -239,6 +244,9 @@ class _NullPlatform:
     def choose_folder(self, start: Path, on_done: Callable[[Path | None], None]) -> None:
         on_done(None)
 
+    def choose_cleanup(self, ask: CleanupAsk, on_done: Callable[[list[str] | None], None]) -> None:
+        on_done(None)  # no GUI: delete nothing
+
     def ask_range(self, req: RangeRequest, on_done: Callable[[RangeAnswer | None], None]) -> None:
         on_done(None)
 
@@ -253,6 +261,17 @@ class _NullPlatform:
 
     def screen(self, op: str, path: Path | None = None, *, quality: str = "1080p") -> None:
         raise OSError("no app to record the screen")
+
+
+def _present(folder: Path) -> set[Media]:
+    """The kinds of media a recording folder holds now."""
+    from .recordings import media_of
+
+    try:
+        found = {media_of(f.name) for f in folder.iterdir() if f.is_file()}
+    except OSError:
+        return set()
+    return {m for m in found if m is not None}
 
 
 def _system_available() -> bool:
@@ -1015,8 +1034,8 @@ class BarRuntime:
             ):
                 self._sync.send_to_library(library)
             return
-        if key == "cleanup_audio" and idle:
-            self._cleanup_audio()
+        if key == "cleanup" and idle:
+            self._cleanup()
             return
         if key == "toggle_record":  # the shortcut starts or stops recording; the processing
             key = "start" if idle else "stop"  # queue does not get in its way
@@ -1333,6 +1352,8 @@ class BarRuntime:
         inside = folder.resolve().is_relative_to(library_root().resolve()) or task is not None
         if action == "trash":
             self.trash_folder(folder, record_id=id)
+        elif action in ("delete_audio", "delete_video") and inside:
+            self._delete_media(folder, id, Media(action.removeprefix("delete_")))
         elif action == "rename":
             self._ask_title(
                 f"rename:{id}",
@@ -1414,59 +1435,129 @@ class BarRuntime:
         task.named_by_user = chosen is not None
         self._on_change()
 
-    def _cleanup_audio(self) -> None:
-        """Deleting audio of processed recordings: the question and the deletion share one
-        connection snapshot: without a server the texts stay only here, and the question
-        says so."""
-        from .recordings import cleanup_audio, cleanup_plan, size_label
+    def _texts_stay(self, connection: str | None, *, video: bool = False) -> str:
+        """What stays after deleting audio: without a server the texts stay only here (the video
+        is never synced, so it always stays only here)."""
+        if connection:
+            return _("The texts and the video stay.") if video else _("The texts stay.")
+        if _base.STANDALONE:
+            if video:
+                return _("The texts and the video stay only on this Mac.")
+            return _("The texts stay only on this Mac.")
+        if video:
+            return _("The texts and the video stay only on this computer.")
+        return _("The texts stay only on this computer.")
+
+    def _cleaned(self, what: set[Media], connection: str | None, record: str | None) -> None:
+        """Deleting after the question, with the question's connection snapshot; queued and
+        processing recordings are left alone (_held), whatever changed during the question."""
+        from .recordings import cleanup_media
+
+        result = cleanup_media(
+            library_root(),
+            what=what,
+            connection=connection,
+            busy=self._held,
+            trash=self._platform.trash,
+            record=record,
+        )
+        if record is None:
+            audio = bool(result.audio) or (not result.video and Media.AUDIO in what)
+            video = bool(result.video) or (not result.audio and Media.VIDEO in what)
+            if audio and video:
+                notice = _("Audio and video deleted from recordings: {n}", n=result.removed)
+            elif video:
+                notice = _("Video deleted from recordings: {n}", n=result.video)
+            else:
+                notice = _("Audio deleted from recordings: {n}", n=result.audio)
+            self.state.notice = notice
+        self.state.error = "\n".join(result.errors)
+        self._library_changed()
+
+    def _cleanup(self) -> None:
+        """ "Delete audio and video…": a window with what to delete, audio checked at first; the
+        window and the deletion share one connection snapshot."""
+        from .protocol import Choice
+        from .recordings import cleanup_plan, size_label
 
         connection = self.sync_connection()
+        plan = cleanup_plan(library_root(), connection=connection, busy=self._held)
+        if not plan.audio.records and not plan.video.records:
+            self.state.notice = plan.reason  # why there is nothing to delete, not silence
+            return
+        audio, video = plan.audio, plan.video
+        choices = [
+            Choice(
+                key=Media.AUDIO,
+                title=_n(
+                    "Audio — {n} recording, {size}",
+                    "Audio — {n} recordings, {size}",
+                    audio.records,
+                    size=size_label(audio.bytes),
+                ),
+                checked=True,
+            )
+            if audio.records
+            else Choice(key=Media.AUDIO, title=_("Audio"), detail=plan.reason, enabled=False),
+            Choice(
+                key=Media.VIDEO,
+                title=_n(
+                    "Video — {n} recording, {size}",
+                    "Video — {n} recordings, {size}",
+                    video.records,
+                    size=size_label(video.bytes),
+                ),
+            )
+            if video.records
+            else Choice(key=Media.VIDEO, title=_("Video"), enabled=False),
+        ]
+
+        def chosen(keys: list[str] | None) -> None:
+            what = {Media(k) for k in keys or [] if k in set(Media)}
+            if what and self.state.phase == Phase.IDLE:
+                self._cleaned(what, connection, None)
+
+        ask = CleanupAsk(
+            title=_("What to delete?"), message=self._texts_stay(connection), choices=choices
+        )
+        self._platform.choose_cleanup(ask, chosen)
+
+    def _delete_media(self, folder: Path, record_id: str, media: Media) -> None:
+        """A card's "Delete audio" / "Delete video": the question names the recording, the size
+        and what stays; not for a recording being recorded, processed or queued."""
+        from .recordings import cleanup_plan, size_label
+        from .state import result_name, title_of
+
+        connection = self.sync_connection()
+        plan = cleanup_plan(
+            library_root(), connection=connection, busy=self._held, record=record_id
+        )
+        amount = plan.audio if media is Media.AUDIO else plan.video
+        if not amount.records:
+            return  # it changed since the menu was shown: the card shows what is left
+        name = title_of(folder) or result_name(folder)
+        size = size_label(amount.bytes)
+        present = _present(folder)
+        if media is Media.AUDIO:
+            question = _("Delete the audio of “{name}”?", name=name)
+            stays = self._texts_stay(connection, video=Media.VIDEO in present)
+            ok = _("Delete audio")
+        else:
+            question = _("Delete the video of “{name}”?", name=name)
+            texts = any((folder / n).is_file() for n in (FileName.TRANSCRIPT, FileName.SUMMARY))
+            if Media.AUDIO not in present:
+                stays = _("The texts stay.")
+            elif texts:
+                stays = _("The audio and the texts stay.")
+            else:
+                stays = _("The audio stays.")
+            ok = _("Delete video")
 
         def confirmed(yes: bool) -> None:
-            if not yes or self.state.phase != Phase.IDLE:
-                return
-            result = cleanup_audio(
-                library_root(),
-                connection=connection,
-                busy=self._held,  # queued and processing recordings are left alone
-                trash=self._platform.trash,
-            )
-            if result.video:
-                self.state.notice = _(
-                    "Audio and video deleted from recordings: {n}", n=result.removed
-                )
-            else:
-                self.state.notice = _("Audio deleted from recordings: {n}", n=result.removed)
-            self.state.error = "\n".join(result.errors)
-            self._library_changed()
+            if yes:
+                self._cleaned({media}, connection, record_id)
 
-        plan = cleanup_plan(library_root(), connection=connection, busy=self._held)
-        if not plan.records:  # why there is nothing to delete: a notice, not silence
-            self.state.notice = plan.reason
-            return
-        size = size_label(plan.bytes)
-        if connection:
-            message = _("This frees {size}. The texts stay.", size=size)
-        elif _base.STANDALONE:
-            message = _("This frees {size}. The texts stay only on this Mac.", size=size)
-        else:
-            message = _("This frees {size}. The texts stay only on this computer.", size=size)
-        if plan.video:
-            question = _n(
-                "Delete audio and video of {n} recording?",
-                "Delete audio and video of {n} recordings?",
-                plan.records,
-            )
-        else:
-            question = _n(
-                "Delete audio of {n} recording?", "Delete audio of {n} recordings?", plan.records
-            )
-        self._platform.confirm(
-            question,
-            message,
-            _("Delete"),
-            confirmed,
-        )
+        self._platform.confirm(question, f"{size}. {stays}", ok, confirmed)
 
     def trash_folder(self, folder: Path, *, record_id: str | None = None) -> None:
         """The whole recording to the Trash (it can be restored from Finder); not one being

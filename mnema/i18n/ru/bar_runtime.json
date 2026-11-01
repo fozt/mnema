@@ -7,14 +7,6 @@
   "Recording not found": "Запись не найдена",
   "Audio deleted from recordings: {n}": "Звук удалён у записей: {n}",
   "Audio and video deleted from recordings: {n}": "Звук и видео удалены у записей: {n}",
-  "This frees {size}. The texts stay.": "Освободится {size}. Тексты останутся.",
-  "This frees {size}. The texts stay only on this Mac.": "Освободится {size}. Тексты останутся только на этом Mac.",
-  "This frees {size}. The texts stay only on this computer.": "Освободится {size}. Тексты останутся только на этом компьютере.",
-  "Delete audio of {n} recording?": [
-    "Удалить звук {n} записи?",
-    "Удалить звук {n} записей?",
-    "Удалить звук {n} записей?"
-  ],
   "Delete": "Удалить",
   "Disconnect from the server?": "Отключиться от сервера?",
   "Disconnect from the server “{name}”?": "Отключиться от сервера «{name}»?",
@@ -72,9 +64,28 @@
   "The audio will not be saved.": "Звук не сохранится.",
   "Discard recording": "Отменить запись",
   "Keep recording": "Продолжить запись",
-  "Delete audio and video of {n} recording?": [
-    "Удалить звук и видео {n} записи?",
-    "Удалить звук и видео {n} записей?",
-    "Удалить звук и видео {n} записей?"
-  ]
+  "Video deleted from recordings: {n}": "Видео удалено у записей: {n}",
+  "The texts stay.": "Тексты останутся.",
+  "The texts stay only on this Mac.": "Тексты останутся только на этом Mac.",
+  "The texts stay only on this computer.": "Тексты останутся только на этом компьютере.",
+  "The texts and the video stay.": "Тексты и видео останутся.",
+  "The texts and the video stay only on this Mac.": "Тексты и видео останутся только на этом Mac.",
+  "The texts and the video stay only on this computer.": "Тексты и видео останутся только на этом компьютере.",
+  "The audio and the texts stay.": "Звук и тексты останутся.",
+  "The audio stays.": "Звук останется.",
+  "What to delete?": "Что удалить?",
+  "Audio": "Звук",
+  "Video": "Видео",
+  "Audio — {n} recording, {size}": [
+    "Звук — {n} запись, {size}",
+    "Звук — {n} записи, {size}",
+    "Звук — {n} записей, {size}"
+  ],
+  "Video — {n} recording, {size}": [
+    "Видео — {n} запись, {size}",
+    "Видео — {n} записи, {size}",
+    "Видео — {n} записей, {size}"
+  ],
+  "Delete the audio of “{name}”?": "Удалить звук записи «{name}»?",
+  "Delete the video of “{name}”?": "Удалить видео записи «{name}»?"
 }

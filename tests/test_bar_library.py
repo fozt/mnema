@@ -13,7 +13,8 @@ import pytest
 from mnema.bar.panel import card_subtitle, panel_model, visible_cards
 from mnema.bar.protocol import SettingsModel
 from mnema.bar.recordings import (
-    cleanup_audio,
+    Media,
+    cleanup_media,
     cleanup_plan,
     find_recording,
     library,
@@ -75,7 +76,11 @@ def synced(root, *folders, server=SERVER):
 
 
 def cleanup(root, **kw):
-    return cleanup_audio(root, connection=CONNECTION, **kw)
+    return cleanup_media(root, what={Media.AUDIO}, connection=CONNECTION, **kw)
+
+
+def cleanup_audio(root, **kw):
+    return cleanup_media(root, what={Media.AUDIO}, **kw)
 
 
 def meta_folders(root):
@@ -153,7 +158,7 @@ def test_meta_dates_remarks_and_titles_survive_audio_absence_and_finder_move(tmp
     assert not any(k.endswith(":process") for k in keys) and keys[-2].endswith(":summarize")
     assert panel.cleanup is not None  # no audio, yet the command is there and says why
     plan = cleanup_plan(tmp_path, connection=None, busy=set)
-    assert (plan.records, plan.reason) == (0, "На этом компьютере нет звука записей")
+    assert (plan.audio.records, plan.reason) == (0, "На этом компьютере нет звука записей")
     monkeypatch.setattr(base, "STANDALONE", True)
     assert (
         cleanup_plan(tmp_path, connection=None, busy=set).reason == "На этом Mac нет звука записей"
@@ -209,7 +214,7 @@ def test_cleanup_uses_native_trash_only_for_processed_idle_audio(tmp_path):
         path.rename(tmp_path.parent / path.parent.name)
 
     result = cleanup(tmp_path, busy=lambda: {meta["id"]}, trash=trash)
-    assert result.removed == 1 and not result.errors
+    assert result.audio == 1 and not result.errors
     assert trashed == [ready / "mic.wav"]
     assert (busy / "mic.wav").exists() and (unfinished / "mic.wav").exists()
     assert (ready / "transcript.txt").exists()
@@ -247,7 +252,7 @@ def test_shared_cleanup_rule(tmp_path, case):
             connection = f"{SERVER}#token=another"
     assert model(tmp_path, connection=connection).cleanup is not None  # every case has audio
     plan = cleanup_plan(tmp_path, connection=connection, busy=lambda: set())
-    assert plan.records == (1 if case["removed"] else 0) and bool(plan.reason)
+    assert plan.audio.records == (1 if case["removed"] else 0) and bool(plan.reason)
     trashed = []
     cleanup_audio(tmp_path, connection=connection, busy=lambda: set(), trash=trashed.append)
     assert sorted(p.name for p in trashed) == case["removed"]
@@ -265,10 +270,10 @@ def test_cleanup_without_server_takes_only_processed_audio(tmp_path):
     synced(tmp_path, done, server="http://old:8000")
     (done / "transcript.txt").write_text("правка после сверки")
     plan = cleanup_plan(tmp_path, connection=None, busy=set)
-    assert (plan.records, plan.bytes) == (1, 32044)
+    assert (plan.audio.records, plan.audio.bytes) == (1, 32044)
     trashed = []
     result = cleanup_audio(tmp_path, connection=None, busy=set, trash=trashed.append)
-    assert result.removed == 1 and trashed == [done / "mic.wav"]
+    assert result.audio == 1 and trashed == [done / "mic.wav"]
 
 
 def test_cleanup_reason_when_only_unprocessed_records_have_audio(tmp_path):
@@ -283,7 +288,7 @@ def test_cleanup_reason_when_only_unprocessed_records_have_audio(tmp_path):
     (going / PROCESSING_MARK).write_text("{}", encoding="utf-8")
     synced(tmp_path, raw, going)
     plan = cleanup_plan(tmp_path, connection=CONNECTION, busy=set)
-    assert (plan.records, plan.reason) == (0, "Звук есть только у необработанных записей")
+    assert (plan.audio.records, plan.reason) == (0, "Звук есть только у необработанных записей")
 
 
 def test_cleanup_reason_never_contradicts_the_card(tmp_path):
@@ -295,13 +300,13 @@ def test_cleanup_reason_never_contradicts_the_card(tmp_path):
     [card] = model(tmp_path, connection=CONNECTION).cards
     assert card.status == "Без речи"
     plan = cleanup_plan(tmp_path, connection=CONNECTION, busy=set)
-    assert (plan.records, plan.reason) == (0, "Звук есть только у записей без речи")
+    assert (plan.audio.records, plan.reason) == (0, "Звук есть только у записей без речи")
     old, _ = record(tmp_path, "Без истории")  # text, but no processing in history
     (old / "mic.wav").write_bytes(b"\0" * 32044)
     synced(tmp_path, silent, old)
     assert [c.status for c in model(tmp_path, connection=CONNECTION).cards] == ["", "Без речи"]
     plan = cleanup_plan(tmp_path, connection=CONNECTION, busy=set)
-    assert (plan.records, plan.reason) == (0, "Нет записей, звук которых можно удалить")
+    assert (plan.audio.records, plan.reason) == (0, "Нет записей, звук которых можно удалить")
 
 
 def test_cleanup_knows_the_synced_server_however_its_address_is_written(tmp_path):
@@ -330,12 +335,12 @@ def test_cleanup_failure_and_active_marker_leave_audio_in_place(tmp_path):
         raise OSError("no native trash")
 
     result = cleanup(tmp_path, busy=lambda: set(), trash=unavailable)
-    assert result.errors and not result.removed and (folder / "mic.wav").exists()
+    assert result.errors and not result.audio and (folder / "mic.wav").exists()
     (folder / PROCESSING_MARK).write_text(
         json.dumps({"node": "http://node:8000"}), encoding="utf-8"
     )
     result = cleanup(tmp_path, busy=lambda: set(), trash=unavailable)
-    assert not result.errors and not result.removed
+    assert not result.errors and not result.audio
 
 
 def test_ui_never_creates_root_or_follows_outside_symlink(tmp_path, monkeypatch):
@@ -414,7 +419,7 @@ def test_symlinked_library_root_still_shows_and_finds_records(tmp_path, monkeypa
     assert find_recording(library_root(), data["id"]) == link / "Звонок"
     trashed = []
     result = cleanup(library_root(), busy=lambda: set(), trash=trashed.append)
-    assert result.removed == 1 and not result.errors and len(trashed) == 1
+    assert result.audio == 1 and not result.errors and len(trashed) == 1
 
 
 @pytest.mark.parametrize("replace", [True, False])
@@ -439,7 +444,7 @@ def test_cleanup_rechecks_identity_and_texts_after_snapshot(tmp_path, replace):
     result = cleanup(
         tmp_path, busy=busy, trash=lambda path: pytest.fail("changed recording must stay")
     )
-    assert not result.removed and (folder / "mic.wav").exists()
+    assert not result.audio and (folder / "mic.wav").exists()
 
 
 def test_plain_folder_gets_identity_once_before_actions_without_changing_existing_files(tmp_path):
@@ -491,27 +496,152 @@ def test_cleanup_texts_follow_the_interface_language(tmp_path, monkeypatch):
     ]  # fmt: skip
 
 
-def test_the_screen_video_goes_with_the_audio_and_opens_from_the_card(tmp_path):
-    """The recording's own video (video.mp4, screen.mov left by a failed assembly) is counted and
-    deleted with the audio; a video of another name stays. The card opens the video."""
-    folder, data = record(tmp_path, "2026-11-01_Собеседование", processed=True)
+def _video_record(root, name="2026-11-01_Собеседование", **kw):
+    folder, data = record(root, name, **kw)
     (folder / "mic.wav").write_bytes(b"\0" * 32044)
     (folder / "video.mp4").write_bytes(b"v" * 5000)
     (folder / "screen.mov").write_bytes(b"s" * 700)
-    (folder / "clip.mp4").write_bytes(b"c" * 10)
-    [card] = model(tmp_path).cards
+    (folder / "clip.mp4").write_bytes(b"c" * 10)  # not the recording's video
+    return folder, data
+
+
+def test_the_card_opens_the_video_and_offers_deleting_audio_and_video(tmp_path):
+    """The recording's own video (video.mp4, screen.mov left by a failed assembly) opens from the
+    card; "Delete audio" and "Delete video" sit with "Delete recording" after a separator."""
+    folder, data = _video_record(tmp_path, processed=True)
+    [card] = model(tmp_path, connection=None).cards
     opens = [(b.key, b.title) for b in card.menu[:3]]
     assert opens == [
         (f"record:{data['id']}:transcript", "Открыть расшифровку"),
         (f"record:{data['id']}:video", "Открыть видео"),
         (f"record:{data['id']}:folder", "Открыть папку"),
     ]
+    tail = [(b.key.rsplit(":", 1)[1], b.title, b.divider) for b in card.menu[-3:]]
+    assert tail == [
+        ("delete_audio", "Удалить звук", True),
+        ("delete_video", "Удалить видео", False),
+        ("trash", "Удалить запись", False),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("what", "gone", "kept"),
+    [
+        ({Media.AUDIO}, ["mic.wav"], ["video.mp4", "screen.mov"]),
+        ({Media.VIDEO}, ["screen.mov", "video.mp4"], ["mic.wav"]),
+        ({Media.AUDIO, Media.VIDEO}, ["mic.wav", "screen.mov", "video.mp4"], []),
+    ],
+    ids=["audio", "video", "both"],
+)
+def test_cleanup_takes_the_audio_the_video_or_both(tmp_path, what, gone, kept):
+    """The plan counts audio and video apart; the cleanup removes only what was chosen, the
+    texts and a video of another name stay."""
+    folder, _ = _video_record(tmp_path, processed=True)
     plan = cleanup_plan(tmp_path, connection=None, busy=set)
-    assert (plan.records, plan.bytes) == (1, 32044 + 5000 + 700)
+    assert (plan.audio.records, plan.audio.bytes) == (1, 32044)
+    assert (plan.video.records, plan.video.bytes) == (1, 5000 + 700)
     trashed = []
-    result = cleanup_audio(tmp_path, connection=None, busy=set, trash=trashed.append)
-    assert result.removed == 1
-    assert sorted(p.name for p in trashed) == ["mic.wav", "screen.mov", "video.mp4"]
+    result = cleanup_media(tmp_path, what=what, connection=None, busy=set, trash=trashed.append)
+    assert sorted(p.name for p in trashed) == gone
+    assert (result.audio, result.video, result.removed) == (
+        int(Media.AUDIO in what),
+        int(Media.VIDEO in what),
+        1,
+    )
+    assert all((folder / name).exists() for name in [*kept, "clip.mp4", "transcript.txt"])
+
+
+def test_video_goes_from_an_unprocessed_recording_but_its_audio_stays(tmp_path):
+    """The video does not wait for processing or sync: an unprocessed recording offers only
+    "Delete video", the plan and the cleanup of one recording follow the same rule."""
+    folder, data = _video_record(tmp_path, text=False)
+    other, _ = _video_record(tmp_path, "2026-11-02_Другая", processed=True)
+    [card] = [c for c in model(tmp_path, connection=CONNECTION).cards if c.id == data["id"]]
+    keys = [b.key.rsplit(":", 1)[1] for b in card.menu]
+    assert "delete_video" in keys and "delete_audio" not in keys
+    plan = cleanup_plan(tmp_path, connection=CONNECTION, busy=set, record=data["id"])
+    assert (plan.audio.records, plan.video.records) == (0, 1)
+    trashed = []
+    result = cleanup_media(
+        tmp_path,
+        what={Media.AUDIO, Media.VIDEO},
+        connection=CONNECTION,
+        busy=set,
+        trash=trashed.append,
+        record=data["id"],
+    )
+    assert sorted(p.name for p in trashed) == ["screen.mov", "video.mp4"]
+    assert (result.audio, result.video) == (0, 1)
+    assert all(p.parent == folder for p in trashed) and (other / "video.mp4").exists()
+
+
+def test_busy_recording_keeps_its_video(tmp_path):
+    """A queued or processing recording (the app's busy set) keeps its video; a failed Trash says
+    so and leaves the file."""
+    folder, data = _video_record(tmp_path, processed=True)
+    assert not cleanup_plan(tmp_path, connection=None, busy=lambda: {data["id"]}).video.records
+    result = cleanup_media(
+        tmp_path,
+        what={Media.VIDEO},
+        connection=None,
+        busy=lambda: {data["id"]},
+        trash=lambda p: pytest.fail("busy recording"),
+    )
+    assert not result.video
+
+    def unavailable(path):
+        raise OSError("no trash")
+
+    result = cleanup_media(
+        tmp_path, what={Media.VIDEO}, connection=None, busy=set, trash=unavailable
+    )
+    assert result.errors == ["Не удалось удалить видео записи «Собеседование»"]
+    assert not result.video and (folder / "video.mp4").exists()
+
+
+def test_card_offers_delete_audio_by_the_cleanup_rule(tmp_path):
+    """ "Delete audio" follows the cleanup rule: with a server only after sync confirmed the
+    texts; an unprocessed recording has none; without a server a processed one has it."""
+    done, data = record(tmp_path, "Готово", processed=True)
+    raw, raw_data = record(tmp_path, "Сырая", text=False)
+    for folder in (done, raw):
+        (folder / "mic.wav").write_bytes(b"\0" * 32044)
+
+    def deletes(connection, id):
+        [card] = [c for c in model(tmp_path, connection=connection).cards if c.id == id]
+        actions = [b.key.rsplit(":", 1)[1] for b in card.menu]
+        return [a for a in actions if a in ("delete_audio", "delete_video", "trash")]
+
+    assert deletes(CONNECTION, data["id"]) == ["trash"]  # the texts are not on the server yet
+    synced(tmp_path, done)
+    assert deletes(CONNECTION, data["id"]) == ["delete_audio", "trash"]
+    assert deletes(None, data["id"]) == ["delete_audio", "trash"]
+    assert deletes(None, raw_data["id"]) == ["trash"]
+
+
+def test_linux_cleanup_window_without_gtk_is_a_zenity_checklist():
+    """zenity cannot disable a line: a line with nothing to delete is left out; the answer is
+    the checked keys in the window's order, Cancel or nothing checked deletes nothing."""
+    from mnema.bar.cleanup_pick import zenity_answer, zenity_command
+    from mnema.bar.protocol import Choice, CleanupAsk
+
+    ask = CleanupAsk(
+        title="Что удалить?",
+        message="Тексты останутся.",
+        choices=[
+            Choice(key="audio", title="Звук — 2 записи, 1 ГБ", checked=True),
+            Choice(key="video", title="Видео", enabled=False),
+        ],
+    )
+    command = zenity_command(ask)
+    assert command[:3] == ["zenity", "--list", "--checklist"]
+    assert command[-3:] == ["TRUE", "audio", "Звук — 2 записи, 1 ГБ"]
+    assert "--ok-label=Удалить" in command and "--text=Тексты останутся." in command
+    ask.choices[1].enabled = True
+    assert zenity_answer(ask, 0, "video,audio\n") == ["audio", "video"]
+    assert zenity_answer(ask, 0, "screen\n") is None
+    assert zenity_answer(ask, 0, "\n") is None
+    assert zenity_answer(ask, 1, "audio") is None
 
 
 def test_a_card_without_video_has_no_video_item(tmp_path):

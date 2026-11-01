@@ -279,6 +279,30 @@ def test_card_process_then_language_correction_while_processing(monkeypatch, tmp
     assert seen == [(folder, None), (folder, "en")]
 
 
+def test_cleanup_window_answer_is_the_checked_lines_it_offered() -> None:
+    """The app answers the cleanup window with the checked keys: only enabled lines count, a
+    malformed answer or a closed window deletes nothing."""
+    from mnema.bar.protocol import Choice, CleanupAsk
+
+    out = _Out()
+    platform = ProtocolPlatform(Channel(out))
+    ask = CleanupAsk(
+        title="Что удалить?",
+        choices=[
+            Choice(key="audio", title="Звук", enabled=False),
+            Choice(key="video", title="Видео — 1 запись, 1 ГБ"),
+        ],
+    )
+    got: list[Any] = []
+    for _ in range(4):
+        platform.choose_cleanup(ask, got.append)
+    windows = out.rest()
+    assert [m.ask.kind for m in windows] == ["cleanup"] * 4
+    for msg, value in zip(windows, [["audio", "video", 3], "video", None, []], strict=True):
+        platform.answered(msg.id, value)
+    assert got == [["video"], None, None, []]
+
+
 def test_protocol_platform_converts_answers_and_cancels() -> None:
     out = _Out()
     platform = ProtocolPlatform(Channel(out))
