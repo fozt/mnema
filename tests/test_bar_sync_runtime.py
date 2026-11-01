@@ -241,7 +241,6 @@ def test_cleanup_confirms_then_rechecks_current_busy_state_and_keeps_text(
     rt.handle("cleanup")
     assert shown(platform.cleanup) == (
         "Что удалить?",
-        "Тексты останутся.",
         [("audio", "Звук — 1 запись, 0,0 МБ", True, True), ("video", "Видео", False, False)],
     )
     platform.answer(["audio"])
@@ -252,23 +251,23 @@ def test_cleanup_confirms_then_rechecks_current_busy_state_and_keeps_text(
 
 
 def shown(ask):
-    """The cleanup window: title, message, lines as (key, title, checked, enabled)."""
+    """The cleanup window: title, lines as (key, title, checked, enabled)."""
     lines = [(c.key, c.title, c.checked, c.enabled) for c in ask.choices]
-    return ask.title, ask.message, lines
+    return ask.title, lines
 
 
 @pytest.mark.parametrize(
     ("mac", "place"), [(True, "на этом Mac"), (False, "на этом компьютере")], ids=["mac", "linux"]
 )
-def test_cleanup_without_server_says_texts_stay_only_here(app, monkeypatch, mac, place):
-    """No server connected: audio of a processed recording can be deleted, the question names
-    the machine that keeps the texts. A server connected during the question: the deletion
-    follows the question's rule."""
+def test_cleanup_without_server_deletes_the_audio_of_a_processed_recording(
+    app, monkeypatch, mac, place
+):
+    """No server connected: audio of a processed recording can be deleted. A server connected
+    during the question: the deletion follows the question's rule."""
     rt, platform, root, _ = app
     monkeypatch.setattr(base, "STANDALONE", mac)
     folder, _ = record(root, audio=True, processed=True)
     rt.handle("cleanup")
-    assert platform.cleanup.message == f"Тексты останутся только {place}."
     monkeypatch.setenv("MNEMA_RUNNER", "http://node")
     platform.answer(["audio"])
     assert platform.trashed == [folder / "mic.wav"]
@@ -311,8 +310,8 @@ def test_cleanup_window_is_english_in_english(app, monkeypatch, count, line):
         record(root, f"Call {i}", audio=True, processed=True)
     rt.handle("cleanup")
     ask = platform.cleanup
-    assert (ask.title, ask.message, ask.ok, ask.cancel) == (
-        "What to delete?", "The texts stay only on this Mac.", "Delete", "Cancel",
+    assert (ask.title, ask.ok, ask.cancel) == (
+        "What to delete?", "Delete", "Cancel",
     )  # fmt: skip
     assert [c.title for c in ask.choices] == [line, "Video"]
     platform.answer(["audio"])
@@ -345,7 +344,7 @@ def test_cleanup_window_deletes_what_is_checked(app, monkeypatch, answer, notice
     again = panel_model(rt.state, rt.prefs, MenuEnv(), cards, SettingsModel(tabs=[])).cleanup
     assert again == cleanup
     rt.handle("cleanup")
-    assert shown(platform.cleanup)[2] == [
+    assert shown(platform.cleanup)[1] == [
         ("audio", "Звук — 2 записи, 0,0 МБ", True, True),
         ("video", "Видео — 1 запись, 1,9 МБ", False, True),
     ]

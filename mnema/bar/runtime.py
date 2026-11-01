@@ -1517,9 +1517,7 @@ class BarRuntime:
             if what and self.state.phase == Phase.IDLE:
                 self._cleaned(what, connection, None)
 
-        ask = CleanupAsk(
-            title=_("What to delete?"), message=self._texts_stay(connection), choices=choices
-        )
+        ask = CleanupAsk(title=_("What to delete?"), choices=choices)
         self._platform.choose_cleanup(ask, chosen)
 
     def _delete_media(self, folder: Path, record_id: str, media: Media) -> None:
