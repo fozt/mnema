@@ -107,12 +107,12 @@ recognition *On this Mac* or make the first recording without it, and shows the 
 Opened straight from the disk image, Mnema asks to be moved to *Applications* first. On its first
 start it turns on *Open at login*. The `mnema` command and `mnema-mcp` are installed separately
 (see [Command line](#command-line)). Updates come from GitHub Releases: *⋯ → Settings… → General
-→ Check for updates* downloads the new app and replaces this one in place, so Mnema has to stay in
-a folder you can write to, such as *Applications*. When only Mnema's own code
-changed, the update is about 4 MB instead of the whole app. To remove Mnema, turn off *Open at
-login* (*Settings → General*), quit it and move it to the Trash; settings stay in
-`~/.config/mnema`, recordings in `~/mnema`, the speech model in `~/Library/Application
-Support/Mnema`. The licenses of everything inside the app are in
+→ Check for updates* looks for a new version, and when there is one, *Update* downloads it and
+replaces this app in place, so Mnema has to stay in a folder you can write to, such as
+*Applications*. When only Mnema's own code changed, the update is about 4 MB instead of the whole
+app. To remove Mnema, turn off *Open at login* (*Settings → General*), quit it and move it to the
+Trash; settings stay in `~/.config/mnema`, recordings in `~/mnema`, the speech model in
+`~/Library/Application Support/Mnema`. The licenses of everything inside the app are in
 `Mnema.app/Contents/Resources/licenses`; the source code of its LGPL and GPL parts is in
 `third-party-sources-X.Y.Z.tar.gz` on the same release page, except the ones that
 `licenses/SOURCE-OFFER.txt` lists as on request. The speech models have their own licenses, see
@@ -219,8 +219,8 @@ git clone https://github.com/fozt/mnema.git && cd mnema
 ```
 
 Mnema appears in the applications menu and in the top panel, and the installer adds the `mnema`
-command. Without a server it only records; recordings are processed once you connect one in
-*Settings → Server*.
+command. Without a server it only records: a recording stays *Not processed*, and after you
+connect a server in *Settings → Server* you can process it with *Process…* on its card.
 
 ### Android
 
@@ -289,9 +289,11 @@ summaries were off) has *Summarize* in its menu.
 Parakeet Ultra recognizes 25 languages: Bulgarian, Croatian, Czech, Danish, Dutch, English,
 Estonian, Finnish, French, German, Greek, Hungarian, Italian, Latvian, Lithuanian, Maltese,
 Polish, Portuguese, Romanian, Russian, Slovak, Slovenian, Spanish, Swedish and Ukrainian, and
-names the language itself. For any other language the recording gets no transcript and the note
-"This language is recognized only in the cloud": audio never goes to the cloud by itself, so
-choose *In the cloud* for that recording (*⋯ → Process recording…*).
+names the language itself. Other languages need *In the cloud*: *Automatic* does not detect
+them, and such speech comes back as a wrong transcript in one of those 25 languages. Audio never
+goes to the cloud by itself, so choose *In the cloud* for that recording (*⋯ → Process
+recording…*). Only the `mnema` command with an explicit `--lang` outside the list gets the note
+"This language is recognized only in the cloud" instead of a transcript.
 
 *On the server* is unavailable until a server is connected. Linux offers *On the server* and *In
 the cloud*. The title and the summary are written by your model in every case: a Mac connected to
