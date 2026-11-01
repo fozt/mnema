@@ -68,6 +68,8 @@ import dev.mnema.app.ui.recordings.ReprocessDefaults
 import dev.mnema.app.ui.recordings.SheetStart
 import dev.mnema.app.ui.recordings.sheetStart
 import dev.mnema.app.ui.recordings.canDelete
+import dev.mnema.app.ui.recordings.CardAction
+import dev.mnema.app.ui.recordings.cardActions
 import dev.mnema.app.ui.recordings.audioAsk
 import dev.mnema.app.ui.recordings.cleanupAsk
 import dev.mnema.app.ui.recordings.recordingAsk
@@ -199,6 +201,37 @@ class RecordingsUiTest {
         for ((count, title) in listOf(1 to "Удалить звук 1 записи?", 2 to "Удалить звук 2 записей?", 11 to "Удалить звук 11 записей?",
             21 to "Удалить звук 21 записи?", 111 to "Удалить звук 111 записей?")) {
             assertEquals(title, cleanupAsk(AudioCleanup(List(count) { records[0] }, trash = true)).title)
+        }
+    }
+
+    @Test
+    fun cardMenuRenamesFirstByTheRecordingScreenRule() {
+        val idle = item()
+        assertEquals(listOf(CardAction(DetailAction.RENAME), CardAction(DetailAction.MOVE), CardAction(DetailAction.DELETE)),
+            cardActions(idle))
+        assertEquals(listOf("Переименовать", "Переместить в раздел", "Удалить запись"), cardActions(idle).map { it.action.title })
+
+        val recording = item(state = ProcessingState.Unprocessed, recordingNow = true)
+        assertEquals(listOf(
+            CardAction(DetailAction.RENAME, "Переименовать можно после записи"),
+            CardAction(DetailAction.MOVE, "Переместить можно после записи"),
+            CardAction(DetailAction.DELETE, enabled = false),
+        ), cardActions(recording))
+
+        // a processing recording gets a title that processing gives the folder at the end, as from the recording screen
+        val processing = item(state = ProcessingState.Recognizing(0.4, ""))
+        assertEquals(listOf(
+            CardAction(DetailAction.TITLE),
+            CardAction(DetailAction.MOVE, "Переместить можно после обработки"),
+            CardAction(DetailAction.DELETE, enabled = false),
+        ), cardActions(processing))
+        assertEquals("Задать название…", cardActions(processing).first().action.title)
+
+        for (card in listOf(idle, recording, processing)) {
+            val screen = detailActions(detail(item = card), serverSet = true)
+            val rename = cardActions(card).first()
+            assertEquals(screen.naming, rename.action)
+            assertEquals(screen.blocked(screen.naming), rename.blocked)
         }
     }
 

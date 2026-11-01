@@ -234,6 +234,51 @@ class RecordingViewModelTest {
     }
 
     @Test
+    fun renameFromTheListRenamesByTheRecordingScreenRule() = runTest {
+        val root = tmp.newFolder("Mnema")
+        val dir = File(root, "2026-10-21_14-35").apply { mkdirs() }
+        WavFixture.write(File(dir, "mic.wav"), WavFixture.samples(1.0, listOf(0.1 to 0.9)))
+        Meta.ensureRecording(dir, "record") { Meta.isoNow(1792582500000, TimeZone.getTimeZone("GMT+03:00")) }
+        var writing: String? = null
+        var working = false
+        val store = FolderRecordingStore(root, backgroundScope, { writing }, { working }, Dispatchers.Unconfined)
+        val list = RecordingsViewModel(store, ZoneId.of("UTC"), compute = Dispatchers.Unconfined)
+        fun card() = store.items.value.single()
+        store.refresh()
+        store.loaded.first { it }
+
+        list.rename(card(), "Дейли: с командой")
+        val renamed = store.items.first { it.singleOrNull()?.title == "Дейли с командой" }.single()
+        assertEquals("2026-10-21_Дейли с командой", renamed.dir.name)
+        assertEquals("record", renamed.id)
+        assertFalse(dir.exists())
+        assertEquals(null, list.notice.value)
+
+        // the same title changes nothing; the folder being recorded keeps its name
+        list.rename(renamed, " Дейли с командой ")
+        writing = renamed.dir.name
+        store.refresh()
+        val recording = store.items.first { it.single().recordingNow }.single()
+        list.rename(recording, "Другое")
+        store.refresh()
+        runCurrent()
+        assertEquals(renamed.dir, card().dir)
+        assertTrue(renamed.dir.isDirectory)
+        assertEquals(null, list.notice.value)
+
+        // a processing recording gets a title, processing names the folder at the end
+        writing = null
+        working = true
+        ProcessStateFile.write(renamed.dir, ProcessState(id = "record", stage = ProcessStage.ASR))
+        store.refresh()
+        val processing = store.items.first { !it.single().recordingNow && isProcessing(it.single().state) }.single()
+        list.rename(processing, "Другое")
+        assertEquals("Другое", store.items.first { it.singleOrNull()?.pendingTitle != null }.single().pendingTitle)
+        assertEquals(renamed.dir, card().dir)
+        assertEquals("Другое", ProcessStateFile.read(renamed.dir)?.userTitle)
+    }
+
+    @Test
     fun movedCardFollowsItsFolderIntoANewSectionAndBack() = runTest {
         val root = tmp.newFolder("Mnema")
         val dir = File(root, "2026-10-21_14-35").apply { mkdirs() }
