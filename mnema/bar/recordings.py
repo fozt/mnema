@@ -30,6 +30,7 @@ from ..live import meta
 from ..live.meta import META_FILE, RecordState
 from ..live.naming import display_title, folder_title, free_name, recording_start, wav_seconds
 from ..live.setup import PROCESSING_MARK, folder_state
+from ..live.video import VIDEOS
 from ..sync.scan import FILES_LOCK, ensure_identity, renew_identity
 from ..sync.state import Checkpoint, current, known_sections, texts_confirmed
 
@@ -52,6 +53,7 @@ class RecordingCard(BaseModel):
     state: RecordState  # meta.record_state
     has_audio: bool = True  # audio files exist
     has_sound: bool = True  # the audio is not empty (meta.has_sound): something to process
+    has_video: bool = False  # the screen video (video.mp4 or screen.mov)
     languages: list[str] = Field(default_factory=list)  # of the last processing
     finished: bool = False  # the last processing in history, a stopped one too, reached the end
     processing: bool = False  # .mnema-processing is present: running or interrupted
@@ -91,6 +93,11 @@ def _no_audio() -> str:
 
 
 _DONE = (RecordState.PROCESSED, RecordState.NO_SPEECH)  # processing reached the end
+
+
+def _cleaned(name: str) -> bool:
+    """A file "Delete audio of processed recordings" removes: audio and the screen video."""
+    return Path(name).suffix.lower() in AUDIO_EXT or name in VIDEOS
 
 
 def _waiting_for_server(card: RecordingCard) -> bool:
@@ -202,6 +209,7 @@ def _card(folder: Path, files: dict[str, os.stat_result]) -> RecordingCard | Non
         has_summary=has_summary,
         has_audio=bool(audio),
         has_sound=meta.has_sound(sizes),
+        has_video=any(name in files for name in VIDEOS),
         remarks=meta.remarks_of(data),
         state=folder_state(folder, files, data),
         languages=_languages(raw_meta),
@@ -360,8 +368,8 @@ def find_recording(root: Path, id: str) -> Path | None:
 def cleanup_plan(
     root: Path, *, connection: str | None, busy: Callable[[], set[str]]
 ) -> CleanupPlan:
-    """How many recordings and bytes of audio cleanup_audio would remove now, for the question
-    before deleting; with nothing to remove, reason says why."""
+    """How many recordings and bytes of audio and video cleanup_audio would remove now, for the
+    question before deleting; with nothing to remove, reason says why."""
     plan = CleanupPlan()
     root = root.absolute()
     cards = library(root, connection=connection).cards
@@ -384,9 +392,7 @@ def cleanup_plan(
             if {card.id, str(card.path), relative} & busy():
                 continue
             sizes = [
-                f.stat().st_size
-                for f in card.path.iterdir()
-                if f.suffix.lower() in AUDIO_EXT and f.is_file()
+                f.stat().st_size for f in card.path.iterdir() if _cleaned(f.name) and f.is_file()
             ]
         except (OSError, ValueError):
             continue
@@ -402,9 +408,9 @@ def cleanup_audio(
     busy: Callable[[], set[str]],
     trash: Callable[[Path], None],
 ) -> CleanupResult:
-    """ "Delete audio of processed recordings": the audio of every cleanable() recording goes to
-    the Trash, the texts stay. Each folder is read again by the same rule first: it may have been
-    replaced in Finder or changed since the snapshot."""
+    """ "Delete audio of processed recordings": the audio and the screen video of every
+    cleanable() recording go to the Trash, the texts stay. Each folder is read again by the same
+    rule first: it may have been replaced in Finder or changed since the snapshot."""
     result = CleanupResult()
     root = root.absolute()
     checkpoint = current()
@@ -424,7 +430,7 @@ def cleanup_audio(
                     or not cleanable(fresh, checkpoint, connection)
                 ):
                     continue
-                audio = [n for n in sorted(found.files) if Path(n).suffix.lower() in AUDIO_EXT]
+                audio = [n for n in sorted(found.files) if _cleaned(n)]
                 for name in audio:
                     trash(found.path / name)
                 result.removed += bool(audio)

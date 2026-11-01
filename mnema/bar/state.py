@@ -462,7 +462,7 @@ def title(state: BarState, *, discreet: bool = False, coarse: bool = False) -> T
     return Title(icon="warning" if state.error or state.sync_errors or asking else "idle")
 
 
-_ARTIFACTS = {".txt", ".md", ".mp3", ".wav"}  # files inside a recording folder
+_ARTIFACTS = {".txt", ".md", ".mp3", ".wav", ".mp4", ".mov"}  # files inside a recording folder
 
 
 def is_artifact(path: Path) -> bool:

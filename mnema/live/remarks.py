@@ -430,6 +430,19 @@ def mix_failed(reason: str) -> Remark:
     )
 
 
+VIDEO_MUX_FAILED = "video_mux_failed"
+
+
+def video_mux_failed(reason: str) -> Remark:
+    return Remark(
+        step=Step.MIX,
+        cause=_("Could not assemble the video: {reason}", reason=plain_error(reason)),
+        effect=_("The screen recording stays without sound in screen.mov"),
+        short_effect=_("no video"),
+        code=VIDEO_MUX_FAILED,
+    )
+
+
 def server_down(server: str, command: str = "") -> Remark:
     """The chosen server did not answer: the recording waits for it and never moves to another
     server or to this computer by itself. server — its name as the user sees it; command — the

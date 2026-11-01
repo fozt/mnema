@@ -67,6 +67,7 @@ _SYMBOLS = {
     "system": ("speaker.wave.2.fill", "speaker.slash.fill"),
 }
 _SENTENCE_END = re.compile(r"(?<=[.!?…])\s")
+OPEN_VIDEO = "Open video"
 
 
 def _when(t: datetime, now: datetime, *, clock: bool = True) -> str:
@@ -192,6 +193,8 @@ def _card(
     opens = [item("summary", _(OPEN_SUMMARY))] if c.has_summary else []
     if c.has_text:
         opens.append(item("transcript", _(OPEN_TEXT)))
+    if c.has_video:
+        opens.append(item("video", _(OPEN_VIDEO)))
     opens.append(item("folder", _(OPEN_FOLDER)))
     rename = item("rename", _("Rename…"))
     # a recording being processed (here or by another process) is not moved
@@ -274,6 +277,8 @@ def _running_menu(c: RecordingCard, job: Job) -> list[Button]:
     menu: list[Button] = []
     if job.transcript_ready is not None:  # the new transcript is ready (it replaces the old one)
         menu.append(Button(key=key("transcript"), title=_(OPEN_TEXT)))
+    if c.has_video:
+        menu.append(Button(key=key("video"), title=_(OPEN_VIDEO)))
     menu.append(Button(key=key("folder"), title=_(OPEN_FOLDER)))
     if can_relang(job):  # another language redoes the recording strictly in it
         applied = job.applied_languages

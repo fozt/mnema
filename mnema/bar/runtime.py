@@ -33,6 +33,7 @@ from ..live import meta
 from ..live.remarks import SOURCE_NAMES
 from ..live.setup import FinalizeCancelled
 from ..live.sources import MicUnavailable
+from ..live.video import video_file
 from ..node_settings import SERVER_NAME
 from ..sync.engine import SyncStatus
 from ..sync.scan import FILES_LOCK
@@ -1297,6 +1298,10 @@ class BarRuntime:
         elif action in ("transcript", "summary"):
             path = folder / (FileName.TRANSCRIPT if action == "transcript" else FileName.SUMMARY)
             if path.is_file() and inside:
+                self._platform.open(path)
+        elif action == "video":
+            path = video_file(folder)
+            if path is not None and inside:
                 self._platform.open(path)
 
     def _job_action(self, task: _Task, action: str) -> None:

@@ -47,6 +47,13 @@ class LightRun(BaseModel):
     lang: str | None = None
 
 
+class VideoRun(BaseModel):
+    """The screen video of the recording."""
+
+    offset: float | None = None  # seconds from the sound's start to the first frame
+    error: str = ""  # why there is no video.mp4
+
+
 class Run(BaseModel):
     kind: Literal["process", "summary"] = "process"  # summary — "Summarize"
     job: str | None = None
@@ -59,6 +66,7 @@ class Run(BaseModel):
     tracks: dict[str, TrackRun] = Field(default_factory=dict)
     silent: list[str] = Field(default_factory=list)  # tracks without a single sound, not recognized
     summary: LightRun | None = None
+    video: VideoRun | None = None
     steps: dict[str, float] = Field(default_factory=dict)  # step → seconds
     remarks: list[str] = Field(default_factory=list)
     notes: list[Remark] = Field(default_factory=list)  # remarks with their steps, before merging

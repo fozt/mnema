@@ -16,6 +16,9 @@ logger = logging.getLogger(__name__)
 
 _WAV_LIMIT = 0xFFFFFFFF - 44 - 2**20  # data length limit of the WAV header, with a margin
 
+SCREEN_FILE = "screen.mov"  # the screen while recording (the Mac app writes it)
+VIDEO_FILE = "video.mp4"  # the screen with the sound, assembled after the recording
+
 
 class WavTrackWriter:
     """Incremental WAV track of a source: PCM16 mono 16 kHz, exactly the stream ASR sees.

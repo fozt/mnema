@@ -489,3 +489,42 @@ def test_cleanup_texts_follow_the_interface_language(tmp_path, monkeypatch):
     assert [records_count(n) for n in (2, 11, 21, 101, 111)] == [
         "2 записей", "11 записей", "21 записи", "101 записи", "111 записей",
     ]  # fmt: skip
+
+
+def test_the_screen_video_goes_with_the_audio_and_opens_from_the_card(tmp_path):
+    """The recording's own video (video.mp4, screen.mov left by a failed assembly) is counted and
+    deleted with the audio; a video of another name stays. The card opens the video."""
+    folder, data = record(tmp_path, "2026-11-01_Собеседование", processed=True)
+    (folder / "mic.wav").write_bytes(b"\0" * 32044)
+    (folder / "video.mp4").write_bytes(b"v" * 5000)
+    (folder / "screen.mov").write_bytes(b"s" * 700)
+    (folder / "clip.mp4").write_bytes(b"c" * 10)
+    [card] = model(tmp_path).cards
+    opens = [(b.key, b.title) for b in card.menu[:3]]
+    assert opens == [
+        (f"record:{data['id']}:transcript", "Открыть расшифровку"),
+        (f"record:{data['id']}:video", "Открыть видео"),
+        (f"record:{data['id']}:folder", "Открыть папку"),
+    ]
+    plan = cleanup_plan(tmp_path, connection=None, busy=set)
+    assert (plan.records, plan.bytes) == (1, 32044 + 5000 + 700)
+    trashed = []
+    result = cleanup_audio(tmp_path, connection=None, busy=set, trash=trashed.append)
+    assert result.removed == 1
+    assert sorted(p.name for p in trashed) == ["mic.wav", "screen.mov", "video.mp4"]
+
+
+def test_a_card_without_video_has_no_video_item(tmp_path):
+    folder, _ = record(tmp_path, "Звонок", processed=True)
+    (folder / "mic.wav").write_bytes(b"\0" * 32044)
+    [card] = model(tmp_path).cards
+    assert not any(b.key.endswith(":video") for b in card.menu)
+
+
+def test_the_video_file_belongs_to_its_recording(tmp_path):
+    from mnema.bar.state import folder_of, title_of
+
+    folder = tmp_path / "2026-11-01_Собеседование v2.0"
+    for name in ("video.mp4", "screen.mov"):
+        assert folder_of(folder / name) == folder
+        assert title_of(folder / name) == "Собеседование v2.0"
