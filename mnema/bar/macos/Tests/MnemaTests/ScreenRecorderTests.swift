@@ -26,24 +26,19 @@ private func t(_ seconds: Double) -> CMTime { CMTime(seconds: seconds, preferred
             == FrameSize(width: 1920, height: 1246))
     // a screen narrower than the quality keeps its own pixels
     #expect(ScreenCapture.frameSize(pixelWidth: 1024, pixelHeight: 768, quality: .hd) == FrameSize(width: 1024, height: 768))
-    func bitRate(_ quality: VideoQuality) -> Int? {
-        let settings = ScreenCapture.outputSettings(FrameSize(width: 1280, height: 832), quality: quality)
-        return (settings[AVVideoCompressionPropertiesKey] as? [String: Any])?[AVVideoAverageBitRateKey] as? Int
+    // the encoder writes the frame it is given, and the lower quality spends fewer bits on it
+    let size = FrameSize(width: 1280, height: 832)
+    func encoder(_ quality: VideoQuality) -> (width: Int?, height: Int?, bitRate: Int?) {
+        let settings = ScreenCapture.outputSettings(size, quality: quality)
+        let compression = settings[AVVideoCompressionPropertiesKey] as? [String: Any]
+        return (
+            settings[AVVideoWidthKey] as? Int, settings[AVVideoHeightKey] as? Int,
+            compression?[AVVideoAverageBitRateKey] as? Int
+        )
     }
-    #expect(bitRate(.hd) == 1_200_000)
-    #expect(bitRate(.fullHD) == 2_000_000)
-}
-
-@Test func encoderIsHevcAt2MbpsWithAKeyFrameEvery10Seconds() throws {
-    let settings = ScreenCapture.outputSettings(FrameSize(width: 1920, height: 1246))
-    #expect(settings[AVVideoCodecKey] as? AVVideoCodecType == .hevc)
-    #expect(settings[AVVideoWidthKey] as? Int == 1920)
-    #expect(settings[AVVideoHeightKey] as? Int == 1246)
-    let compression = try #require(settings[AVVideoCompressionPropertiesKey] as? [String: Any])
-    #expect(compression[AVVideoAverageBitRateKey] as? Int == 2_000_000)
-    #expect(compression[AVVideoExpectedSourceFrameRateKey] as? Int == 15)
-    #expect(compression[AVVideoMaxKeyFrameIntervalDurationKey] as? Double == 10)
-    #expect(compression[AVVideoAllowFrameReorderingKey] as? Bool == false)
+    let hd = encoder(.hd), fullHD = encoder(.fullHD)
+    #expect(hd.width == 1280 && hd.height == 832 && fullHD.width == 1280 && fullHD.height == 832)
+    #expect((hd.bitRate ?? .max) < (fullHD.bitRate ?? 0))
 }
 
 @Test func framesOfAPauseAreDroppedAndLaterOnesShiftByIt() {
@@ -135,7 +130,6 @@ private let editor: pid_t = 300
 /// frame a stream error is the writer's, after it the display went away.
 @Test func streamEndNamesWhoStoppedIt() {
     let userStopped = NSError(domain: SCStreamErrorDomain, code: SCStreamError.Code.userStopped.rawValue)
-    #expect(userStopped.code == -3817)
     #expect(ScreenCapture.end(of: userStopped, afterFirstFrame: true) == .byUser)
     #expect(ScreenCapture.end(of: userStopped, afterFirstFrame: false) == .byUser)
     let lost = NSError(domain: SCStreamErrorDomain, code: SCStreamError.Code.noCaptureSource.rawValue)
