@@ -154,7 +154,7 @@ fun RecordingDetailScreen(
     val deleted by model.deleted.collectAsStateWithLifecycle()
     val failure by model.failure.collectAsStateWithLifecycle()
     val opened by model.opened.collectAsStateWithLifecycle()
-    RefreshWhileShown(model::refresh)
+    RereadWhileShown(model.rereading)
 
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()

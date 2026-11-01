@@ -112,17 +112,29 @@ internal val AUDIO_EXTENSIONS = setOf("wav", "flac", "m4a", "mp3", "ogg", "aac",
  * resume.
  */
 internal fun busyRecordings(root: File, recording: String?, hasWork: (String) -> Boolean, active: Set<String> = emptySet()): Set<String> = synchronized(filesLock) {
-    val result = active.toMutableSet()
-    recording?.takeIf { it.isNotEmpty() }?.let { result += it; result += File(root, it).absolutePath }
-    for (dir in libraryFolders(root).records) {
-        val unknown = File(dir, ProcessStateFile.FILE).exists() && ProcessStateFile.read(dir) == null
-        val state = ProcessStateFile.own(dir)
-        val unfinished = state?.stage in ProcessStage.UNFINISHED && ProcessStateFile.current(dir) != null
-        if (unknown || state != null && (unfinished || hasWork(state.id))) {
-            result += dir.relativeTo(root.canonicalFile).invariantSeparatorsPath
-            result += dir.absolutePath
-            recordingId(dir)?.let(result::add)
-        }
-    }
+    val result = (active + writing(root, recording)).toMutableSet()
+    for (dir in libraryFolders(root).records) if (hasOwnWork(dir, hasWork)) result += keys(root, dir)
     result
+}
+
+/**
+ * The same rule for one recording, without a walk of the library and without the files lock: to show what can be done with
+ * it; a change checks [busyRecordings] again under the lock. Only another copy with the same id being processed is not seen.
+ */
+internal fun busyRecording(root: File, dir: File, recording: String?, hasWork: (String) -> Boolean, active: Set<String> = emptySet()): Boolean {
+    val held = active + writing(root, recording)
+    return keys(root, dir).any { it in held } || hasOwnWork(dir, hasWork)
+}
+
+private fun writing(root: File, recording: String?): Set<String> =
+    recording?.takeIf { it.isNotEmpty() }?.let { setOf(it, File(root, it).absolutePath) }.orEmpty()
+
+private fun keys(root: File, dir: File): Set<String> =
+    setOfNotNull(dir.relativeTo(root.canonicalFile).invariantSeparatorsPath, dir.absolutePath, recordingId(dir))
+
+private fun hasOwnWork(dir: File, hasWork: (String) -> Boolean): Boolean {
+    val unknown = File(dir, ProcessStateFile.FILE).exists() && ProcessStateFile.read(dir) == null
+    val state = ProcessStateFile.own(dir)
+    val unfinished = state?.stage in ProcessStage.UNFINISHED && ProcessStateFile.current(dir) != null
+    return unknown || state != null && (unfinished || hasWork(state.id))
 }

@@ -182,6 +182,27 @@ class LibraryIntegrationTest {
         assertFalse(busyRecordings(root, null, { false }).contains("stopped-id"))
     }
 
+    @Test fun oneRecordingIsBusyByTheSameRuleAsTheWholeLibrary() {
+        val queued = record("Работа/queued", "queued-id")
+        ownWork(queued, ProcessStage.NEW)
+        val unknown = record("unknown")
+        File(unknown, ProcessStateFile.FILE).writeText("broken")
+        val held = record("held", "held-id")
+        ProcessStateFile.write(held, ProcessState(id = "held-id", stage = ProcessStage.DONE))
+        val running = record("running", "running-id")
+        ProcessStateFile.write(running, ProcessState(id = "running-id", stage = ProcessStage.DONE))
+        val live = record("live")
+        val idle = record("Работа/idle", "idle-id")
+        val folders = listOf(queued, unknown, held, running, live, idle).map { it.canonicalFile }
+        val hasWork = { id: String -> id == "running-id" }
+        val busy = busyRecordings(root, "live", hasWork, setOf("held-id"))
+        for (dir in folders) {
+            val keys = listOfNotNull(dir.relativeTo(root.canonicalFile).invariantSeparatorsPath, dir.absolutePath, recordingId(dir))
+            assertEquals(dir.name, keys.any { it in busy }, busyRecording(root, dir, "live", hasWork, setOf("held-id")))
+        }
+        assertEquals(listOf("idle"), folders.filterNot { busyRecording(root, it, "live", hasWork, setOf("held-id")) }.map { it.name })
+    }
+
     @Test fun workFileOfAnotherRecordingIsNotThisRecordingsWork() {
         val first = record("one", "one-id")
         val second = record("two", "two-id")

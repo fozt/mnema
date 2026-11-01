@@ -3,6 +3,7 @@ package dev.mnema.app
 import android.content.Context
 import android.os.SystemClock
 import dev.mnema.app.i18n.AcceptLanguage
+import dev.mnema.app.recordings.busyRecording
 import dev.mnema.app.recordings.busyRecordings
 import dev.mnema.app.recordings.moveToSection
 import dev.mnema.app.recordings.recordingDirectory
@@ -15,6 +16,7 @@ import dev.mnema.app.sync.SyncException
 import dev.mnema.app.sync.SyncScheduling
 import dev.mnema.app.sync.filesLock
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import java.util.TimeZone
 import java.io.IOException
 import kotlinx.coroutines.runBlocking
@@ -88,13 +90,14 @@ class AppGraph(val context: Context) {
 
     // /sdcard is a system symlink. Inside the library every component compares one real root.
     val recordingsRoot: File = File(HelperProtocol.RECORDINGS_ROOT).canonicalFile
-    private val activeFolders = mutableMapOf<String, Int>()
+    // changed under filesLock; a recording's screen reads it without the lock
+    private val activeFolders = ConcurrentHashMap<String, Int>()
     private val syncScheduling by lazy { SyncScheduling(context) }
     private val trash = NativeTrash(context, recordingsRoot)
     private val scheduler = WorkScheduler(context, ::recordingForMutation, ::wakeSync, prepare = { runBlocking { prepareMutation() } })
     val processing: ProcessingScheduler = scheduler
     private val store = FolderRecordingStore(recordingsRoot, scope, ::recordingNow, scheduler::hasWork,
-        trash = trash::move, busy = ::busyFolders, changed = ::wakeSync, prepare = ::prepareMutation, textsOnServer = { sync.textsOnServer() },
+        trash = trash::move, busy = ::busyFolders, busyFolder = ::busyFolder, changed = ::wakeSync, prepare = ::prepareMutation, textsOnServer = { sync.textsOnServer() },
         knownSections = { sync.knownSections() }, syncing = { sync.enabled() }, hasTrash = trash::available)
     val recordings: RecordingStore = store
     // recordings are synced with the same server that processes them
@@ -200,6 +203,12 @@ class AppGraph(val context: Context) {
     private fun busyFolders(): Set<String> = synchronized(filesLock) {
         val recording = try { recordingForMutation() } catch (_: IOException) { throw SyncException(tr("Couldn't check the recording state")) }
         busyRecordings(recordingsRoot, recording, scheduler::hasWork, activeFolders.keys)
+    }
+
+    // an unknown helper state lets nothing be changed, as in busyFolders
+    private fun busyFolder(dir: File): Boolean {
+        val recording = try { recordingForMutation() } catch (_: IOException) { return true }
+        return busyRecording(recordingsRoot, dir, recording, scheduler::hasWork, activeFolders.keys)
     }
 
     /** Client of the active node; null — no node is selected or its connection string is invalid. */

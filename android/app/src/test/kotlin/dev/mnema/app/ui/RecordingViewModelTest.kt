@@ -11,6 +11,10 @@ import dev.mnema.app.processing.ReprocessOptions
 import dev.mnema.app.recordings.FolderRecordingStore
 import dev.mnema.app.recordings.outcomeKey
 import dev.mnema.app.transcript.Meta
+import dev.mnema.app.transcript.RecordingFolder
+import dev.mnema.app.ui.recordings.RecordingsViewModel
+import java.time.ZoneId
+import kotlin.time.Duration.Companion.seconds
 import dev.mnema.app.transcript.WavFixture
 import java.util.TimeZone
 import dev.mnema.app.ui.recordings.DetailState
@@ -24,6 +28,8 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
@@ -77,6 +83,61 @@ class RecordingViewModelTest {
 
         assertEquals("Запись нельзя обработать: нет звука", model.failure.first { it != null })
         assertEquals(listOf(false), scheduler.asked)
+    }
+
+    private fun recording(root: File, name: String): File = File(root, name).apply {
+        mkdirs()
+        WavFixture.write(File(this, "mic.wav"), WavFixture.samples(1.0))
+    }
+
+    @Test
+    fun theRecordingsScreenRereadsItsRecordingNotTheLibrary() = runTest {
+        val root = tmp.newFolder("Mnema")
+        val dir = recording(root, "2026-10-21_14-35")
+        val store = FolderRecordingStore(root, backgroundScope, { null }, { false }, Dispatchers.Unconfined)
+        store.refresh()
+        store.loaded.first { it }
+        val model = RecordingViewModel(store, Refusing(), root, SavedStateHandle(mapOf(RecordingViewModel.FOLDER_ARG to dir.path)),
+            io = Dispatchers.Unconfined, clock = testScheduler.timeSource)
+        backgroundScope.launch { model.state.collect {} }
+        backgroundScope.launch { model.rereading.whileShown() }
+        assertEquals(null, (model.state.first { it is DetailState.Shown } as DetailState.Shown).detail.summary)
+
+        File(dir, RecordingFolder.SUMMARY).writeText("Суть.")
+        val another = recording(root, "2026-10-22_09-00")
+        // it was just read: the first reread waits a period
+        runCurrent()
+        assertEquals(null, (model.state.value as DetailState.Shown).detail.summary)
+        advanceTimeBy(5.seconds)
+        runCurrent()
+        assertEquals("Суть.", (model.state.value as DetailState.Shown).detail.summary?.about)
+        // the library is not rescanned for it
+        assertFalse(store.items.value.any { it.dir.name == another.name })
+    }
+
+    @Test
+    fun comingBackFromARecordingDoesNotRescanTheListBeforeItIsDue() = runTest {
+        val root = tmp.newFolder("Mnema")
+        recording(root, "2026-10-21_14-35")
+        val store = FolderRecordingStore(root, backgroundScope, { null }, { false }, Dispatchers.Unconfined)
+        val list = RecordingsViewModel(store, ZoneId.of("UTC"), compute = Dispatchers.Unconfined, clock = testScheduler.timeSource)
+        fun shown() = store.items.value.map { it.dir.name }
+
+        val first = backgroundScope.launch { list.rereading.whileShown() }
+        runCurrent()
+        assertEquals(listOf("2026-10-21_14-35"), shown()) // the first showing reads at once
+        advanceTimeBy(2.seconds)
+        first.cancel() // a recording is opened over the list
+        recording(root, "2026-10-22_09-00")
+        advanceTimeBy(1.seconds)
+
+        val back = backgroundScope.launch { list.rereading.whileShown() }
+        runCurrent()
+        assertEquals(listOf("2026-10-21_14-35"), shown())
+        advanceTimeBy(2.seconds)
+        runCurrent()
+        assertEquals(listOf("2026-10-22_09-00", "2026-10-21_14-35"), shown()) // five seconds after the last reading
+        back.cancel()
     }
 
     // remembers how processing was queued: as a continuation or with the dialog's choice
