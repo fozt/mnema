@@ -26,6 +26,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ note: Notification) {
         signal(SIGPIPE, SIG_IGN)  // writing to a dead engine's stdin gives an error, not a crash
+        CaptureHiding.start()
         let store = Self.store
         store.sink = { [weak self] msg in
             if case .panel(let open) = msg { self?.panelOpen = open }
