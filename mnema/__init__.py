@@ -1,3 +1,3 @@
 """mnema: meeting recordings — transcription, translation, title and summary."""
 
-__version__ = "0.5.2"
+__version__ = "0.6.0"
