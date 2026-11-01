@@ -22,7 +22,17 @@ def test_english_showcase_has_no_russian_and_russian_one_is_translated():
     assert not _CYRILLIC.search(english)
     panel = StateMsg.model_validate_json(russian).panel
     assert panel.idle is not None and panel.idle.start.title == "Начать запись"
-    assert [c.detail for c in panel.cards if c.detail_warn] == ["Без пересказа"]
+    assert [(s.label, s.on) for s in panel.idle.sources] == [
+        ("mic", True),
+        ("system", True),
+        ("screen", True),
+    ]
+    assert [c.detail for c in panel.cards if c.busy] == ["Распознаю речь… 40\xa0%"]
+    assert not any(c.detail_warn for c in panel.cards)
+    assert panel.settings is not None
+    record = next(t for t in panel.settings.tabs if t.id == "record")
+    titles = [f.title for s in record.sections for f in s.fields]
+    assert {"Экран", "Качество видео", "Распознавание", "Движок", "Модель"} <= set(titles)
 
 
 def test_strip_png_keeps_the_image_and_drops_metadata():

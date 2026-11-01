@@ -24,9 +24,9 @@ serve several people, each with their own devices, library and model.
 - **Local speech recognition** with Parakeet Ultra: 25 European languages, on the Neural Engine
   of your Mac or on the CPU of your server. No audio leaves your machines unless you choose cloud
   recognition (OpenAI), which is also the only place for the languages Parakeet doesn't know.
-- **A title and a short summary** of every call from a cloud model of your choice: Gemini,
-  DeepSeek, OpenAI, Claude, Qwen, OpenRouter or Groq. Free tiers are enough for daily use. You
-  choose the model in the Mac app; on a server it is kept per person.
+- **A title and a short summary** of every recording with text, from a cloud model of your
+  choice: Gemini, DeepSeek, OpenAI, Claude, Qwen, OpenRouter or Groq. Free tiers are enough for
+  daily use. You choose the model in the Mac app; on a server it is kept per person.
 - **Plain files you own**: every recording is a folder with `transcript.txt` and `summary.txt`,
   ready for Obsidian, an LLM or an archive.
 - **Your own server** for Linux and the phone, with invites per device and sync of texts
@@ -75,19 +75,33 @@ Requirements: Apple Silicon, macOS 14.2 or later.
    server, under your name; without one, on this Mac.
 4. Click *Start recording*. macOS asks for microphone and system audio access the first time.
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/settings-dark.png">
+    <img src="docs/images/settings-light.png" width="520" alt="The Recording tab of Mnema settings">
+  </picture>
+</p>
+
 **Screen video.** Turn on *Screen* next to *Microphone* and *System audio* to record the screen
 the active window is on, together with the sound. macOS asks for screen recording access when you
-turn it on; after allowing it, quit and reopen Mnema. When the recording is processed, the folder
-gets one `video.mp4` with the sound. *Settings → Recording → Video quality*: 1080p (default, small
-text stays readable, up to about 1 GB per hour) or 720p (about half the size). Mnema's own windows
-never show in the video, in screen sharing or in screenshots. While the screen is recorded, macOS
-shows its recording icon in the menu bar; share a window rather than the whole screen in a call to
-keep it out of the share. The video stays on this Mac: it is not sent to a server and does not
-sync. *Delete audio and video of processed recordings…* removes it with the audio.
+turn it on and applies it after Mnema restarts, so quit and reopen Mnema after allowing it; until
+then the toggle says *Permission needed*. When the recording is processed, the folder gets one
+`video.mp4` with the sound, and the card menu offers *Open video*. *Settings → Recording → Video
+quality* applies from the next recording: 1080p (default, small text stays readable, up to about
+0.9 GB per hour, about 0.4 GB on a calm screen) or 720p (up to about 0.5 GB per hour).
 
-The speech model (about 630 MB) is not in the app: Mnema downloads it once, when you turn on
-recognition *On this Mac* or make the first recording without it, and shows the progress. It
-needs a connection and room on the disk; the model lives in
+Mnema's own windows never show in the video, in screen sharing or in screenshots. While the screen
+is recorded, macOS shows its recording icon in the menu bar, and Mnema cannot hide it: share a
+window rather than the whole screen in a call to keep the menu bar out of the share. *Hide
+recording in the menu bar* (*Settings → General*, or the panel during a recording) makes Mnema's
+own icon look idle. The video is assembled and kept on this Mac, even when the server recognizes
+the speech: it is not sent anywhere and does not sync. *Delete audio and video of processed
+recordings…* removes it with the audio.
+
+The speech model (about 630 MB) is not in the app: Mnema downloads it once, when you choose
+recognition *On this Mac* or make the first recording without it, and shows the progress in the
+*Recognition model* row of *Settings → Recording*; while the model is missing, that row has a
+*Download* button. It needs a connection and room on the disk; the model lives in
 `~/Library/Application Support/Mnema/models`.
 
 Opened straight from the disk image, Mnema asks to be moved to *Applications* first. On its first
@@ -223,7 +237,11 @@ other phones Mnema may record only your microphone, and it tells you when call a
 4. In *Settings → Processing → Server* tap *Add server* and paste an invite from your server.
 
 The phone records both sides of a call as two tracks and keeps recordings in
-`Documents/Mnema`. It updates itself from *Settings → Updates*.
+`Documents/Mnema`. The connected server recognizes and summarizes them with your model; a new
+recording can start while an earlier one waits in the server's queue. The list shows each
+recording's date, time and length; a long press opens *Rename*, *Move to section* and *Delete
+recording*, and a swipe to the left offers to delete it. The phone updates itself from
+*Settings → Updates*.
 
 ## Using Mnema
 
@@ -232,22 +250,31 @@ a folder named after the call, for example `2026-10-21_Release planning`:
 
 | File | What it is |
 |---|---|
-| `transcript.txt` | The transcript, in paragraphs, each marked `mic` (you) or `system` (the other side) |
-| `summary.txt` | The gist in one or two sentences, then the main points |
+| `transcript.txt` | The transcript in paragraphs, each with its time and track: `[12:34] mic:` (you) or `system:` (the other side) |
+| `summary.txt` | The gist in one or two sentences, then the main points, each with the time it came up |
 | `recording.mp3` | Both tracks mixed together |
 | `mic.wav`, `system.wav` | The original tracks |
+| `video.mp4` | The screen with the sound (Mac, with *Screen* on) |
 
 Rename a recording in the app or in Finder: the folder name is its title. Folders inside `~/mnema`
 are sections; move recordings between them from the card menu. Texts sync between your devices
-through the server; audio stays where it was recorded.
+through the server; audio and video stay where they were recorded. A recording deleted on one
+device is deleted on the others at the next sync: into the Trash, or for good on a phone without
+one.
+
+Recordings wait in a queue while earlier ones are processed, so a new recording can start at
+any time; the card of the one being processed shows its step and progress.
 
 **Language** is detected from the speech. If it comes out wrong, pick it in the menu of the
 recording that is being processed, or in *⋯ → Process recording…* for an existing one; the
 chosen language is told to cloud recognition and used for cleaning up the text and for the
-summary.
+summary. *Process recording…* processes any recording folder again, all of it or a part, with
+its own title, language, recognition and tracks.
 
-**Without a model** you still get the transcript; the card offers *Summarize* once a model is
-set.
+**Summaries.** With *Write summaries* on, every recording with text gets a title and a summary,
+in the language set in *Summary language* (the conversation's by default). Without a model you
+still get the transcript. A recording with text and no summary (no model, the model failed or
+summaries were off) has *Summarize* in its menu.
 
 ### Recognition
 
@@ -255,8 +282,8 @@ set.
 
 | Place | Who recognizes | Engines |
 |---|---|---|
-| On this Mac (Mac only) | The Mac itself, on the Neural Engine | Automatic, Parakeet Ultra |
-| On the server | Your server, on its CPU | Automatic, Parakeet Ultra |
+| On this Mac (Mac only) | The Mac itself, on the Neural Engine | Automatic, Parakeet |
+| On the server | Your server, on its CPU | Automatic, Parakeet |
 | In the cloud | OpenAI | `gpt-4o-transcribe`, `gpt-4o-mini-transcribe` |
 
 Parakeet Ultra recognizes 25 languages: Bulgarian, Croatian, Czech, Danish, Dutch, English,
@@ -288,18 +315,20 @@ A Mac without a server reads it from `MNEMA_ASR_API_KEY` in `~/.config/mnema/.en
 | DeepSeek | [platform.deepseek.com/api_keys](https://platform.deepseek.com/api_keys) | Paid, very cheap |
 | OpenAI, Claude, Qwen, Groq | the provider's console | Paid |
 
-One recording costs one request. With a server connected, the window saves the model and the
-key on the server under your name, and the server uses them for your recordings from every
-device, Linux and phone included; they show the model but cannot change it yet. Keys are shown
-only masked and are kept in a file readable by the server alone.
+One recording costs one request; a transcript longer than the model takes at once goes in
+parts. With a server connected, the window saves the model and the key on the server under your
+name, and the server uses them for your recordings from every device, Linux and phone included;
+they show the model, which is chosen in the Mac app. Keys are shown only masked and are kept in
+a file readable by the server alone.
 
 ### Live text and translation
 
 `mnema live` shows captions as you speak, through a server: a phrase is recognized when you
-pause (or after 15 seconds), together with up to 10 seconds before it, so it appears a moment
-after it ends instead of word by word. Live translation (`mnema live --translate`) uses the model
-too. If you have a DeepL key, set it in *Settings → Server → Set the DeepL key…* and the server
-translates phrases with it, otherwise with your model.
+pause (or after 15 seconds), together with up to 10 seconds of audio before it as context, so it
+appears a moment after it ends instead of word by word. Live translation
+(`mnema live --translate`) uses the model too. If you have a DeepL key, set it in *Settings →
+Server → Set the DeepL key…* and the server translates phrases with it, otherwise with your
+model.
 
 ## Command line
 
@@ -314,10 +343,10 @@ uv tool install "mnema[cli] @ https://github.com/fozt/mnema/releases/download/vX
 
 The constraints file holds the versions of the dependencies the release was tested with. The
 command installs `mnema` and `mnema-mcp` into `~/.local/bin`; add that folder to `PATH` if your
-shell doesn't have it. Update with the same command and `--force` (`mnema update` prints it). On a Mac
-the command recognizes through the installed Mnema app, so install the app too, or connect a
-server; on Linux it recognizes on the CPU with Parakeet or on a server. The Linux app installer
-adds the command itself.
+shell doesn't have it. Update with the same command and `--force` (`mnema update` prints it).
+On a Mac the command recognizes through the installed Mnema app, so install the app too, or
+connect a server; on Linux it recognizes on the CPU with Parakeet or on a server. The Linux app
+installer adds the command itself.
 
 ```bash
 mnema transcribe meeting.mov                    # → meeting.txt
@@ -344,8 +373,10 @@ explicitly. For YouTube videos that require sign-in add `--cookies-from-browser 
 
 ### Claude and other assistants
 
-`mnema-mcp` comes with the command and is an MCP server with four tools: `transcribe`,
-`translate`, `list_recordings` and `read_transcript`. Add it to Claude Code:
+`mnema-mcp` comes with the command and is an MCP server with four tools: `transcribe` (a file
+or a link; the transcript is also saved outside the recordings library), `translate`,
+`list_recordings` (the recordings library of this computer) and `read_transcript`. It processes
+where the `mnema` command does. Add it to Claude Code:
 
 ```bash
 claude mcp add mnema -- mnema-mcp
@@ -357,7 +388,9 @@ claude mcp add mnema -- mnema-mcp
   processes it.
 - **The model provider** receives only the transcript text, to write the title and the summary.
   On a shared server that is the provider each person chose, with their key.
-- **Sync** carries texts only: `transcript.txt`, `summary.txt` and processing history.
+- **Sync** carries texts only: `transcript.txt`, `summary.txt` and processing history, plus
+  renames, moves and deletions.
+- **Screen video** is assembled and kept on the Mac that recorded it.
 - **Speech models** are downloaded once from Hugging Face, on the Mac at the first use, on the
   server with the first job; recognition itself works offline.
 - **Cloud recognition** sends the audio to OpenAI and is off unless a person chooses *In the
@@ -372,19 +405,21 @@ claude mcp add mnema -- mnema-mcp
 - **No notifications on a Mac:** allow Mnema in *System Settings → Notifications*.
 - **No microphone or call audio:** allow Mnema in *System Settings → Privacy & Security →
   Microphone* and *Screen & System Audio Recording*.
+- ***Screen* says *Permission needed*:** allow Mnema in *Screen & System Audio Recording*, then
+  quit and reopen it.
 - **The phone can't start the helper:** turn on Wi-Fi debugging and stay on Wi-Fi.
 - **"Could not download the recognition model":** check the connection and the free disk space,
   then try again.
 - **"Install Mnema or connect a server" from the `mnema` command on a Mac:** the command
   recognizes through the Mnema app, which isn't installed; install it or give `--runner`.
-- **"Update the app" or "Update the server":** the app and the server run different Mnema
-  versions (the first two numbers differ). Update the side the notice names.
+- **"Update the app" or "Update the server" in the panel:** the app and the server run
+  different Mnema versions (the first two numbers differ). Update the side the notice names.
 
 ## Speech models
 
-Mnema recognizes speech with **Parakeet Ultra** and finds pauses with silero VAD. The weights are
-not part of the app and the repository: they are downloaded on first use, and they have their own
-licenses.
+Mnema recognizes speech with **Parakeet Ultra** and finds pauses with silero VAD. The Parakeet
+weights are not part of the app or the repository: they are downloaded on first use. The models
+have their own licenses.
 
 - [NVIDIA parakeet-tdt-0.6b-v3](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3), the base
   model, by NVIDIA (CC-BY-4.0).

@@ -87,11 +87,11 @@ The weights of the models are not in the bundle. Their attribution (CC-BY-4.0) i
 `licenses/MODELS.txt` of the app and in the README.
 
 The README screenshots are rendered, not captured: on a Mac with Command Line Tools,
-`uv run python -m scripts.screenshots` builds the panel from invented recordings through the real
-panel model, once in English and once in Russian, draws it with the Mac app's preview and writes
-`docs/images/panel-{light,dark}.png` (English, for README.md) and
-`docs/images/panel-{light,dark}.ru.png` (Russian, for README.ru.md). Run it after changing how the
-panel looks.
+`uv run python -m scripts.screenshots` builds the panel and the settings from invented recordings
+through the real panel and settings models, once in English and once in Russian, draws them with
+the Mac app's preview and writes `docs/images/{panel,settings}-{light,dark}.png` (English, for
+README.md) and `docs/images/{panel,settings}-{light,dark}.ru.png` (Russian, for README.ru.md).
+Run it after changing how the panel or the settings look.
 
 The server image (what `./install.sh server` runs) builds from the checkout with Docker:
 
