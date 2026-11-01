@@ -1,0 +1,15 @@
+{
+  "about": "Длина записи (live/meta.recording_seconds на ПК и сервере, Kotlin Meta.recordingSeconds на телефоне; по ней — длина в карточке на Маке, в Linux и на телефоне): самая длинная WAV-дорожка папки; WAV нет (сверка переносит тексты и историю, а не звук; звук удалён) — самая длинная дорожка tracks.*.seconds последней обработки в истории, которая мерила дорожки (у «Составить пересказ» дорожек нет), статус не важен; иначе 0 — длина неизвестна, не показывается. wav — длины WAV-дорожек папки (как их читает wav_seconds, фикстура recording-start-v1, lengths), runs — история .mnema-meta.json, null — файла нет.",
+  "cases": [
+    {"name": "longest wav track", "wav": [600.0, 1200.5], "runs": [{"status": "ok", "tracks": {"mic": {"seconds": 30.0}}}], "seconds": 1200.5},
+    {"name": "empty wav still wins", "wav": [0.0], "runs": [{"status": "ok", "tracks": {"mic": {"seconds": 30.0}}}], "seconds": 0.0},
+    {"name": "no wav: longest track of the history", "wav": [], "runs": [{"status": "ok", "tracks": {"mic": {"lang": "ru", "seconds": 4200.3}, "system": {"lang": "ru", "seconds": 4199.8}}}], "seconds": 4200.3},
+    {"name": "summary run measures no tracks", "wav": [], "runs": [{"status": "ok", "tracks": {"mic": {"seconds": 75.0}}}, {"kind": "summary", "status": "ok", "tracks": {}}], "seconds": 75.0},
+    {"name": "the last measured run", "wav": [], "runs": [{"status": "ok", "tracks": {"mic": {"seconds": 75.0}}}, {"status": "failed", "tracks": {"mic": {"seconds": 90.0, "error": "сбой"}}}], "seconds": 90.0},
+    {"name": "a stopped run measured too", "wav": [], "runs": [{"status": "ok", "tracks": {"mic": {"seconds": 75.0}}}, {"status": "stopped", "tracks": {"mic": {"seconds": 80.0}}}], "seconds": 80.0},
+    {"name": "track without a length", "wav": [], "runs": [{"status": "ok", "tracks": {"mic": {"seconds": 75.0}}}, {"status": "ok", "tracks": {"mic": {"lang": "ru"}, "system": {"seconds": null}}}], "seconds": 75.0},
+    {"name": "malformed lengths", "wav": [], "runs": [{"status": "ok", "tracks": {"mic": {"seconds": "75"}, "system": {"seconds": true}, "x": 3}}, "run", {"tracks": []}], "seconds": 0.0},
+    {"name": "no history", "wav": [], "runs": [], "seconds": 0.0},
+    {"name": "no meta", "wav": [], "runs": null, "seconds": 0.0}
+  ]
+}

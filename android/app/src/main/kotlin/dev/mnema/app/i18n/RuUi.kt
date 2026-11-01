@@ -24,6 +24,11 @@ internal val RU_UI: Map<String, Any> = mapOf(
     "Delete audio of {n} recording forever?" to listOf("Удалить звук {n} записи навсегда?", "Удалить звук {n} записей навсегда?", "Удалить звук {n} записей навсегда?"),
     // FastScrollbar
     "Conversation scroll" to "Прокрутка разговора",
+    // Format
+    "{n} s" to "{n} с",
+    "{n} min" to "{n} мин",
+    "{h} h" to "{h} ч",
+    "{h} h {m} min" to "{h} ч {m} мин",
     // HelperSection
     "Records calls. Launched over Wireless debugging" to "Записывает звонок. Запускается через отладку по Wi-Fi",
     "Status" to "Состояние",

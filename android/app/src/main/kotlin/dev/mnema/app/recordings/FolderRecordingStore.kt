@@ -337,7 +337,7 @@ class FolderRecordingStore(
         // like the desktop _card: audio of any format or a text makes a card
         val audio = files.filter { it.extension.lowercase() in AUDIO_EXTENSIONS }
         if (audio.isEmpty() && RecordingFolder.TRANSCRIPT !in names && RecordingFolder.SUMMARY !in names) return null
-        val seconds = audio.filter { it.extension.lowercase() == "wav" }.maxOfOrNull(Wav::seconds) ?: 0.0
+        val wav = audio.filter { it.extension.lowercase() == "wav" }.map(Wav::seconds)
         val summary = if (RecordingFolder.SUMMARY in names) read(File(dir, RecordingFolder.SUMMARY))?.let(::parseSummaryFile) else null
         val relative = dir.relativeTo(root.canonicalFile).invariantSeparatorsPath
         val recording = relative == writing || dir.absolutePath == writing
@@ -353,7 +353,8 @@ class FolderRecordingStore(
             dir = dir,
             title = shown.title ?: timeText(start, shown.part),
             startedAt = start.at.atZone(zone).toInstant().toEpochMilli(),
-            durationS = seconds,
+            durationS = wav.maxOrNull() ?: 0.0,
+            lengthS = Meta.recordingSeconds(wav, meta),
             about = summary?.about.orEmpty(),
             state = if (recording) ProcessingState.Unprocessed else stateOf(dir, files, meta, process, running),
             recordingNow = recording,

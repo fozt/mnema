@@ -87,7 +87,6 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -517,23 +516,6 @@ fun showsProgress(state: ProcessingState): Boolean =
     state == ProcessingState.Preparing || state is ProcessingState.Uploading || state == ProcessingState.Queued ||
         state is ProcessingState.Recognizing || state == ProcessingState.Summarizing
 
-/** Title on the left, length on the right in tabular digits: the length never shrinks, the title gets an ellipsis. */
-@Composable
-internal fun TitleWithLength(title: String, length: String?, style: TextStyle, modifier: Modifier = Modifier, maxLines: Int = 1) {
-    Row(modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text(title, Modifier.weight(1f).alignByBaseline(), style = style, maxLines = maxLines, overflow = TextOverflow.Ellipsis)
-        if (length != null) {
-            Text(
-                length,
-                Modifier.alignByBaseline(),
-                style = MaterialTheme.typography.labelLarge.copy(fontFeatureSettings = "tnum"),
-                maxLines = 1,
-                softWrap = false,
-            )
-        }
-    }
-}
-
 @Composable
 private fun DayHeader(label: String) {
     Text(
@@ -564,11 +546,11 @@ private fun NewestCard(
                 .padding(start = 24.dp, end = 24.dp, top = 24.dp, bottom = 20.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            TitleWithLength(
+            Text(
                 recordingTitle(item, today, zone),
-                recordingLength(item),
-                MaterialTheme.typography.headlineSmallEmphasized,
+                style = MaterialTheme.typography.headlineSmallEmphasized,
                 maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
             )
             if (item.about.isNotBlank()) {
                 Text(item.about, style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -581,7 +563,7 @@ private fun NewestCard(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                recordingStart(item, today, zone)?.let { InfoChip(it) }
+                whenLabel(item, today, zone).ifEmpty { null }?.let { InfoChip(it) }
                 StatusChip(item)
                 recordingWarning(item)?.let { WarningChip(it) }
                 pendingLabel(item)?.let { InfoChip(it) }
@@ -609,7 +591,7 @@ private fun RecordingCard(
         ) {
             StateShape(item.state, ROW_SHAPE)
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                TitleWithLength(recordingTitle(item, today, zone), recordingLength(item), MaterialTheme.typography.titleMedium)
+                Text(recordingTitle(item, today, zone), style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 if (item.about.isNotBlank()) {
                     Text(
                         item.about,
