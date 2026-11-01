@@ -402,12 +402,21 @@ class ScreenEventMsg(BaseModel):
     offset: float | None = None  # started: host-time seconds from ScreenMsg(start) to the frame
 
 
+class ScreenAccessMsg(BaseModel):
+    """App → engine: whether macOS lets Mnema record the screen (at the start, when the panel
+    opens and after the app asked for it); granted takes effect after the app restarts."""
+
+    type: Literal["screen_access"] = "screen_access"
+    granted: bool
+
+
 Outgoing = Annotated[
     StateMsg | AskMsg | FormMsg | NotifyMsg | SettingsMsg | ScreenMsg | QuitMsg,
     Field(discriminator="type"),
 ]
 Incoming = Annotated[
-    ActionMsg | AnswerMsg | FormEventMsg | PanelMsg | ScreenEventMsg, Field(discriminator="type")
+    ActionMsg | AnswerMsg | FormEventMsg | PanelMsg | ScreenEventMsg | ScreenAccessMsg,
+    Field(discriminator="type"),
 ]
 OUTGOING: TypeAdapter[Any] = TypeAdapter(Outgoing)
 INCOMING: TypeAdapter[Any] = TypeAdapter(Incoming)
@@ -420,7 +429,7 @@ def encode(msg: BaseModel) -> str:
 
 def decode_incoming(
     line: str,
-) -> ActionMsg | AnswerMsg | FormEventMsg | PanelMsg | ScreenEventMsg:
+) -> ActionMsg | AnswerMsg | FormEventMsg | PanelMsg | ScreenEventMsg | ScreenAccessMsg:
     """A line from the app → a message; ValueError for a broken line."""
     return INCOMING.validate_json(line)
 
@@ -1126,6 +1135,7 @@ def _samples() -> dict[str, BaseModel]:
         "in-screen-started": ScreenEventMsg(state="started", offset=0.42),
         "in-screen-failed": ScreenEventMsg(state="failed", reason="permission"),
         "in-screen-stopped": ScreenEventMsg(state="stopped"),
+        "in-screen-access": ScreenAccessMsg(granted=False),
     }
 
 

@@ -17,6 +17,7 @@ from .protocol import (
     Tone,
 )
 from .state import (
+    PERMISSION_NEEDED,
     VIDEO_QUALITIES,
     BarPrefs,
     LocalModel,
@@ -258,14 +259,18 @@ def _update_status(env: MenuEnv) -> SettingsField:
     return status
 
 
-def _screen_rows(prefs: BarPrefs) -> list[SettingsField]:
-    """The screen video on the Mac: the toggle and its quality, from the next recording."""
+def _screen_rows(prefs: BarPrefs, env: MenuEnv) -> list[SettingsField]:
+    """The screen video on the Mac: the toggle and its quality, from the next recording; on
+    without the macOS permission, the toggle says one is needed."""
     quality = [
         Choice(key=f"video_quality:{value}", title=value, checked=prefs.video_quality == value)
         for value in VIDEO_QUALITIES
     ]
+    screen = _toggle(_("Screen"), "toggle_screen", prefs.screen)
+    if prefs.screen and not env.screen_access:
+        screen.detail = _(PERMISSION_NEEDED)
     return [
-        _toggle(_("Screen"), "toggle_screen", prefs.screen),
+        screen,
         _choice(_("Video quality"), quality, value=prefs.video_quality),
     ]
 
@@ -340,7 +345,7 @@ def settings_model(
                 fields=[
                     _toggle(_("Microphone"), "toggle_mic", prefs.mic),
                     _toggle(_("System audio"), "toggle_system", prefs.system),
-                    *(_screen_rows(prefs) if env.mac else []),
+                    *(_screen_rows(prefs, env) if env.mac else []),
                 ],
             ),
             SettingsSection(title=_("Processing"), fields=processing),

@@ -592,3 +592,65 @@ def test_quitting_during_the_assembly_kills_ffmpeg_before_the_engine_exits(mac, 
     rt.join(timeout=20)
     runs = json.loads((folder / meta.META_FILE).read_text(encoding="utf-8"))["runs"]
     assert runs == []
+
+
+def _screen_row(rt: BarRuntime):
+    env = rt.menu_env()
+    idle = panel_model(rt.state, rt.prefs, env, [], settings_model(rt.prefs, env)).idle
+    assert idle is not None
+    return next(s for s in idle.sources if s.label == "screen")
+
+
+def _screen_toggle(rt: BarRuntime):
+    fields = settings_model(rt.prefs, rt.menu_env()).tabs[0].sections[0].fields
+    return next(f for f in fields if f.key == "toggle_screen")
+
+
+def test_screen_without_permission_says_so_until_the_app_has_it(mac) -> None:
+    """The app reports that macOS does not let it record the screen: a "Screen" that is on says
+    a permission is needed, in the panel and in the settings; off, it says nothing. A recording
+    without it keeps the sound and the permission remark; granted, the status goes."""
+    rt, app = mac({"start": ("failed", "permission", None)})
+    assert _screen_row(rt).status == "" and _screen_toggle(rt).detail == ""
+    rt.screen_access(False)
+    assert _screen_row(rt).on and _screen_row(rt).status == "Нужно разрешение"
+    assert _screen_toggle(rt).detail == "Нужно разрешение"
+    rt.handle("toggle_screen")
+    assert not _screen_row(rt).on and _screen_row(rt).status == ""
+    assert _screen_toggle(rt).detail == ""
+    rt.handle("toggle_screen")
+    folder = _record(rt, app)
+    assert _frames(folder / "mic.wav") > 0
+    assert [n["code"] for n in _video(folder)["notes"]] == ["video_permission"]
+    rt.screen_access(True)
+    assert _screen_row(rt).status == "" and _screen_toggle(rt).detail == ""
+
+
+def test_engine_shows_the_permission_the_app_reports(mac, tmp_path) -> None:
+    """Mnema.app sends "screen_access" over the protocol: the next panel state says a permission
+    is needed by the screen."""
+    import functools
+
+    from test_bar_headless import _line, _Out, _start
+
+    from mnema.bar.headless import Channel, Engine
+    from mnema.bar.protocol import ActionMsg, QuitMsg, ScreenAccessMsg, StateMsg
+
+    def screen_status(m) -> str | None:
+        if not isinstance(m, StateMsg) or m.panel.idle is None:
+            return None
+        return next((s.status for s in m.panel.idle.sources if s.label == "screen"), None)
+
+    mac()
+    out = _Out()
+    runtime = functools.partial(BarRuntime, prefs_file=tmp_path / "bar.json")
+    engine = Engine(Channel(out), runtime=runtime, root=lambda: tmp_path / "notes")
+    thread, app = _start(engine)
+    app.write(_line(ScreenAccessMsg(granted=False)))
+    out.until(lambda m: screen_status(m) == "Нужно разрешение")
+    app.write(_line(ScreenAccessMsg(granted=True)))
+    out.until(lambda m: screen_status(m) == "")
+    app.write(_line(ActionMsg(key="quit")))
+    out.until(lambda m: isinstance(m, QuitMsg))
+    app.close()
+    thread.join(timeout=10)

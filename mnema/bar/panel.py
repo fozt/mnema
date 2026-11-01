@@ -36,6 +36,7 @@ from .state import (
     OPEN_FOLDER,
     OPEN_SUMMARY,
     OPEN_TEXT,
+    PERMISSION_NEEDED,
     QUEUED,
     QUIT,
     SET_TITLE,
@@ -99,6 +100,14 @@ def _source(label: str, *, on: bool, key: str) -> Source:
     return Source(
         label=label, title=source_name(label), symbol=symbol, symbol_off=symbol_off, on=on, key=key
     )
+
+
+def _screen_source(prefs: BarPrefs, env: MenuEnv) -> Source:
+    """The screen when idle: on without the macOS permission, it says one is needed."""
+    source = _source("screen", on=prefs.screen, key="toggle_screen")
+    if prefs.screen and not env.screen_access:
+        source.status = _(PERMISSION_NEEDED)
+    return source
 
 
 def _live_source(m: SourceMeter) -> Source:
@@ -454,7 +463,7 @@ def panel_model(
             sources=[
                 _source("mic", on=prefs.mic, key="toggle_mic"),
                 _source("system", on=prefs.system, key="toggle_system"),
-                *([_source("screen", on=prefs.screen, key="toggle_screen")] if env.mac else []),
+                *([_screen_source(prefs, env)] if env.mac else []),
             ],
             section=_section(prefs, sorted(set(sections or []))),
         )

@@ -181,3 +181,22 @@ private struct Timeout: Error {}
     try await until { closed }
     #expect(events == [.stopped] && !recorder.active)
 }
+
+/// macOS applies a granted Screen Recording permission only after a restart: Mnema asks when
+/// "Screen" is turned on, so it can be granted before the first recording.
+@Test func turningTheScreenOnWithoutPermissionAsksForIt() throws {
+    guard case .state(let panel) = try Wire.decode(line: fixture("out-state-idle")) else {
+        Issue.record("not a state")
+        return
+    }
+    #expect(panel.idle?.sources.first { $0.label == "screen" }?.on == false)
+    #expect(ScreenAccess.shouldAsk(key: "toggle_screen", panel: panel, granted: false))
+    #expect(!ScreenAccess.shouldAsk(key: "toggle_screen", panel: panel, granted: true))
+    #expect(!ScreenAccess.shouldAsk(key: "toggle_mic", panel: panel, granted: false))
+    var on = panel  // turning it off asks nothing
+    on.idle?.sources = panel.idle?.sources.map { var s = $0; if s.label == "screen" { s.on = true }; return s } ?? []
+    #expect(!ScreenAccess.shouldAsk(key: "toggle_screen", panel: on, granted: false))
+    var recording = panel  // the toggle does not change while recording
+    recording.idle = nil
+    #expect(!ScreenAccess.shouldAsk(key: "toggle_screen", panel: recording, granted: false))
+}

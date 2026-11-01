@@ -166,6 +166,25 @@ struct PauseTimeline {
     }
 }
 
+/// The Screen Recording permission. macOS applies a grant only after the app restarts, so Mnema
+/// asks when "Screen" is turned on, not when a recording starts (that stays a fallback for a
+/// "Screen" turned on before).
+enum ScreenAccess {
+    static var granted: Bool { CGPreflightScreenCaptureAccess() }
+
+    /// The action turns "Screen" on (it is off in the idle panel) and macOS does not let Mnema
+    /// record the screen yet: ask now.
+    static func shouldAsk(key: String, panel: PanelModel?, granted: Bool) -> Bool {
+        guard key == "toggle_screen", !granted, let idle = panel?.idle,
+            let screen = idle.sources.first(where: { $0.label == "screen" })
+        else { return false }
+        return !screen.on
+    }
+
+    /// Shows the system request; the answer comes with the next restart of the app.
+    static func ask() { _ = CGRequestScreenCaptureAccess() }
+}
+
 /// The screen video of a recording: SCStream frames of one display, without Mnema's windows, into
 /// a fragmented HEVC screen.mov. The engine drives it (ScreenMsg), events go back through onEvent
 /// on the main thread. Frames and commands share one serial queue, so the state needs no lock.

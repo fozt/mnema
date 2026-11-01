@@ -416,6 +416,7 @@ class BarRuntime:
         self._tasks: list[_Task] = []  # the processing queue; the first runs (state.jobs shows it)
         self._worker: threading.Thread | None = None  # the "mnema-bar-process" thread
         self._no_assembly = threading.Event()  # cleared while a video is being assembled
+        self._screen_access = True  # the app reports whether macOS lets it record the screen
         self._no_assembly.set()
         self._started = 0.0
         self._paused_at: float | None = None
@@ -711,6 +712,7 @@ class BarRuntime:
             server_version=self.server_version,
             model=node_settings.model() if here else None,
             mac=_base.STANDALONE,
+            screen_access=self._screen_access,
             asr_choices=self._asr_choices,
             asr_key=self.server_asr_key if server else self._here_asr_key() if here else None,
             asr_model=self._local_model if _base.STANDALONE else None,
@@ -2619,6 +2621,13 @@ class BarRuntime:
                 _keep_offset(prepared.base, screen.offset)
         if state == "failed":
             self._on_change()
+
+    def screen_access(self, granted: bool) -> None:
+        """The app says whether macOS lets it record the screen: until it does, a "Screen" that is
+        on says a permission is needed; the app asks for it when "Screen" is turned on."""
+        if granted != self._screen_access:
+            self._screen_access = granted
+            self._env_changed()
 
     def _assemble_video(self, task: _Task, base: Path) -> bool:
         """The first step of processing a recording with a screen.mov (just recorded, or left
