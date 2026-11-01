@@ -159,13 +159,37 @@ def test_screen_without_free_space_does_not_start(tmp_path, monkeypatch) -> None
     assert app.sent == [] and recorder.error == "no_space"
 
 
-def test_screen_app_silent_at_start_is_a_writer_failure(tmp_path) -> None:
-    """The app never answered start: a failure, and stop still tells the app, without waiting."""
-    recorder, app = _screen(tmp_path, {}, start_wait=0.0, stop_wait=0.0)
+def test_screen_app_silent_is_a_writer_failure(tmp_path) -> None:
+    """The app answered neither start nor stop: stop gives up after its wait, a failure."""
+    recorder, app = _screen(tmp_path, {}, stop_wait=0.0)
     recorder.start()
     recorder.stop()
     assert [op for op, _ in app.sent] == ["start", "stop"]
     assert recorder.error == "writer"
+
+
+def test_screen_start_does_not_wait_for_the_first_frame(tmp_path) -> None:
+    """start only tells the app: the first frame comes later, and a stop while the video is still
+    starting goes to the app at once and ends it without a failure."""
+    recorder, app = _screen(tmp_path, {"stop": ("stopped", "", None)})
+    recorder.start()
+    assert recorder.running and recorder.offset is None
+    recorder.stop()
+    assert [op for op, _ in app.sent] == ["start", "stop"]
+    assert not recorder.running and recorder.error == "" and not recorder.ended
+
+
+def test_screen_stopped_in_the_app_ends_the_video_without_a_failure(tmp_path) -> None:
+    """The user stopped sharing from the menu bar indicator: the app says stopped by itself;
+    the video ends there, keeps its offset and is not stopped again."""
+    recorder, app = _screen(tmp_path, {"start": ("started", "", 0.25)})
+    recorder.origin = time.monotonic()
+    recorder.start()
+    recorder.event("stopped")
+    recorder.pause()
+    recorder.stop()
+    assert [op for op, _ in app.sent] == ["start"]
+    assert recorder.ended and recorder.error == "" and recorder.offset is not None
 
 
 def test_screen_app_gone_at_start_is_a_writer_failure(tmp_path) -> None:

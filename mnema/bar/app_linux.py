@@ -180,7 +180,7 @@ class LinuxPlatform:
         if out.returncode != 0:
             raise OSError(out.stderr.strip() or _("The Trash is unavailable"))
 
-    def screen(self, op: str, path: Path | None = None) -> None:
+    def screen(self, op: str, path: Path | None = None, *, quality: str = "1080p") -> None:
         raise OSError("no screen video on Linux")
 
     def open_form(self, ask: Any, on_event: Any) -> Any:

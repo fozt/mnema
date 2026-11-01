@@ -70,5 +70,10 @@
   "Discard recording?": "Отменить запись?",
   "The audio will not be saved.": "Звук не сохранится.",
   "Discard recording": "Отменить запись",
-  "Keep recording": "Продолжить запись"
+  "Keep recording": "Продолжить запись",
+  "Delete audio and video of {n} recording?": [
+    "Удалить звук и видео {n} записи?",
+    "Удалить звук и видео {n} записей?",
+    "Удалить звук и видео {n} записей?"
+  ]
 }

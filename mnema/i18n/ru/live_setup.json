@@ -26,5 +26,6 @@
   "Not enough disk space: the part of the recording needs ~{size} MB": "Не хватает места на диске: для части записи нужно ~{size} МБ",
   "Part of the recording {start}–{end} of {length}": "Часть записи {start}–{end} из {length}",
   "Full recording moved to the Trash": "Полная запись перемещена в Корзину",
-  "Full recording kept: {reason}": "Полная запись оставлена: {reason}"
+  "Full recording kept: {reason}": "Полная запись оставлена: {reason}",
+  "it has a video": "в ней видео"
 }

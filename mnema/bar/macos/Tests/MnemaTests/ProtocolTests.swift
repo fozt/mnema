@@ -37,7 +37,7 @@ func fixture(_ name: String) throws -> Data {
     #expect(panel.cards[3].buttons.map(\.title) == ["Обработать…"])
     #expect(panel.footer.last?.divider == true && panel.cleanup != nil)
     #expect(panel.settings.tabs.map(\.id) == ["record", "server", "general"])
-    #expect(panel.idle?.sources.map(\.label) == ["mic", "system"])
+    #expect(panel.idle?.sources.map(\.label) == ["mic", "system", "screen"])
 }
 
 /// Processing shows in the recording card: the panel top stays Start recording; the running one
@@ -434,6 +434,9 @@ func connectionForm() throws -> FormAsk {
         (.formEvent(id: 7, rev: 4, op: "force", values: submitted), "in-form-force"),
         (.answer(id: 2, value: .null), "in-answer-cancel"),
         (.panel(open: true), "in-panel"),
+        (.screen(.started(offset: 0.42)), "in-screen-started"),
+        (.screen(.failed(.permission)), "in-screen-failed"),
+        (.screen(.stopped), "in-screen-stopped"),
     ]
     for (msg, name) in cases {
         let data = try Wire.encode(msg)

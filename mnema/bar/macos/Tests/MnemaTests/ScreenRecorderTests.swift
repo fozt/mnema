@@ -16,6 +16,24 @@ private func t(_ seconds: Double) -> CMTime { CMTime(seconds: seconds, preferred
     #expect(ScreenCapture.frameSize(pixelWidth: 1367, pixelHeight: 769) == FrameSize(width: 1366, height: 768))
 }
 
+@Test func qualityPicksTheWidthAndTheBitrate() {
+    let retina = (pixelWidth: 3024, pixelHeight: 1964)
+    #expect(
+        ScreenCapture.frameSize(pixelWidth: retina.pixelWidth, pixelHeight: retina.pixelHeight, quality: .hd)
+            == FrameSize(width: 1280, height: 832))
+    #expect(
+        ScreenCapture.frameSize(pixelWidth: retina.pixelWidth, pixelHeight: retina.pixelHeight, quality: .fullHD)
+            == FrameSize(width: 1920, height: 1246))
+    // a screen narrower than the quality keeps its own pixels
+    #expect(ScreenCapture.frameSize(pixelWidth: 1024, pixelHeight: 768, quality: .hd) == FrameSize(width: 1024, height: 768))
+    func bitRate(_ quality: VideoQuality) -> Int? {
+        let settings = ScreenCapture.outputSettings(FrameSize(width: 1280, height: 832), quality: quality)
+        return (settings[AVVideoCompressionPropertiesKey] as? [String: Any])?[AVVideoAverageBitRateKey] as? Int
+    }
+    #expect(bitRate(.hd) == 1_200_000)
+    #expect(bitRate(.fullHD) == 2_000_000)
+}
+
 @Test func encoderIsHevcAt2MbpsWithAKeyFrameEvery10Seconds() throws {
     let settings = ScreenCapture.outputSettings(FrameSize(width: 1920, height: 1246))
     #expect(settings[AVVideoCodecKey] as? AVVideoCodecType == .hevc)
@@ -41,6 +59,19 @@ private func t(_ seconds: Double) -> CMTime { CMTime(seconds: seconds, preferred
     timeline.pause(at: t(131))  // a second pause while paused changes nothing
     timeline.resume(at: t(132))
     #expect(timeline.place(t(140)) == t(133))
+}
+
+/// The wait for the first frame counts only capture time: a pause in the first seconds writes no
+/// frames and is not a failure.
+@Test func pausedTimeDoesNotCountTowardsTheFirstFrameWait() {
+    var timeline = PauseTimeline()
+    #expect(timeline.active(from: t(100), to: t(103)) == t(3))
+    timeline.pause(at: t(101))
+    #expect(timeline.active(from: t(100), to: t(110)) == t(1))  // still paused
+    timeline.resume(at: t(111))
+    #expect(timeline.active(from: t(100), to: t(115)) == t(5))
+    // a pause before the capture started does not count against it
+    #expect(timeline.active(from: t(112), to: t(115)) == t(3))
 }
 
 @Test func videoEndsAtTheStopOrAtThePauseItStoppedIn() {
@@ -100,32 +131,36 @@ private let editor: pid_t = 300
     #expect(ScreenCapture.failure(nil, whileRecording: true) == .writer)
 }
 
-@Test func screenMessagesDecodeAsPythonWritesThem() throws {
-    let start = Data(#"{"type": "screen", "op": "start", "path": "/Users/me/mnema/2026-11-01_10-00/screen.mov"}"#.utf8)
-    guard case .screen(.start, let path) = try Wire.decode(line: start) else {
+/// A stream that ends by itself: stopped from the menu bar indicator is no failure; before the first
+/// frame a stream error is the writer's, after it the display went away.
+@Test func streamEndNamesWhoStoppedIt() {
+    let userStopped = NSError(domain: SCStreamErrorDomain, code: SCStreamError.Code.userStopped.rawValue)
+    #expect(userStopped.code == -3817)
+    #expect(ScreenCapture.end(of: userStopped, afterFirstFrame: true) == .byUser)
+    #expect(ScreenCapture.end(of: userStopped, afterFirstFrame: false) == .byUser)
+    let lost = NSError(domain: SCStreamErrorDomain, code: SCStreamError.Code.noCaptureSource.rawValue)
+    #expect(ScreenCapture.end(of: lost, afterFirstFrame: true) == .failed(.displayLost))
+    #expect(ScreenCapture.end(of: lost, afterFirstFrame: false) == .failed(.writer))
+}
+
+@Test func screenFixturesDecodeAsPythonWritesThem() throws {
+    guard case .screen(.start, let path, let quality) = try Wire.decode(line: fixture("out-screen-start")) else {
         Issue.record("not a screen start")
         return
     }
-    #expect(path == "/Users/me/mnema/2026-11-01_10-00/screen.mov")
-    guard case .screen(.pause, "") = try Wire.decode(line: Data(#"{"type": "screen", "op": "pause", "path": ""}"#.utf8)) else {
+    #expect(path == "/Users/me/mnema/2026-09-30_10-05/screen.mov" && quality == .fullHD)
+    guard case .screen(.start, _, .hd) = try Wire.decode(line: fixture("out-screen-start-720p")) else {
+        Issue.record("not a 720p start")
+        return
+    }
+    guard case .screen(.pause, "", _) = try Wire.decode(line: fixture("out-screen-pause")) else {
         Issue.record("not a screen pause")
         return
     }
-}
-
-@Test func screenEventsEncodeAsPythonReadsThem() throws {
-    func json(_ msg: Incoming) throws -> NSDictionary? {
-        try JSONSerialization.jsonObject(with: Wire.encode(msg)) as? NSDictionary
+    guard case .screen(.stop, "", _) = try Wire.decode(line: fixture("out-screen-stop")) else {
+        Issue.record("not a screen stop")
+        return
     }
-    #expect(
-        try json(.screen(.started(offset: 0.25)))
-            == ["type": "screen_event", "state": "started", "reason": "", "offset": 0.25] as NSDictionary)
-    #expect(
-        try json(.screen(.failed(.displayLost)))
-            == ["type": "screen_event", "state": "failed", "reason": "display_lost", "offset": NSNull()] as NSDictionary)
-    #expect(
-        try json(.screen(.stopped))
-            == ["type": "screen_event", "state": "stopped", "reason": "", "offset": NSNull()] as NSDictionary)
 }
 
 @MainActor private func until(_ done: () -> Bool) async throws {

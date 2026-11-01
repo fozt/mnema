@@ -1731,6 +1731,26 @@ def test_process_part_replaces_full_recording(monkeypatch, tmp_path) -> None:
     assert not list(tmp_path.glob("Созвон из архива (*"))
 
 
+def test_full_recording_with_a_video_is_not_trashed(monkeypatch, tmp_path) -> None:
+    """The checkbox is on but the full recording has the screen video: a part has none, so the
+    full one stays next to the part, and its notes say why."""
+    from mnema.bar.range_pick import RangeAnswer
+
+    def answer(req):
+        return RangeAnswer(start="0:00:30", end="0:01:30", title=req.name, replace=True)
+
+    rt, _platform, folder, lengths = _range_setup(monkeypatch, tmp_path, answer)
+    (folder / "video.mp4").write_bytes(b"screen with sound")
+    rt.handle("process_folder")
+    rt.join(timeout=10)
+
+    assert lengths == [60.0, 60.0]
+    assert not (tmp_path / "trash").exists() and (folder / "video.mp4").exists()
+    part = tmp_path / "Созвон из архива (0.00.30–0.01.30)"
+    assert (part / "transcript.txt").exists() and not (part / "video.mp4").exists()
+    assert "Полная запись оставлена: в ней видео" in _details(part)
+
+
 def test_process_whole_recording_with_own_title_and_errors(monkeypatch, tmp_path) -> None:
     """The whole recording: the full one is not trashed (the checkbox does not matter); an
     own title names the folder. A wrong time is a clear error in the menu, without

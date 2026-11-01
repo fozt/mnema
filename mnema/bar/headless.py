@@ -234,10 +234,11 @@ class ProtocolPlatform:
     def open_settings(self, tab: str) -> None:
         self.channel.send(SettingsMsg(tab=tab))
 
-    def screen(self, op: str, path: Path | None = None) -> None:
+    def screen(self, op: str, path: Path | None = None, *, quality: str = "1080p") -> None:
         if self.channel.closed:
             raise OSError("the app is gone")
-        self.channel.send(ScreenMsg.model_validate({"op": op, "path": str(path or "")}))
+        msg = {"op": op, "path": str(path or ""), "quality": quality}
+        self.channel.send(ScreenMsg.model_validate(msg))
 
 
 def _keys(node: Any) -> set[str]:

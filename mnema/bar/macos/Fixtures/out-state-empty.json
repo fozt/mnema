@@ -175,6 +175,36 @@
                   "choices": [],
                   "tone": "none",
                   "progress": null
+                },
+                {
+                  "kind": "choice",
+                  "title": "Качество видео",
+                  "key": null,
+                  "checked": false,
+                  "enabled": true,
+                  "value": "1080p",
+                  "detail": "",
+                  "placeholder": "",
+                  "error": "",
+                  "role": "normal",
+                  "choices": [
+                    {
+                      "key": "video_quality:1080p",
+                      "title": "1080p",
+                      "detail": "",
+                      "checked": true,
+                      "enabled": true
+                    },
+                    {
+                      "key": "video_quality:720p",
+                      "title": "720p",
+                      "detail": "",
+                      "checked": false,
+                      "enabled": true
+                    }
+                  ],
+                  "tone": "none",
+                  "progress": null
                 }
               ]
             },

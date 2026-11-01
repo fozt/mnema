@@ -105,13 +105,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Notifications.shared.post(note)
         case .settings(let tab):
             store.showSettings(tab)  // click on the server in the panel header
-        case .screen(.start, let path):
-            screen.start(path: path)
-        case .screen(.pause, _):
+        case .screen(.start, let path, let quality):
+            // no file to write: refused at once, the engine does not wait for the first frame
+            guard !path.isEmpty else { return bridge.send(.screen(.failed(.writer))) }
+            screen.start(path: path, quality: quality)
+        case .screen(.pause, _, _):
             screen.pause()
-        case .screen(.resume, _):
+        case .screen(.resume, _, _):
             screen.resume()
-        case .screen(.stop, _):
+        case .screen(.stop, _, _):
             screen.stop()
         case .quit:
             engineQuit = true

@@ -46,6 +46,7 @@ from .settings_model import HOTKEY_BUSY, HOTKEY_INVALID, recognition_at, server_
 from .state import (
     STEP_AT,
     SUMMARIZING,
+    VIDEO_QUALITIES,
     BarPrefs,
     BarState,
     Job,
@@ -200,9 +201,10 @@ class Platform(Protocol):
         """The settings window on tab ``tab`` (a SettingsModel tab id)."""
         ...
 
-    def screen(self, op: str, path: Path | None = None) -> None:
-        """The screen video (Mac app): start into path, pause, resume, stop; the app answers
-        through BarRuntime.screen_event. Raises when there is no app to record it."""
+    def screen(self, op: str, path: Path | None = None, *, quality: str = "1080p") -> None:
+        """The screen video (Mac app): start into path at a quality (720p, 1080p), pause, resume,
+        stop; the app answers through BarRuntime.screen_event. Raises when there is no app to
+        record it."""
         ...
 
 
@@ -249,7 +251,7 @@ class _NullPlatform:
 
     def open_settings(self, tab: str) -> None: ...
 
-    def screen(self, op: str, path: Path | None = None) -> None:
+    def screen(self, op: str, path: Path | None = None, *, quality: str = "1080p") -> None:
         raise OSError("no app to record the screen")
 
 
@@ -273,20 +275,6 @@ def _video_history(prepared: Any) -> None:
     prepared.run.video = meta.VideoRun(offset=screen.offset, error=screen.error)
     if screen.error:
         prepared.run.notes.append(video_failed(screen.error))
-
-
-def _keep_video(prepared: Any) -> None:
-    """The video facts go into the recording's history at once: a processing that comes later
-    (or never: the server was down, Mnema quit) does not lose them."""
-    video = prepared.run.video
-    if video is None:
-        return
-    notes = [n for n in prepared.run.notes if n.code.startswith("video")]
-    try:
-        with FILES_LOCK:
-            meta.set_video(prepared.base, meta.RecordedVideo(**video.model_dump(), notes=notes))
-    except OSError:  # the history is not writable: the recording stays as it is
-        logger.warning("the video of %s is not in its history", prepared.base, exc_info=True)
 
 
 def _carry_video(folder: Path) -> None:
@@ -1074,6 +1062,11 @@ class BarRuntime:
             self.prefs.system = not self.prefs.system
         elif key == "toggle_screen" and idle and _base.STANDALONE:
             self.prefs.screen = not self.prefs.screen
+        elif key.startswith("video_quality:") and idle and _base.STANDALONE:
+            value = key.removeprefix("video_quality:")
+            self.prefs.video_quality = next(
+                (q for q in VIDEO_QUALITIES if q == value), self.prefs.video_quality
+            )
         elif key.startswith("record_section:") and idle:
             name = key.removeprefix("record_section:")
             if name and name not in self.record_sections():
@@ -1164,8 +1157,6 @@ class BarRuntime:
                 or not (self.prefs.mic or self.prefs.system)
             ):
                 return
-            if self._thread is not None and self._thread.is_alive():
-                return  # the previous recording is still closing its tracks
             # processing of earlier ones goes on: its queue, last recording and sync stay
             self.state.phase = Phase.RECORDING  # recording comes first: the phase shows at once
             self.state.paused, self.state.elapsed, self.state.meters = False, 0.0, []
@@ -1440,8 +1431,18 @@ class BarRuntime:
             message = _("This frees {size}. The texts stay only on this Mac.", size=size)
         else:
             message = _("This frees {size}. The texts stay only on this computer.", size=size)
+        if plan.video:
+            question = _n(
+                "Delete audio and video of {n} recording?",
+                "Delete audio and video of {n} recordings?",
+                plan.records,
+            )
+        else:
+            question = _n(
+                "Delete audio of {n} recording?", "Delete audio of {n} recordings?", plan.records
+            )
         self._platform.confirm(
-            _n("Delete audio of {n} recording?", "Delete audio of {n} recordings?", plan.records),
+            question,
             message,
             _("Delete"),
             confirmed,
@@ -2138,6 +2139,7 @@ class BarRuntime:
         fresh = task.prepared is not None  # just recorded
         # tracks from the "Process recording" window (a just-finished recording uses all)
         chosen = task.tracks if job.kind is JobKind.RECOVER else None
+        self._assemble_video(task, base)
         try:
             while True:
                 try:
@@ -2445,7 +2447,8 @@ class BarRuntime:
             base = live_base(None, section=self._record_section())
             self._active = base
         if config.screen:
-            prepared = build_live(config, base=base, screen=self._platform.screen)
+            screen = partial(self._platform.screen, quality=self.prefs.video_quality)
+            prepared = build_live(config, base=base, screen=screen)
         else:
             prepared = build_live(config, base=base)
         for label, w in prepared.writers.items():  # sources off in the settings write silence
@@ -2515,7 +2518,10 @@ class BarRuntime:
                     _("Recording deleted"), _("The audio and the transcript were not saved"), None
                 )
                 return
-            self._finish_video(prepared)
+            if getattr(prepared, "screen", None) is not None:  # assembled when it is processed
+                from ..live.video import keep
+
+                keep(prepared.base, prepared.run)
             if not self.quit_requested:  # quitting: the recording is saved, process it later
                 with FILES_LOCK:
                     job = Job(id=self._identity(prepared.base), folder=prepared.base)
@@ -2538,11 +2544,13 @@ class BarRuntime:
             with FILES_LOCK, self._lock:
                 self._prepared = self._session = None
                 self._active = None
-            self.state.phase = Phase.IDLE
-            self.state.meters = []
-            self.state.paused = False
             self._scan_unfinished()
             self._library_changed()
+            with self._lock:  # the last step: a new recording may start right after it
+                self.state.phase = Phase.IDLE
+                self.state.meters = []
+                self.state.paused = False
+            self._on_change()
 
     def _ask_result_title(self, task: _Task, path: Path) -> None:
         """The title window after processing ("Skip"): only when nothing is being recorded and
@@ -2579,27 +2587,24 @@ class BarRuntime:
         if state == "failed":
             self._on_change()
 
-    def _finish_video(self, prepared: Any) -> None:
-        """The video with the recording's sound, before processing is queued: the folder may be
-        renamed once it is processed."""
-        if getattr(prepared, "screen", None) is None:
-            return
+    def _assemble_video(self, task: _Task, base: Path) -> None:
+        """The first step of processing a recording with a screen.mov (just recorded, or left
+        by a quit or a crash): video.mp4 with its sound, always here, wherever the text is made;
+        the card shows the step without a share. A failure is a remark, processing goes on."""
         from ..live import video
 
-        notice = self.state.notice
-
-        def shown(_fraction: float | None, message: str) -> None:
-            self.state.notice = message
-            self._on_change()
-
+        if not video.pending(base):
+            return
+        job = task.job
+        job.stage = _(video.ASSEMBLING)
+        self._on_change()
         try:
-            video.finish(prepared.base, prepared.run, on=shown)
+            video.assemble(base, task.prepared.run if task.prepared is not None else None)
         except Exception:  # noqa: BLE001 - the recording and its sound stay as they are
-            logger.exception("the video of %s was not assembled", prepared.base)
+            logger.exception("the video of %s was not assembled", base)
         finally:
-            self.state.notice = notice
+            job.stage = ""
             self._on_change()
-        _keep_video(prepared)
 
     # ── GUI timer ──────────────────────────────────────────────────────────────
 
@@ -2639,6 +2644,6 @@ class BarRuntime:
             history = (prev.history + [float(getattr(w, "level", 0.0))])[-_HISTORY:]
             muted = bool(getattr(w, "muted", False))
             meters.append(SourceMeter(label=label, history=history, muted=muted))
-        if (screen := getattr(prepared, "screen", None)) is not None:  # off once it failed
-            meters.append(SourceMeter(label="screen", muted=bool(screen.error)))
+        if (screen := getattr(prepared, "screen", None)) is not None:  # off once it ended
+            meters.append(SourceMeter(label="screen", muted=bool(screen.error or screen.ended)))
         self.state.meters = meters

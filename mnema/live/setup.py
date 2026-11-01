@@ -63,6 +63,7 @@ from .naming import (
     titled_path,
     wav_seconds,
 )
+from .record import SCREEN_FILE, VIDEO_FILE
 from .remarks import Remark, Step
 
 logger = logging.getLogger(__name__)
@@ -427,7 +428,7 @@ def build_live(
 
     video = None
     if config.screen and config.record and screen is not None:
-        from .record import SCREEN_FILE, ScreenRecorder
+        from .record import ScreenRecorder
 
         video = ScreenRecorder(base / SCREEN_FILE, screen)
     prepared = PreparedLive(
@@ -1293,7 +1294,7 @@ def _slice_wav(src: Path, dst: Path, start: float, end: float | None) -> None:
 
 _RECORDING_FILES = {
     "mic.wav", "system.wav", "recording.mp3", "transcript.txt", "summary.txt", "summary.md",
-    "translation.md", "video.mp4", "screen.mov",
+    "translation.md", VIDEO_FILE, SCREEN_FILE,
     ".DS_Store",
 }  # fmt: skip
 
@@ -1324,6 +1325,8 @@ def _keep_original_reason(result: LiveResult, writers: dict[str, Any], base: Pat
     folder is not a Mnema recording. None when it may go."""
     if not is_recording_folder(base):
         return _("the folder has other files")
+    if any((base / name).is_file() for name in (VIDEO_FILE, SCREEN_FILE)):
+        return _("it has a video")  # the part has none: the video lives only in the full one
     if result.defer_command or result.transcript_txt is None:
         return _("the part of the recording is not transcribed")
     missed = [

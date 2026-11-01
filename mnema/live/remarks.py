@@ -335,6 +335,9 @@ _VIDEO_FAILURES = {
 }
 
 
+VIDEO_REASONS = tuple(_VIDEO_FAILURES)  # why the capture itself failed (ScreenRecorder.error)
+
+
 def video_failed(reason: str) -> Remark:
     """The screen video did not start or broke off (ScreenRecorder.error); the sound is kept."""
     key = reason if reason in _VIDEO_FAILURES else "writer"

@@ -73,7 +73,6 @@ class Run(BaseModel):
     tracks: dict[str, TrackRun] = Field(default_factory=dict)
     silent: list[str] = Field(default_factory=list)  # tracks without a single sound, not recognized
     summary: LightRun | None = None
-    video: VideoRun | None = None
     steps: dict[str, float] = Field(default_factory=dict)  # step → seconds
     remarks: list[str] = Field(default_factory=list)
     notes: list[Remark] = Field(default_factory=list)  # remarks with their steps, before merging
@@ -322,13 +321,23 @@ def set_video(base: Path, video: RecordedVideo) -> None:
         _write(base, data)
 
 
-def carry_video(base: Path) -> None:
-    """The last processing gets the recording's video (set_video) and its remarks, once."""
+def recorded_video(base: Path) -> RecordedVideo | None:
+    """The screen video the recording left in its history (set_video); None — none."""
     try:
         data = json.loads((base / META_FILE).read_text(encoding="utf-8"))
-        video = RecordedVideo.model_validate(data["video"])
-        runs = data["runs"]
+        return RecordedVideo.model_validate(data["video"])
     except (OSError, ValueError, LookupError, TypeError):
+        return None
+
+
+def carry_video(base: Path) -> None:
+    """The last processing gets the recording's video (set_video) and its remarks, once."""
+    video = recorded_video(base)
+    try:
+        runs = json.loads((base / META_FILE).read_text(encoding="utf-8"))["runs"]
+    except (OSError, ValueError, LookupError, TypeError):
+        return
+    if video is None:
         return
     if not runs or not isinstance(runs[-1], dict) or runs[-1].get("video") is not None:
         return

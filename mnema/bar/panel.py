@@ -486,7 +486,9 @@ def panel_model(
         # (cleanup_plan)
         cleanup=Button(
             key="cleanup_audio",
-            title=_("Delete audio of processed recordings…"),
+            title=_("Delete audio and video of processed recordings…")
+            if any(c.cleanable and c.has_video for c in cards)
+            else _("Delete audio of processed recordings…"),
             symbol="waveform",
             enabled=idle,
         )

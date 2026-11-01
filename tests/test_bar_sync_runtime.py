@@ -311,6 +311,28 @@ def test_cleanup_question_is_english_in_english(app, monkeypatch, count, title):
     assert rt.state.notice == f"Audio deleted from recordings: {count}"
 
 
+def test_cleanup_with_video_says_audio_and_video(app, monkeypatch):
+    """A processed recording with the screen video: the button and the question name the video
+    too, and the size counts it."""
+    rt, platform, root, _ = app
+    monkeypatch.setattr(base, "STANDALONE", True)
+    folder, _id = record(root, "Собеседование", audio=True, processed=True)
+    record(root, "Звонок", audio=True, processed=True)
+    cards = library(root, connection=None).cards
+    cleanup = panel_model(rt.state, rt.prefs, MenuEnv(), cards, SettingsModel(tabs=[])).cleanup
+    assert cleanup is not None and cleanup.title == "Удалить звук обработанных записей…"
+    (folder / "video.mp4").write_bytes(b"v" * 2_000_000)
+    cards = library(root, connection=None).cards
+    cleanup = panel_model(rt.state, rt.prefs, MenuEnv(), cards, SettingsModel(tabs=[])).cleanup
+    assert cleanup is not None and cleanup.title == "Удалить звук и видео обработанных записей…"
+    rt.handle("cleanup_audio")
+    title, message, ok = platform.asked
+    assert (title, ok) == ("Удалить звук и видео 2 записей?", "Удалить")
+    assert "МБ" in message
+    platform.answer(True)
+    assert not (folder / "video.mp4").exists()
+
+
 def test_missing_record_id_never_deletes_replacement_at_old_path(app):
     rt, platform, root, updates = app
     folder, id = record(root)
