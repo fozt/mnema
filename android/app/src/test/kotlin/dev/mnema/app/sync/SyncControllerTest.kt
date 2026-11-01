@@ -99,42 +99,56 @@ class SyncControllerTest {
         }
     }
 
-    @OptIn(ExperimentalCoroutinesApi::class)
-    @Test fun withoutTrashTheListChoiceDeletesARecordingRemovedElsewhereForever() {
-        Dispatchers.setMain(UnconfinedTestDispatcher())
-        try {
-            runBlocking {
-                val library = TestLibrary()
-                MockWebServer().use { server ->
-                    server.dispatcher = library
-                    server.start()
-                    val connection = parseConnection(server.url("/").toString().trimEnd('/') + "#token=t")
-                    val root = tmp.newFolder("client")
-                    val http = RunnerClient.defaultHttp()
-                    try {
-                        val store = FolderRecordingStore(root, CoroutineScope(Dispatchers.Unconfined), { null }, { false }, Dispatchers.Unconfined,
-                            trash = { error("unexpected trash") }, hasTrash = { false })
-                        val sync = SyncController(root, File(tmp.root, "sync.json"), { connection }, { emptySet() }, { error("unexpected trash") }, {},
-                            clientFactory = { LibraryClient(it, http) }, hasTrash = { false })
-                        val id = library.add("Встреча")
-                        assertTrue(sync.runOnce().errors.isEmpty())
-                        val folder = File(root, "Встреча")
-                        assertTrue(folder.isDirectory)
-                        library.records.remove(id)
-                        assertEquals(listOf(id), sync.runOnce().serverMissing)
-                        assertTrue(folder.isDirectory)
+    /** The owner's case: recordings made on the Mac and deleted there vanish from a phone without the trash by sync alone. */
+    @Test fun withoutTrashRecordingsDeletedElsewhereVanishWithoutAQuestionOrAnError(): Unit = runBlocking {
+        val library = TestLibrary()
+        MockWebServer().use { server ->
+            server.dispatcher = library
+            server.start()
+            val connection = parseConnection(server.url("/").toString().trimEnd('/') + "#token=t")
+            val root = tmp.newFolder("client")
+            val http = RunnerClient.defaultHttp()
+            try {
+                val store = FolderRecordingStore(root, CoroutineScope(Dispatchers.Unconfined), { null }, { false }, Dispatchers.Unconfined,
+                    trash = { error("unexpected trash") }, hasTrash = { false })
+                val sync = SyncController(root, File(tmp.root, "sync.json"), { connection }, { emptySet() }, { error("unexpected trash") },
+                    changed = store::refresh, clientFactory = { LibraryClient(it, http) }, hasTrash = { false })
+                val ids = listOf("Встреча", "Работа/Дейли", "Звонок").map { library.add(it) }
+                assertEquals(emptyList<String>(), sync.runOnce().errors)
+                assertEquals(3, store.items.value.size)
+                ids.forEach { library.records.remove(it) }
+                val status = sync.runOnce()
+                assertEquals(emptyList<String>(), status.errors)
+                assertTrue(status.bulkMissing.isEmpty())
+                assertTrue(store.items.value.isEmpty())
+                assertNull(store.failure.value)
+                assertEquals(listOf("Работа"), root.list()!!.toList())
+            } finally { http.dispatcher.executorService.shutdown(); http.connectionPool.evictAll() }
+        }
+        library.failure?.let { throw AssertionError(it) }
+    }
 
-                        val model = RecordingsViewModel(store, ZoneId.of("UTC"), sync)
-                        model.resolveBulk(restore = false, onServer = true)
-                        model.resolving.first { !it }
-                        assertFalse(folder.exists())
-                        assertEquals(emptyList<String>(), sync.status.value.errors)
-                        assertTrue(sync.status.value.serverMissing.isEmpty())
-                    } finally { http.dispatcher.executorService.shutdown(); http.connectionPool.evictAll() }
-                }
-                library.failure?.let { throw AssertionError(it) }
-            }
-        } finally { Dispatchers.resetMain() }
+    /** The list scan met a folder that sync deleted after the listing: not a bare "No such file or directory" under the list. */
+    @Test fun aRecordingDeletedWhileTheListIsReadIsNoError() {
+        val root = tmp.newFolder("client")
+        val folder = File(root, "Встреча").apply { mkdirs() }
+        File(folder, "transcript.txt").writeText("текст") // no meta yet: the scan gives it an id
+        var deleted = false
+        val store = FolderRecordingStore(root, CoroutineScope(Dispatchers.Unconfined), { null }, { false }, Dispatchers.Unconfined,
+            busy = { if (!deleted) { deleted = true; folder.deleteRecursively() }; emptySet() })
+        store.refresh()
+        assertTrue(deleted)
+        assertNull(store.failure.value)
+        assertTrue(store.items.value.isEmpty())
+        assertFalse(folder.exists())
+    }
+
+    /** A system message is not shown as the sync error: only our own text, in the user's language. */
+    @Test fun aSystemErrorBeforeSyncIsShownInTheUsersWords(): Unit = runBlocking {
+        val root = tmp.newFolder("client")
+        val controller = SyncController(root, File(tmp.root, "sync.json"), { parseConnection("http://unused:8000") }, { emptySet() }, {}, {},
+            prepare = { throw IOException("No such file or directory") }, clientFactory = { error("HTTP must not start") })
+        assertEquals(listOf("Не удалось синхронизировать записи с сервером"), controller.runOnce().errors)
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -184,7 +198,7 @@ class SyncControllerTest {
         val started = CompletableDeferred<Unit>()
         val release = CompletableDeferred<Unit>()
         val controller = SyncController(root, File(tmp.root, "sync.json"), { parseConnection("http://unused:8000") }, { emptySet() }, {}, {},
-            prepare = { started.complete(Unit); release.await(); throw IOException("Сверка остановлена") }, clientFactory = { error("HTTP must not start") })
+            prepare = { started.complete(Unit); release.await(); throw SyncException("Сверка остановлена") }, clientFactory = { error("HTTP must not start") })
         val running = async(Dispatchers.Default) { controller.runOnce() }
         try {
             started.await()
@@ -199,7 +213,7 @@ class SyncControllerTest {
         val root = tmp.newFolder("client")
         var clients = 0
         val controller = SyncController(root, File(tmp.root, "sync.json"), { parseConnection("http://unused:8000") }, { emptySet() }, {}, {},
-            prepare = { throw IOException("Неизвестно состояние записи") }, clientFactory = { clients++; error("HTTP must not start") })
+            prepare = { throw SyncException("Неизвестно состояние записи") }, clientFactory = { clients++; error("HTTP must not start") })
         assertEquals(listOf("Неизвестно состояние записи"), controller.runOnce().errors)
         assertEquals(0, clients)
         assertFalse(File(tmp.root, "sync.json").exists())

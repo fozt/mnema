@@ -59,10 +59,9 @@ class SyncController(
     fun previousPath(id: String): String? = try { loadCheckpoint(stateFile).records[id]?.path } catch (_: IOException) { null }
 
     suspend fun runOnce() = cycle { engine.runOnce() }
-    // forever — "Delete forever" was chosen because there is no trash
-    suspend fun resolveBulk(ids: List<String>, restore: Boolean, forever: Boolean = false) = cycle {
+    suspend fun resolveBulk(ids: List<String>, restore: Boolean) = cycle {
         if (selected() != shownConnection) SyncStatus(errors = mutableListOf(tr("The sync server changed; refresh the list")))
-        else engine.resolveBulk(ids, restore, forever)
+        else engine.resolveBulk(ids, restore)
     }
     /** "Send" to the other library [library] the list asked about. */
     suspend fun sendToLibrary(library: String) = cycle {
@@ -71,9 +70,10 @@ class SyncController(
     }
     private suspend fun cycle(action: suspend () -> SyncStatus) = lock.withLock {
         val connection = selected()
-        val result = try { prepare(); action() } catch (e: IOException) {
-            SyncStatus(errors = mutableListOf(e.message ?: tr("Could not sync recordings with the server")))
-        }
+        // only our own messages reach the list: a system one ("No such file or directory") says nothing to the user
+        val result = try { prepare(); action() }
+        catch (e: SyncException) { SyncStatus(errors = mutableListOf(e.message ?: tr("Could not sync recordings with the server"))) }
+        catch (_: IOException) { SyncStatus(errors = mutableListOf(tr("Could not sync recordings with the server"))) }
         shownConnection = connection
         publish(if (selected() == connection) result else SyncStatus(errors = mutableListOf(tr("The sync server changed; a new sync will start"))))
     }

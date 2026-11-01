@@ -11,7 +11,6 @@ import dev.mnema.app.recordings.ProcessingState
 import dev.mnema.app.recordings.RecordingItem
 import dev.mnema.app.server.Health
 import dev.mnema.app.server.NodeCheck
-import dev.mnema.app.sync.SyncStatus
 import dev.mnema.app.ui.onboarding.onboardingSteps
 import dev.mnema.app.ui.onboarding.stepNote
 import dev.mnema.app.ui.record.TrackSound
@@ -27,7 +26,6 @@ import dev.mnema.app.ui.recordings.recordingAsk
 import dev.mnema.app.ui.recordings.recordingLabel
 import dev.mnema.app.ui.recordings.recordingSubtitle
 import dev.mnema.app.ui.recordings.recordingTitle
-import dev.mnema.app.ui.recordings.serverMissingAsk
 import dev.mnema.app.ui.recordings.sizeLabel
 import dev.mnema.app.ui.recordings.stateLabel
 import dev.mnema.app.ui.settings.UpdateAction
@@ -117,8 +115,6 @@ class EnglishUiTest {
         assertEquals("700 MB will be freed. The texts will stay.", cleanupAsk(AudioCleanup(listOf(record, record))).text)
         val asks = listOf(recordingAsk(true, true), recordingAsk(false, false), audioAsk(true), audioAsk(false))
         assertEnglish(asks.flatMap { listOf(it.title, it.text, it.button) })
-        val missing = serverMissingAsk(SyncStatus(serverMissing = mutableListOf("a")))
-        assertEnglish(listOf(missing.text, missing.delete))
         val part = PartForm(length = 7200.0).typeEnd("0:30").commitEnd()
         assertEquals("The whole recording is selected", PartForm(length = 7200.0).caption)
         assertEquals(true, part.caption.startsWith("Selected "))

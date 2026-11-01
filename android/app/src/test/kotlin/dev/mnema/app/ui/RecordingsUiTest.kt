@@ -68,12 +68,9 @@ import dev.mnema.app.ui.recordings.ReprocessDefaults
 import dev.mnema.app.ui.recordings.SheetStart
 import dev.mnema.app.ui.recordings.sheetStart
 import dev.mnema.app.ui.recordings.canDelete
-import dev.mnema.app.ui.recordings.ServerMissingAsk
 import dev.mnema.app.ui.recordings.audioAsk
 import dev.mnema.app.ui.recordings.cleanupAsk
 import dev.mnema.app.ui.recordings.recordingAsk
-import dev.mnema.app.ui.recordings.serverMissingAsk
-import dev.mnema.app.sync.SyncStatus
 import dev.mnema.app.ui.recordings.sharedFiles
 import dev.mnema.app.ui.recordings.stateLabel
 import dev.mnema.app.ui.recordings.whenLabel
@@ -203,10 +200,6 @@ class RecordingsUiTest {
             21 to "Удалить звук 21 записи?", 111 to "Удалить звук 111 записей?")) {
             assertEquals(title, cleanupAsk(AudioCleanup(List(count) { records[0] }, trash = true)).title)
         }
-        assertEquals(ServerMissingAsk("На сервере нет записей: 2. На телефоне они сохранены.", "Удалить на телефоне"),
-            serverMissingAsk(SyncStatus(serverMissing = mutableListOf("a", "b"))))
-        assertEquals(ServerMissingAsk("Удалено на другом устройстве: 1", "Удалить навсегда"),
-            serverMissingAsk(SyncStatus(serverMissing = mutableListOf("a"), withoutTrash = true)))
     }
 
     @Test

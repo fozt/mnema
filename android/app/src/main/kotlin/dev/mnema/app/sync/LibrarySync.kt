@@ -28,7 +28,7 @@ class LibrarySync(
     private val busy: () -> Set<String>,
     private val trash: (File) -> Unit,
     private val clientFactory: (Connection) -> LibraryClient = { LibraryClient(it) },
-    // without a trash, what was deleted on the server is deleted here only after "Delete forever"
+    // what was deleted on another device goes to the trash here; without one it is deleted forever
     private val hasTrash: () -> Boolean = { true },
     // moves a folder to the server's name (and each of the two case-change steps); if Android refuses (EPERM from
     // MediaProvider), a rename keeps the old name everywhere and a case change waits for the next sync
@@ -38,13 +38,13 @@ class LibrarySync(
 ) {
     private val lock = Mutex()
     suspend fun runOnce(): SyncStatus = lock.withLock { withContext(Dispatchers.IO) { run(null) } }
-    suspend fun resolveBulk(ids: List<String>, restore: Boolean, forever: Boolean = false): SyncStatus = lock.withLock {
-        withContext(Dispatchers.IO) { run(Choice(ids.toSet(), restore, forever)) }
+    suspend fun resolveBulk(ids: List<String>, restore: Boolean): SyncStatus = lock.withLock {
+        withContext(Dispatchers.IO) { run(Choice(ids.toSet(), restore)) }
     }
     /** The answer "Send" to the question about [library]: a sync as with a new server. */
     suspend fun sendToLibrary(library: String): SyncStatus = lock.withLock { withContext(Dispatchers.IO) { run(null, send = library) } }
 
-    private class Choice(val ids: Set<String>, val restore: Boolean, val forever: Boolean)
+    private class Choice(val ids: Set<String>, val restore: Boolean)
 
     private suspend fun run(choice: Choice?, send: String? = null): SyncStatus {
         val status = SyncStatus()
@@ -178,33 +178,22 @@ class LibrarySync(
                 }
             }
             val missing = previous.records.filter { (id, record) -> local.complete && id !in lefts && !blocked(record) }.keys
-            // the server lost several recordings at once: local copies are not deleted without a choice
-            val gone = previous.records.filter { (id, record) -> id in lefts && id !in remote && !blocked(record) && !blocked(lefts.getValue(id)) }.keys
-            val noTrash = !hasTrash()
-            status.withoutTrash = noTrash
+            // several recordings vanished here at once (a wiped folder): the server copies wait for a choice. What was deleted
+            // on another device is deleted here without a question; a reinstalled server answers another library number
             var held = if (missing.size >= 2) missing else emptySet()
-            // without a trash even one recording gone on the server waits for a choice: nothing is silently deleted forever
-            var heldOnServer = if (gone.size >= 2 || noTrash && gone.isNotEmpty()) gone else emptySet()
-            var forever = emptySet<String>()
             if (choice != null) {
-                val ids = choice.ids
-                val here = held.isNotEmpty() // losses on both sides are asked about in turn, this device first
-                if (ids.isEmpty() || ids != (if (here) held else heldOnServer)) throw SyncException(tr("The list of missing recordings changed; sync again"))
+                if (choice.ids.isEmpty() || choice.ids != held) throw SyncException(tr("The list of missing recordings changed; sync again"))
                 if (choice.restore) {
-                    previous = previous.copy(records = previous.records - ids)
-                    save() // the whole set is excluded before the first download or upload, so a restart will not delete the rest
+                    previous = previous.copy(records = previous.records - choice.ids)
+                    save() // the whole set is excluded before the first download, so a restart will not delete the rest
                 }
-                if (here) held = emptySet()
-                // the trash was chosen but is gone now: ask again, this time about deleting forever
-                else if (choice.restore || choice.forever || !noTrash) heldOnServer = emptySet()
-                if (!here && choice.forever) forever = ids
+                held = emptySet()
             }
             status.bulkMissing += held.sorted()
-            if (held.isEmpty()) status.serverMissing += heldOnServer.sorted()
             if (held.isNotEmpty() && local.missingRoot) return
             for (id in (lefts.keys + remote.keys + previous.records.keys).sorted()) {
                 val left = lefts[id]; val right = remote[id]; val old = previous.records[id]
-                if (id in held || id in heldOnServer || listOfNotNull(left, right, old).any(::blocked)) continue
+                if (id in held || listOfNotNull(left, right, old).any(::blocked)) continue
                 try {
                     when {
                         left == null && old != null -> {
@@ -215,12 +204,7 @@ class LibrarySync(
                             if (right != null) call { client.remove(id, right.tag) }
                             forget(id); status.changed = true
                         }
-                        right == null && old != null && left != null -> synchronized(filesLock) {
-                            val current = current(left)
-                            if (current.files != left.files) throw SyncException(tr("The local recording has already changed; deletion is postponed"))
-                            discard(safePath(root, current.path), id in forever, hasTrash(), trash)
-                            forget(id); status.changed = true
-                        }
+                        right == null && old != null && left != null -> deletedThere(left, old)
                         left != null && right == null -> if (FileName.TRANSCRIPT in left.files || FileName.SUMMARY in left.files) publish(left)
                         right != null && left == null -> download(right)
                         left != null && right != null -> merge(left, right, old)
@@ -229,8 +213,38 @@ class LibrarySync(
                 catch (_: IllegalArgumentException) { failed(listOfNotNull(left, old, right).first(), tr("Could not sync the recording")) }
                 catch (_: NoSuchElementException) { failed(listOfNotNull(left, old, right).first(), tr("Could not sync the recording")) }
             }
-            if (held.isEmpty() && heldOnServer.isEmpty() && local.complete) sections()
+            if (held.isEmpty() && local.complete) sections()
             if (local.complete) save()
+        }
+
+        /**
+         * Deleted on another device: here it goes to the trash or, without one, is deleted forever. Without a trash a recording
+         * whose texts were edited here since the last sync goes back to the server instead, so the edit is not lost unseen.
+         */
+        suspend fun deletedThere(left: Record, old: Record) {
+            val withTrash = hasTrash()
+            if (!withTrash && editedHere(left, old)) {
+                forget(left.id)
+                publish(left)
+                return
+            }
+            synchronized(filesLock) {
+                selected()
+                if (blocked(left, busy())) throw SyncException(tr("The recording is busy; sync will wait"))
+                val folder = safePath(root, left.path)
+                // already gone (or moved: the next scan finds it by id): nothing to delete now
+                if (!exists(folder)) return@synchronized
+                // a file deleted since the scan, meta too, is no reason to wait; a new or edited one is
+                val changed = FileName.entries.any { name -> stamp(recordFile(root, left.path, name)).let { it != null && it != left.files[name] } }
+                if (changed) throw SyncException(tr("The local recording has already changed; deletion is postponed"))
+                discard(folder, forever = true, hasTrash = withTrash, trash = trash)
+                forget(left.id); status.changed = true
+            }
+        }
+
+        /** A transcript or summary here differs from the last sync: added or edited, not merely missing. */
+        fun editedHere(left: Record, old: Record) = listOf(FileName.TRANSCRIPT, FileName.SUMMARY).any { name ->
+            left.files[name]?.let { it.sha256 != old.files[name]?.sha256 } ?: false
         }
 
         /** A sync error about one recording starts with its title; a server change ends the cycle with its own message. */

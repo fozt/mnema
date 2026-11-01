@@ -77,6 +77,8 @@ object Meta {
 
     private fun update(dir: File, strict: Boolean = true, change: (JsonObject) -> JsonObject) = synchronized(filesLock) {
         try {
+            // a deleted folder gets no new history: a temporary file there fails with a bare "No such file or directory"
+            if (!Files.isDirectory(dir.toPath())) throw IOException(tr("The recording folder is unavailable"))
             val file = File(dir, FILE)
             if (Files.isSymbolicLink(file.toPath()) || file.isDirectory) throw IOException(tr("The recording history is unavailable"))
             var data = if (file.exists()) {

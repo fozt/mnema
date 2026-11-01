@@ -7,6 +7,9 @@ import android.os.Environment
 import android.provider.MediaStore
 import java.io.File
 import java.io.IOException
+import java.nio.file.Files
+import java.nio.file.LinkOption
+import java.nio.file.NoSuchFileException
 import java.util.UUID
 import kotlin.io.path.ExperimentalPathApi
 import kotlin.io.path.deleteRecursively
@@ -51,17 +54,32 @@ class NativeTrash internal constructor(
     catch (_: Exception) { true.also { supported = it } }
 }
 
-/** With a trash the recording goes there; without one it is deleted forever, only if the user agreed. */
-internal fun discard(file: File, forever: Boolean, hasTrash: Boolean, trash: (File) -> Unit) = when {
-    hasTrash -> trash(file)
-    forever -> deleteForever(file)
-    else -> throw SyncException(NO_TRASH)
+/** With a trash the recording goes there; without one it is deleted forever, only if [forever]. Already gone is done. */
+internal fun discard(file: File, forever: Boolean, hasTrash: Boolean, trash: (File) -> Unit) {
+    if (!Files.exists(file.toPath(), LinkOption.NOFOLLOW_LINKS)) return
+    when {
+        hasTrash -> trash(file)
+        forever -> deleteForever(file)
+        else -> throw SyncException(NO_TRASH)
+    }
 }
 
-/** Deletes the whole folder; a link inside is removed itself, its target stays. */
+/**
+ * Deletes the whole folder, its meta last: an interrupted deletion leaves the same recording, not a folder that a scan
+ * would take for a new one. A link inside is removed itself, its target stays; what is already gone is not an error.
+ */
 @OptIn(ExperimentalPathApi::class)
 internal fun deleteForever(file: File) {
-    try { file.toPath().deleteRecursively() } catch (_: IOException) { throw SyncException(NOT_DELETED) }
+    val path = file.toPath()
+    try {
+        if (Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) {
+            val meta = path.resolve(FileName.META.fileName)
+            Files.newDirectoryStream(path).use { it.toList() }.filter { it != meta }.forEach { it.deleteRecursively() }
+            Files.deleteIfExists(meta)
+        }
+        path.deleteRecursively()
+    } catch (_: NoSuchFileException) { /* deleted meanwhile */ }
+    catch (_: IOException) { throw SyncException(NOT_DELETED) }
 }
 
 internal val NO_TRASH: String get() = tr("The trash is unavailable")

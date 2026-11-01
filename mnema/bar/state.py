@@ -229,7 +229,6 @@ class BarState(BaseModel):
     error: str = ""
     sync_revision: int = 0  # UI only: revision of the selected connection
     sync_missing: list[str] = Field(default_factory=list)
-    sync_missing_on_server: bool = False  # sync_missing are gone on the server, not here
     sync_other_library: int | None = None  # the server has another library: local recordings
     sync_foreign: str = ""  # that library's number, for the answer
     sync_errors: list[str] = Field(default_factory=list)

@@ -258,56 +258,27 @@ class LibrarySyncTest {
         assertTrue(loadCheckpoint(checkpoint).records.isEmpty())
     }
 
-    @Test fun twoRecordsGoneOnServerKeepLocalCopiesUntilDeleteHereIsChosen() {
+    @Test fun recordingsDeletedOnAnotherDeviceGoToTheTrashHereWithoutAQuestion() {
         val (a, aid) = synced("a"); val (b, bid) = synced("Работа/b"); val (c, cid) = synced("c")
         library.records.remove(aid); library.records.remove(bid)
-        val pending = ok()
-        assertEquals(listOf(aid, bid).sorted(), pending.serverMissing)
-        assertTrue(pending.bulkMissing.isEmpty())
-        assertTrue(a.isDirectory && b.isDirectory); assertTrue(trashed.isEmpty())
-        assertEquals(setOf(aid, bid, cid), loadCheckpoint(checkpoint).records.keys)
-        assertTrue(runBlocking { engine().resolveBulk(listOf(aid), false) }.errors.isNotEmpty())
-        assertTrue(a.isDirectory)
-        assertTrue(runBlocking { engine().resolveBulk(listOf(aid, bid), false) }.errors.isEmpty())
+        val status = ok()
+        assertTrue(status.bulkMissing.isEmpty()); assertTrue(status.changed)
         assertFalse(a.exists() || b.exists()); assertTrue(c.isDirectory)
         assertEquals(2, trashed.size)
         assertEquals(setOf(cid), loadCheckpoint(checkpoint).records.keys)
-        assertTrue(ok().serverMissing.isEmpty())
+        assertFalse(ok().changed)
     }
 
-    @Test fun lossesOnBothSidesAreAskedOneAfterAnotherStartingHere() {
-        val (a, aid) = synced("a"); val (b, bid) = synced("b"); val (_, cid) = synced("c"); val (_, did) = synced("d")
+    @Test fun lossesHereWaitWhileDeletionsOnTheServerAreApplied() {
+        val (a, aid) = synced("a"); val (b, bid) = synced("b"); val (c, cid) = synced("c"); val (d, did) = synced("d")
         a.deleteRecursively(); b.deleteRecursively()
         library.records.remove(cid); library.records.remove(did)
-        val first = ok()
-        assertEquals(listOf(aid, bid).sorted(), first.bulkMissing); assertTrue(first.serverMissing.isEmpty())
-        assertTrue(runBlocking { engine().resolveBulk(listOf(cid, did), false) }.errors.isNotEmpty())
-        val second = runBlocking { engine().resolveBulk(listOf(aid, bid), true) }
-        assertEquals(emptyList<String>(), second.errors)
-        assertEquals(listOf(cid, did).sorted(), second.serverMissing)
+        assertEquals(listOf(aid, bid).sorted(), ok().bulkMissing)
+        assertFalse(c.exists() || d.exists()); assertEquals(2, trashed.size)
+        assertTrue(runBlocking { engine().resolveBulk(listOf(cid, did), true) }.errors.isNotEmpty())
+        assertEquals(emptyList<String>(), runBlocking { engine().resolveBulk(listOf(aid, bid), true) }.errors)
         assertTrue(File(root, "a").isDirectory && File(root, "b").isDirectory)
-        assertTrue(File(root, "c").isDirectory && File(root, "d").isDirectory); assertTrue(trashed.isEmpty())
-    }
-
-    @Test fun twoRecordsGoneOnServerAreSentBackWhenRestoreIsChosen() {
-        val (a, aid) = synced("a"); val (b, bid) = synced("Работа/b")
-        library.records.clear(); library.sections.clear()
-        assertEquals(listOf(aid, bid).sorted(), ok().serverMissing)
-        assertTrue(runBlocking { engine().resolveBulk(listOf(aid, bid), true) }.errors.isEmpty())
-        assertTrue(a.isDirectory && b.isDirectory); assertTrue(trashed.isEmpty())
-        assertEquals(mapOf(aid to "a", bid to "Работа/b"), library.records.mapValues { it.value.path })
-        assertEquals("оригинал", remote(bid).files.getValue(FileName.TRANSCRIPT).text)
-        assertTrue(ok().serverMissing.isEmpty())
-
-        // without a trash even one loss is held
-        bin = false
-        val (c, cid) = synced("c")
-        library.records.remove(cid)
-        assertEquals(listOf(cid), ok().serverMissing)
-        assertTrue(runBlocking { engine().resolveBulk(listOf(cid), true) }.errors.isEmpty())
-        assertTrue(c.isDirectory)
-        assertEquals("c", remote(cid).path)
-        assertTrue(ok().serverMissing.isEmpty())
+        assertEquals(setOf(aid, bid), library.records.keys)
     }
 
     @Test fun restoreRemovesAllChosenCheckpointIdsBeforeAnyDownloadAndSurvivesInterruption() {
@@ -384,34 +355,54 @@ class LibrarySyncTest {
         assertEquals("audio", File(trashed.single(), "mic.wav").readText())
     }
 
-    @Test fun withoutTrashEvenOneServerDeletionWaitsAndIsDeletedForeverOnlyByChoice() {
-        val (folder, id) = synced("a"); val (other, _) = synced("b")
-        File(folder, "mic.wav").writeText("audio")
+    @Test fun withoutTrashRecordingsDeletedElsewhereAreDeletedForeverWithoutAQuestion() {
+        val (a, aid) = synced("a"); val (b, bid) = synced("Работа/b"); val (c, _) = synced("c")
+        File(a, "mic.wav").writeText("audio")
         bin = false
-        library.records.remove(id)
-        val pending = ok()
-        assertEquals(listOf(id), pending.serverMissing)
-        assertTrue(pending.withoutTrash)
-        assertTrue(folder.isDirectory)
-        // choosing the trash without one deletes nothing: the question repeats
-        val again = runBlocking { engine().resolveBulk(listOf(id), false) }
-        assertEquals(listOf(id), again.serverMissing)
-        assertTrue(File(folder, "mic.wav").isFile)
-        assertTrue(runBlocking { engine().resolveBulk(listOf(id), false, forever = true) }.errors.isEmpty())
-        assertFalse(folder.exists()); assertTrue(other.isDirectory); assertTrue(trashed.isEmpty())
-        assertFalse(id in loadCheckpoint(checkpoint).records)
-        assertTrue(ok().serverMissing.isEmpty())
+        library.records.remove(aid); library.records.remove(bid)
+        val status = ok()
+        assertTrue(status.bulkMissing.isEmpty())
+        assertFalse(a.exists() || b.exists()); assertTrue(c.isDirectory); assertTrue(trashed.isEmpty())
+        assertFalse(aid in loadCheckpoint(checkpoint).records || bid in loadCheckpoint(checkpoint).records)
+        assertFalse(ok().changed)
     }
 
-    @Test fun aHeldServerDeletionGoesToTheTrashOnceItIsBack() {
+    @Test fun withoutTrashARecordingEditedHereGoesBackToTheServerInsteadOfBeingDeleted() {
         val (folder, id) = synced("a")
+        File(folder, FileName.SUMMARY.fileName).writeText("пересказ, сделанный на телефоне")
         bin = false
         library.records.remove(id)
-        assertEquals(listOf(id), ok().serverMissing)
-        bin = true
-        assertTrue(ok().serverMissing.isEmpty())
+        ok()
+        assertTrue(folder.isDirectory); assertTrue(trashed.isEmpty())
+        assertEquals("пересказ, сделанный на телефоне", remote(id).files.getValue(FileName.SUMMARY).text)
+        assertEquals("a", remote(id).path)
+        assertFalse(ok().changed)
+    }
+
+    @Test fun withTrashARecordingEditedHereGoesToTheTrashLikeOnTheDesktop() {
+        val (folder, id) = synced("a")
+        File(folder, FileName.SUMMARY.fileName).writeText("правка")
+        library.records.remove(id)
+        ok()
         assertFalse(folder.exists())
-        assertEquals(1, trashed.size)
+        assertEquals("правка", File(trashed.single(), FileName.SUMMARY.fileName).readText())
+        assertTrue(library.records.isEmpty())
+    }
+
+    @Test fun aFolderAlreadyGoneOrHalfDeletedIsNoError() {
+        val (a, aid) = synced("a"); val (b, bid) = synced("b")
+        bin = false
+        library.records.remove(aid); library.records.remove(bid)
+        // the scan saw both; one is deleted and the other loses its texts before sync deletes them
+        var once = true
+        val engine = LibrarySync(root, checkpoint, { selected }, {
+            if (once && busyCalls++ > 0) { once = false; a.deleteRecursively(); File(b, FileName.TRANSCRIPT.fileName).delete() }
+            busy.toSet()
+        }, { error("no trash") }, { LibraryClient(it, http) }, { bin })
+        assertEquals(emptyList<String>(), runBlocking { engine.runOnce() }.errors)
+        assertFalse(a.exists() || b.exists())
+        assertEquals(emptyList<String>(), ok().errors)
+        assertTrue(loadCheckpoint(checkpoint).records.isEmpty())
     }
 
     @Test fun missingBusyPathRetainsCheckpointAndKnownRootDeletionIsSafe() {
@@ -1280,9 +1271,7 @@ class LibrarySyncTest {
             val status = try { (1..syncs).map { run() }.last() } finally { rights?.let { Files.setPosixFilePermissions(root.toPath(), it) } }
 
             assertEquals(name, case["errors"]?.jsonPrimitive?.boolean ?: false, status.errors.isNotEmpty())
-            val held = (status.bulkMissing + status.serverMissing).map { names.getValue(it) }.sorted()
-            assertEquals(name, strings("held"), held)
-            if (held.isNotEmpty()) assertEquals(name, case.getValue("held_on").jsonPrimitive.content == "server", status.bulkMissing.isEmpty())
+            assertEquals(name, strings("held"), status.bulkMissing.map { names.getValue(it) }.sorted())
             val local = root.walkTopDown().filter { it.name == FileName.META.fileName }.map { it.parentFile!!.relativeTo(root).invariantSeparatorsPath }
             assertEquals(name, strings("local").sorted(), local.sorted().toList())
             assertEquals(name, pairs("server"), library.records.entries.associate { (id, remote) -> remote.path to (names[id] ?: "new") })

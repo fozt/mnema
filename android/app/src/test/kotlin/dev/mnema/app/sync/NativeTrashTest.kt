@@ -97,4 +97,29 @@ class NativeTrashTest {
         assertEquals(listOf(kept), moved)
         assertTrue(kept.isDirectory)
     }
+
+    @Test fun deletingWhatIsAlreadyGoneIsDone() {
+        val gone = File(temp.root, "gone")
+        discard(gone, forever = true, hasTrash = false) { error("no trash") }
+        discard(gone, forever = true, hasTrash = true) { error("nothing to trash") }
+        val folder = temp.newFolder("half").also { File(it, ".mnema-meta.json").writeText("{}") }
+        deleteForever(File(folder, "transcript.txt"))
+        deleteForever(folder)
+        deleteForever(folder)
+        assertFalse(folder.exists())
+    }
+
+    @Test fun permanentDeletionRemovesMetaLastSoAnInterruptionLeavesTheSameRecording() {
+        val folder = temp.newFolder("record")
+        File(folder, ".mnema-meta.json").writeText("{}")
+        File(folder, "transcript.txt").writeText("текст")
+        File(folder, "nested").mkdirs()
+        // a file that cannot be deleted stops the deletion like a killed process would
+        File(folder, "nested/locked.txt").writeText("x")
+        File(folder, "nested").setWritable(false)
+        try {
+            assertThrows(SyncException::class.java) { deleteForever(folder) }
+            assertTrue(File(folder, ".mnema-meta.json").isFile)
+        } finally { File(folder, "nested").setWritable(true) }
+    }
 }

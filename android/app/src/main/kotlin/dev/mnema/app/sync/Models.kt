@@ -58,11 +58,9 @@ data class Scan(val manifest: Manifest = Manifest(), val complete: Boolean = tru
     val withoutFiles: List<String> = emptyList(), // known recordings without their files
     val readable: Boolean = true) // no other folder failed to be read
 
-// bulkMissing — gone on this device, serverMissing — gone on the server; both wait for the user's choice.
-// withoutTrash — there is no trash: what vanished on the server is deleted here only forever.
+// bulkMissing — several recordings gone on this device at once; they wait for the user's choice.
 // otherLibrary — not null: the server has another library (foreign) and sync waits; the number of recordings "Send" sends
 data class SyncStatus(val bulkMissing: MutableList<String> = mutableListOf(), val errors: MutableList<String> = mutableListOf(), var changed: Boolean = false,
-    val serverMissing: MutableList<String> = mutableListOf(), var withoutTrash: Boolean = false,
     var otherLibrary: Int? = null, var foreign: String = "")
 
 class SyncException(message: String) : IOException(message)

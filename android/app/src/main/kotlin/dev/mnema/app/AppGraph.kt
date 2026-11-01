@@ -104,7 +104,9 @@ class AppGraph(val context: Context) {
                 try { parseConnection(node.connection) } catch (_: ConnectionException) { null }
             }
         }, busy = ::busyFolders, trash = trash::move, changed = store::refresh, prepare = {
-            if (settings.current().activeEntry() != null) prepareMutation()
+            if (settings.current().activeEntry() != null) {
+                try { prepareMutation() } catch (_: IOException) { throw SyncException(tr("Couldn't check the recording state")) }
+            }
         }, hasTrash = trash::available)
     }
 
@@ -196,7 +198,7 @@ class AppGraph(val context: Context) {
     }
 
     private fun busyFolders(): Set<String> = synchronized(filesLock) {
-        val recording = try { recordingForMutation() } catch (e: IOException) { throw SyncException(e.message.orEmpty()) }
+        val recording = try { recordingForMutation() } catch (_: IOException) { throw SyncException(tr("Couldn't check the recording state")) }
         busyRecordings(recordingsRoot, recording, scheduler::hasWork, activeFolders.keys)
     }
 
