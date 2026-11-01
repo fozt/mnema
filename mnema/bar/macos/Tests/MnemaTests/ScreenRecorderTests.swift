@@ -1,0 +1,154 @@
+import AVFoundation
+import CoreMedia
+import Foundation
+import ScreenCaptureKit
+import Testing
+
+@testable import Mnema
+
+private func t(_ seconds: Double) -> CMTime { CMTime(seconds: seconds, preferredTimescale: 1_000_000_000) }
+
+@Test func frameIsAtMost1920WideWithTheScreenProportions() {
+    #expect(ScreenCapture.frameSize(pixelWidth: 3024, pixelHeight: 1964) == FrameSize(width: 1920, height: 1246))
+    #expect(ScreenCapture.frameSize(pixelWidth: 5120, pixelHeight: 2880) == FrameSize(width: 1920, height: 1080))
+    #expect(ScreenCapture.frameSize(pixelWidth: 1440, pixelHeight: 900) == FrameSize(width: 1440, height: 900))
+    // HEVC with 4:2:0 needs even sides
+    #expect(ScreenCapture.frameSize(pixelWidth: 1367, pixelHeight: 769) == FrameSize(width: 1366, height: 768))
+}
+
+@Test func encoderIsHevcAt2MbpsWithAKeyFrameEvery10Seconds() throws {
+    let settings = ScreenCapture.outputSettings(FrameSize(width: 1920, height: 1246))
+    #expect(settings[AVVideoCodecKey] as? AVVideoCodecType == .hevc)
+    #expect(settings[AVVideoWidthKey] as? Int == 1920)
+    #expect(settings[AVVideoHeightKey] as? Int == 1246)
+    let compression = try #require(settings[AVVideoCompressionPropertiesKey] as? [String: Any])
+    #expect(compression[AVVideoAverageBitRateKey] as? Int == 2_000_000)
+    #expect(compression[AVVideoExpectedSourceFrameRateKey] as? Int == 15)
+    #expect(compression[AVVideoMaxKeyFrameIntervalDurationKey] as? Double == 10)
+    #expect(compression[AVVideoAllowFrameReorderingKey] as? Bool == false)
+}
+
+@Test func framesOfAPauseAreDroppedAndLaterOnesShiftByIt() {
+    var timeline = PauseTimeline()
+    #expect(timeline.place(t(100)) == t(100))
+    timeline.pause(at: t(110))
+    #expect(timeline.place(t(112)) == nil)  // paused
+    timeline.resume(at: t(115))
+    #expect(timeline.place(t(113)) == nil)  // a frame of the pause delivered late
+    #expect(timeline.place(t(109)) == t(109))  // a frame from before the pause
+    #expect(timeline.place(t(120)) == t(115))
+    timeline.pause(at: t(130))
+    timeline.pause(at: t(131))  // a second pause while paused changes nothing
+    timeline.resume(at: t(132))
+    #expect(timeline.place(t(140)) == t(133))
+}
+
+@Test func videoEndsAtTheStopOrAtThePauseItStoppedIn() {
+    var timeline = PauseTimeline()
+    timeline.pause(at: t(10))
+    timeline.resume(at: t(12))
+    #expect(timeline.end(at: t(20)) == t(18))
+    timeline.pause(at: t(25))
+    #expect(timeline.end(at: t(40)) == t(23))  // stopped while paused: the video ends where the pause began
+}
+
+private let mnema: pid_t = 100
+private let zoom: pid_t = 200
+private let editor: pid_t = 300
+
+@Test func capturedWindowIsTheActiveAppsFrontWindowNotMnemas() {
+    let windows = [
+        WindowInfo(pid: mnema, bounds: CGRect(x: 0, y: 0, width: 400, height: 600)),
+        WindowInfo(pid: editor, bounds: CGRect(x: 2000, y: 0, width: 800, height: 600)),
+        WindowInfo(pid: zoom, bounds: CGRect(x: 100, y: 100, width: 800, height: 600)),
+        WindowInfo(pid: zoom, bounds: CGRect(x: 3000, y: 100, width: 800, height: 600)),
+    ]
+    #expect(ScreenCapture.window(windows, front: zoom, own: mnema) == CGRect(x: 100, y: 100, width: 800, height: 600))
+    // Mnema is active (its panel was clicked): the front window of another app
+    #expect(ScreenCapture.window(windows, front: mnema, own: mnema) == CGRect(x: 2000, y: 0, width: 800, height: 600))
+    #expect(ScreenCapture.window(windows, front: nil, own: mnema) == CGRect(x: 2000, y: 0, width: 800, height: 600))
+    // the active app has no window on screen
+    #expect(ScreenCapture.window(windows, front: 400, own: mnema) == nil)
+}
+
+@Test func capturedDisplayHoldsMostOfTheWindowOtherwiseTheMainOne() {
+    let displays = [
+        DisplayInfo(id: 1, frame: CGRect(x: 0, y: 0, width: 1512, height: 982)),
+        DisplayInfo(id: 2, frame: CGRect(x: 1512, y: -200, width: 2560, height: 1440)),
+    ]
+    let across = CGRect(x: 1200, y: 100, width: 1000, height: 600)  // mostly on the external one
+    #expect(ScreenCapture.display(for: across, among: displays, main: 1) == 2)
+    #expect(ScreenCapture.display(for: CGRect(x: 10, y: 10, width: 300, height: 300), among: displays, main: 2) == 1)
+    #expect(ScreenCapture.display(for: nil, among: displays, main: 2) == 2)
+    #expect(ScreenCapture.display(for: CGRect(x: -5000, y: 0, width: 10, height: 10), among: displays, main: 1) == 1)
+}
+
+@Test func failureReasonNamesWhatWentWrong() {
+    let declined = NSError(domain: SCStreamErrorDomain, code: SCStreamError.Code.userDeclined.rawValue)
+    #expect(ScreenCapture.failure(declined, whileRecording: false) == .permission)
+    #expect(ScreenCapture.failure(declined, whileRecording: true) == .permission)
+    let diskFull = NSError(domain: AVFoundationErrorDomain, code: AVError.Code.diskFull.rawValue)
+    #expect(ScreenCapture.failure(diskFull, whileRecording: true) == .noSpace)
+    let posix = NSError(domain: NSPOSIXErrorDomain, code: Int(ENOSPC))
+    let wrapped = NSError(domain: AVFoundationErrorDomain, code: -11800, userInfo: [NSUnderlyingErrorKey: posix])
+    #expect(ScreenCapture.failure(wrapped, whileRecording: true) == .noSpace)
+    // the display was disconnected or the lid closed while recording
+    let lost = NSError(domain: SCStreamErrorDomain, code: SCStreamError.Code.noCaptureSource.rawValue)
+    #expect(ScreenCapture.failure(lost, whileRecording: true) == .displayLost)
+    #expect(ScreenCapture.failure(lost, whileRecording: false) == .writer)
+    #expect(ScreenCapture.failure(NSError(domain: AVFoundationErrorDomain, code: -11800), whileRecording: true) == .writer)
+    #expect(ScreenCapture.failure(nil, whileRecording: true) == .writer)
+}
+
+@Test func screenMessagesDecodeAsPythonWritesThem() throws {
+    let start = Data(#"{"type": "screen", "op": "start", "path": "/Users/me/mnema/2026-11-01_10-00/screen.mov"}"#.utf8)
+    guard case .screen(.start, let path) = try Wire.decode(line: start) else {
+        Issue.record("not a screen start")
+        return
+    }
+    #expect(path == "/Users/me/mnema/2026-11-01_10-00/screen.mov")
+    guard case .screen(.pause, "") = try Wire.decode(line: Data(#"{"type": "screen", "op": "pause", "path": ""}"#.utf8)) else {
+        Issue.record("not a screen pause")
+        return
+    }
+}
+
+@Test func screenEventsEncodeAsPythonReadsThem() throws {
+    func json(_ msg: Incoming) throws -> NSDictionary? {
+        try JSONSerialization.jsonObject(with: Wire.encode(msg)) as? NSDictionary
+    }
+    #expect(
+        try json(.screen(.started(offset: 0.25)))
+            == ["type": "screen_event", "state": "started", "reason": "", "offset": 0.25] as NSDictionary)
+    #expect(
+        try json(.screen(.failed(.displayLost)))
+            == ["type": "screen_event", "state": "failed", "reason": "display_lost", "offset": NSNull()] as NSDictionary)
+    #expect(
+        try json(.screen(.stopped))
+            == ["type": "screen_event", "state": "stopped", "reason": "", "offset": NSNull()] as NSDictionary)
+}
+
+@MainActor private func until(_ done: () -> Bool) async throws {
+    let deadline = Date().addingTimeInterval(10)
+    while !done() {
+        guard Date() < deadline else { throw Timeout() }
+        try await Task.sleep(nanoseconds: 10_000_000)
+    }
+}
+
+private struct Timeout: Error {}
+
+/// The engine waits for stopped after its stop, even when no video was running (it did not start);
+/// a stop for a gone engine sends nothing and only reports that the file is closed.
+@MainActor @Test func stopIsAnsweredWithStoppedOnlyForTheEngine() async throws {
+    let recorder = ScreenRecorder()
+    var events: [ScreenEvent] = []
+    recorder.onEvent = { events.append($0) }
+    recorder.stop()
+    try await until { !events.isEmpty }
+    #expect(events == [.stopped])
+    var closed = false
+    recorder.stop(report: false) { closed = true }
+    try await until { closed }
+    #expect(events == [.stopped] && !recorder.active)
+}

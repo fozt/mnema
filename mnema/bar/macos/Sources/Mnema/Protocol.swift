@@ -284,6 +284,26 @@ struct NotifyMsg: Codable, Hashable {
     var openKey: String?
 }
 
+/// ScreenMsg.op: the screen video of the recording (ScreenRecorder).
+enum ScreenOp: String, Codable, Hashable {
+    case start, pause, resume, stop
+}
+
+/// ScreenEventMsg.reason: why the screen video did not start or broke off.
+enum ScreenFailure: String, Codable, Hashable {
+    case permission
+    case noSpace = "no_space"
+    case displayLost = "display_lost"
+    case writer
+}
+
+/// ScreenEventMsg: started carries the offset, seconds from the start message to the first frame.
+enum ScreenEvent: Hashable {
+    case started(offset: Double)
+    case failed(ScreenFailure)
+    case stopped
+}
+
 /// Engine → app.
 enum Outgoing: Decodable {
     case state(PanelModel)
@@ -291,9 +311,10 @@ enum Outgoing: Decodable {
     case form(id: Int, ask: FormAsk?)  // nil closes the window (saved)
     case notify(NotifyMsg)
     case settings(tab: String)  // open the settings window on a tab
+    case screen(op: ScreenOp, path: String)  // path: screen.mov, only with start
     case quit
 
-    private enum Keys: String, CodingKey { case type, panel, id, ask, tab }
+    private enum Keys: String, CodingKey { case type, panel, id, ask, tab, op, path }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: Keys.self)
@@ -305,6 +326,9 @@ enum Outgoing: Decodable {
             self = .form(id: try c.decode(Int.self, forKey: .id), ask: try c.decodeIfPresent(FormAsk.self, forKey: .ask))
         case "notify": self = .notify(try NotifyMsg(from: decoder))
         case "settings": self = .settings(tab: try c.decode(String.self, forKey: .tab))
+        case "screen":
+            self = .screen(
+                op: try c.decode(ScreenOp.self, forKey: .op), path: try c.decodeIfPresent(String.self, forKey: .path) ?? "")
         case "quit": self = .quit
         default:
             throw DecodingError.dataCorruptedError(
@@ -358,8 +382,9 @@ enum Incoming: Encodable, Hashable {
     case answer(id: Int, value: JSONValue)
     case formEvent(id: Int, rev: Int, op: String, values: [String: String])
     case panel(open: Bool)
+    case screen(ScreenEvent)
 
-    private enum Keys: String, CodingKey { case type, key, id, value, open, rev, op, values }
+    private enum Keys: String, CodingKey { case type, key, id, value, open, rev, op, values, state, reason, offset }
 
     func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: Keys.self)
@@ -380,6 +405,21 @@ enum Incoming: Encodable, Hashable {
         case .panel(let open):
             try c.encode("panel", forKey: .type)
             try c.encode(open, forKey: .open)
+        case .screen(let event):
+            try c.encode("screen_event", forKey: .type)
+            var reason = "", offset: Double? = nil
+            switch event {
+            case .started(let seconds):
+                try c.encode("started", forKey: .state)
+                offset = seconds
+            case .failed(let failure):
+                try c.encode("failed", forKey: .state)
+                reason = failure.rawValue
+            case .stopped:
+                try c.encode("stopped", forKey: .state)
+            }
+            try c.encode(reason, forKey: .reason)
+            try c.encode(offset, forKey: .offset)
         }
     }
 }
