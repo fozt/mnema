@@ -54,6 +54,13 @@ class VideoRun(BaseModel):
     error: str = ""  # why there is no full video: permission, no_space, display_lost, writer…
 
 
+class RecordedVideo(VideoRun):
+    """The video as the recording left it, kept in the history apart from any processing: a
+    processing that comes later (stopped, after a server was down, after quitting) gets it."""
+
+    notes: list[Remark] = Field(default_factory=list)
+
+
 class Run(BaseModel):
     kind: Literal["process", "summary"] = "process"  # summary — "Summarize"
     job: str | None = None
@@ -304,6 +311,27 @@ def amend(
     if video is not None:
         last["video"] = video.model_dump(mode="json")
     _write(base, data)
+
+
+def set_video(base: Path, video: RecordedVideo) -> None:
+    """The screen video of a just-stopped recording, before any processing."""
+    data = _for_write(base)
+    if data is not None:
+        data["video"] = video.model_dump(mode="json")
+        _write(base, data)
+
+
+def carry_video(base: Path) -> None:
+    """The last processing gets the recording's video (set_video) and its remarks, once."""
+    try:
+        data = json.loads((base / META_FILE).read_text(encoding="utf-8"))
+        video = RecordedVideo.model_validate(data["video"])
+        runs = data["runs"]
+    except (OSError, ValueError, LookupError, TypeError):
+        return
+    if not runs or not isinstance(runs[-1], dict) or runs[-1].get("video") is not None:
+        return
+    amend(base, notes=video.notes, video=VideoRun(offset=video.offset, error=video.error))
 
 
 def last(base: Path) -> Run | None:

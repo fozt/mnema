@@ -283,3 +283,78 @@ def test_engine_drives_the_app_recorder_over_the_protocol(mac, tmp_path) -> None
     thread.join(timeout=10)
     folder = Path(start.path).parent
     assert _video(folder)["video"]["offset"] >= 0.25
+
+
+def _processed_later(monkeypatch) -> None:
+    """The "Process…" of a recording: the node appends its run."""
+
+    def processed(base, config, connection, **kw):
+        meta.append(base, meta.Run(status="ok"))
+        return LiveResult(base=base), ""
+
+    monkeypatch.setattr("mnema.live.recording_client.recover_on_node", processed)
+
+
+def test_stopped_processing_keeps_the_video_remark(mac, monkeypatch) -> None:
+    from mnema.live.setup import FinalizeCancelled
+
+    def stopped(prepared, tracks, **kw):
+        raise FinalizeCancelled
+
+    rt, app = mac({"start": ("failed", "permission", None)})
+    monkeypatch.setattr("mnema.live.recording_client.finalize_on_node", stopped)
+    run = _video(_record(rt, app))
+    assert run["status"] == "stopped"
+    assert run["video"] == {"offset": None, "error": "permission"}
+    assert [n["code"] for n in run["notes"]] == ["video_permission"]
+
+
+def test_server_down_then_processed_the_history_tells_about_the_video(mac, monkeypatch) -> None:
+    """The server did not answer, no processing in the history; "Retry" later processes it and
+    the history says why there is no video."""
+
+    def deferred(prepared, tracks, **kw):
+        return LiveResult(base=prepared.base, defer_command="mnema finish x"), ""
+
+    rt, app = mac({"start": ("failed", "permission", None)})
+    monkeypatch.setattr("mnema.live.recording_client.finalize_on_node", deferred)
+    folder = _record(rt, app)
+    _processed_later(monkeypatch)
+    rt.recover(folder)
+    rt.join(timeout=20)
+    run = _video(folder)
+    assert run["video"] == {"offset": None, "error": "permission"}
+    assert [n["code"] for n in run["notes"]] == ["video_permission"]
+
+
+def test_quit_while_recording_then_processed_the_history_tells_about_the_video(
+    mac, monkeypatch
+) -> None:
+    rt, app = mac({"start": ("failed", "permission", None)})
+    rt.handle("start")
+    assert _Source.reading.wait(timeout=10)
+    folder = rt.active_folder
+    assert folder is not None
+    rt.handle("quit")
+    rt.join(timeout=20)
+    assert rt.can_exit
+    _processed_later(monkeypatch)
+    later, _app = mac()  # the next launch
+    later.recover(folder)
+    later.join(timeout=20)
+    run = _video(folder)
+    assert run["video"] == {"offset": None, "error": "permission"}
+    assert [n["code"] for n in run["notes"]] == ["video_permission"]
+
+
+def test_processing_again_tells_about_the_video_once_per_processing(mac, monkeypatch) -> None:
+    rt, app = mac({"start": ("failed", "permission", None)})
+    folder = _record(rt, app)
+    _processed_later(monkeypatch)
+    rt.recover(folder)
+    rt.join(timeout=20)
+    runs = json.loads((folder / meta.META_FILE).read_text(encoding="utf-8"))["runs"]
+    assert [[n["code"] for n in r["notes"]] for r in runs] == [
+        ["video_permission"],
+        ["video_permission"],
+    ]

@@ -274,13 +274,27 @@ def _video_history(prepared: Any) -> None:
         prepared.run.notes.append(video_failed(screen.error))
 
 
-def _amend_video(run: Any, folder: Path) -> None:
-    """The processing appended its run: the video of the recording goes into it."""
-    if run is None or run.video is None:
+def _keep_video(prepared: Any) -> None:
+    """The video facts go into the recording's history at once: a processing that comes later
+    (or never: the server was down, Mnema quit) does not lose them."""
+    video = prepared.run.video
+    if video is None:
         return
-    notes = [n for n in run.notes if n.code.startswith("video")]
-    with FILES_LOCK:
-        meta.amend(folder, notes=notes, video=run.video)
+    notes = [n for n in prepared.run.notes if n.code.startswith("video")]
+    try:
+        with FILES_LOCK:
+            meta.set_video(prepared.base, meta.RecordedVideo(**video.model_dump(), notes=notes))
+    except OSError:  # the history is not writable: the recording stays as it is
+        logger.warning("the video of %s is not in its history", prepared.base, exc_info=True)
+
+
+def _carry_video(folder: Path) -> None:
+    """A processing appended its run: the recording's video and its remarks go into it."""
+    try:
+        with FILES_LOCK:
+            meta.carry_video(folder)
+    except OSError:
+        logger.warning("the video of %s is not in its last processing", folder, exc_info=True)
 
 
 def _drop_unused_tracks(prepared: Any, tracks: list[Any]) -> list[Any]:
@@ -2117,7 +2131,6 @@ class BarRuntime:
         if auto_name is None:  # by the original name, also on a restart after a rename
             auto_name = is_default_name(base)
         fresh = task.prepared is not None  # just recorded
-        recorded = task.prepared.run if task.prepared is not None else None  # its video
         # tracks from the "Process recording" window (a just-finished recording uses all)
         chosen = task.tracks if job.kind is JobKind.RECOVER else None
         try:
@@ -2169,7 +2182,7 @@ class BarRuntime:
                             title=... if whole else part.title, auto_name=auto_name,
                             replace=part.replace, lang=job.lang, asr=task.asr, tracks=chosen,
                         )  # fmt: skip
-                    _amend_video(recorded, done)
+                    _carry_video(done)
                     self._finish(result, done, retry)
                     # never reached the server: no part, so the full one gets no part title
                     return None if result.defer_command else self.state.last_result
@@ -2185,6 +2198,7 @@ class BarRuntime:
 
                         with FILES_LOCK:
                             (folder / PROCESSING_MARK).unlink(missing_ok=True)
+                        _carry_video(folder)
                         self.state.last_result = recognized.transcript_txt or folder
                         self.state.last_warnings = list(recognized.remarks)
                         self.state.last_summary = None
@@ -2303,6 +2317,7 @@ class BarRuntime:
 
         cancel_active_job()  # a step was running on the server: free it
         keep_audio_only(base, started=task.began)
+        _carry_video(base)
         self.state.last_result = base
         self.state.last_warnings = []
         self.state.last_summary = None
@@ -2579,6 +2594,7 @@ class BarRuntime:
         finally:
             self.state.notice = notice
             self._on_change()
+        _keep_video(prepared)
 
     # ── GUI timer ──────────────────────────────────────────────────────────────
 
