@@ -6,9 +6,13 @@ from enum import StrEnum
 from .models import LEGACY_SUMMARY, FileName
 
 # Files that mark a folder as a recording; unrelated files (memo.m4a, pdf) do not change the layout.
+# video.mp4 and screen.mov are the Mac's screen video: they stay on it, sync never carries them.
 RECORD_FILES = frozenset(
-    {"mic.wav", "system.wav", FileName.TRANSCRIPT, FileName.SUMMARY, LEGACY_SUMMARY, FileName.META}
-)
+    {
+        "mic.wav", "system.wav", "video.mp4", "screen.mov",
+        FileName.TRANSCRIPT, FileName.SUMMARY, LEGACY_SUMMARY, FileName.META,
+    }
+)  # fmt: skip
 TEXTS = frozenset({FileName.TRANSCRIPT, FileName.SUMMARY})
 
 

@@ -1277,7 +1277,7 @@ def _slice_wav(src: Path, dst: Path, start: float, end: float | None) -> None:
 
 _RECORDING_FILES = {
     "mic.wav", "system.wav", "recording.mp3", "transcript.txt", "summary.txt", "summary.md",
-    "translation.md",
+    "translation.md", "video.mp4", "screen.mov",
     ".DS_Store",
 }  # fmt: skip
 

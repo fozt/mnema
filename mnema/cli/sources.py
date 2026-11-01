@@ -17,6 +17,8 @@ from ..connection import Connection
 from ..core.base import phased
 from ..dispatch import resolve_runner
 from ..i18n import _
+from ..library.models import FileName
+from ..live.record import SCREEN_FILE, VIDEO_FILE
 from .ui import console, die, run_with_progress
 
 # Downloads from links are temporary: only the result (a transcript, ...) is kept.
@@ -165,6 +167,13 @@ def _merged_name(files: list[Path], *, want_video: bool = True) -> str:
     return f"{base}_merged{suffix}" if base else f"merged{suffix}"
 
 
+def _recording_video(path: Path) -> bool:
+    """The screen video of a Mnema recording: a folder walk takes the recording's tracks."""
+    return path.name in (VIDEO_FILE, SCREEN_FILE) and any(
+        (path.parent / name).exists() for name in ("mic.wav", "system.wav", FileName.META)
+    )
+
+
 def _resolve_sources(
     raw_inputs,
     *,
@@ -226,7 +235,11 @@ def _resolve_sources(
             continue
         p = Path(raw).expanduser()
         if p.is_dir():
-            found = sorted(f for f in p.rglob("*") if f.is_file() and f.suffix.lower() in exts)
+            found = sorted(
+                f
+                for f in p.rglob("*")
+                if f.is_file() and f.suffix.lower() in exts and not _recording_video(f)
+            )
             if not found:
                 note = _("No suitable files in the folder: {path}", path=escape(str(p)))
                 console.print(f"[yellow]{note}[/]")

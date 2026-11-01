@@ -484,3 +484,13 @@ def test_another_library_asks_before_sending_and_the_answer_names_it(
     assert rt._sync.choices == ["L3"]
     rt._sync_changed(SyncStatus(connection="http://srv"))
     assert not panel_model(rt.state, rt.prefs, MenuEnv(), [], SettingsModel(tabs=[])).notices
+
+
+def test_the_card_opens_the_video_and_the_screen_recording_when_assembly_failed(app):
+    rt, platform, root, updates = app
+    folder, id = record(root)
+    (folder / "screen.mov").write_bytes(b"frames")
+    rt.handle(f"record:{id}:video")
+    (folder / "video.mp4").write_bytes(b"video")
+    rt.handle(f"record:{id}:video")
+    assert platform.opened == [folder / "screen.mov", folder / "video.mp4"]

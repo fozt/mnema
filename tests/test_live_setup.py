@@ -1190,7 +1190,8 @@ def test_processed_recording_is_still_a_mnema_folder(tmp_path) -> None:
     recording; a foreign file in the folder prevents it."""
     from mnema.live.setup import is_recording_folder
 
-    for name in ("mic.wav", "transcript.txt", "summary.txt", ".mnema-meta.json"):
+    names = ("mic.wav", "transcript.txt", "summary.txt", ".mnema-meta.json", "video.mp4")
+    for name in (*names, "screen.mov"):
         (tmp_path / name).write_text("x")
     assert is_recording_folder(tmp_path)
     (tmp_path / "заметки.txt").write_text("чужое")

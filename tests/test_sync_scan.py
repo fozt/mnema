@@ -165,3 +165,18 @@ def test_library_root_through_a_link_scans_fully_but_links_out_stay_blocked(tmp_
     (real / "Работа/Чужая").symlink_to(recording(tmp_path, "outside"), target_is_directory=True)
     result = scan(link, set())
     assert not result.complete and result.blocked_paths == ["Работа/Чужая"]
+
+
+def test_the_screen_video_stays_on_this_computer(tmp_path):
+    """Sync carries only the texts and the history: the recording's video is neither sent nor
+    blocks the recording; a folder holding only the screen video is a recording without texts."""
+    folder = recording(tmp_path, "Собеседование")
+    (folder / "video.mp4").write_bytes(b"video")
+    lost = tmp_path / "Без текста"
+    lost.mkdir()
+    (lost / "screen.mov").write_bytes(b"frames")
+    result = scan(tmp_path, set())
+    [record] = result.manifest.records
+    assert set(record.files) == {FileName.TRANSCRIPT, FileName.META}
+    assert result.complete and result.blocked_paths == ["Без текста"]
+    assert (folder / "video.mp4").read_bytes() == b"video"
