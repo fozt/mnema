@@ -312,8 +312,8 @@ def test_cleanup_question_is_english_in_english(app, monkeypatch, count, title):
 
 
 def test_cleanup_with_video_says_audio_and_video(app, monkeypatch):
-    """A processed recording with the screen video: the button and the question name the video
-    too, and the size counts it."""
+    """A processed recording with the screen video: the button, the question and the notice
+    after it name the video too, and the size counts it."""
     rt, platform, root, _ = app
     monkeypatch.setattr(base, "STANDALONE", True)
     folder, _id = record(root, "Собеседование", audio=True, processed=True)
@@ -331,6 +331,7 @@ def test_cleanup_with_video_says_audio_and_video(app, monkeypatch):
     assert "МБ" in message
     platform.answer(True)
     assert not (folder / "video.mp4").exists()
+    assert rt.state.notice == "Звук и видео удалены у записей: 2"
 
 
 def test_missing_record_id_never_deletes_replacement_at_old_path(app):

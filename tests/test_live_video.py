@@ -13,21 +13,44 @@ SOUND = b"\0" * (WAV_HEADER + 3200)
 
 @pytest.fixture
 def ffmpeg(monkeypatch):
-    """ffmpeg at its process boundary: the commands it got; an answer writes the output file
-    (the last argument) or fails with exit code 1 and stderr."""
+    """ffmpeg at its process boundary (subprocess.run, or Popen when the caller can stop it):
+    the commands it got; an answer writes the output file (the last argument) or fails with
+    exit code 1 and stderr."""
     monkeypatch.setenv("MNEMA_FFMPEG", "/opt/ffmpeg")
     calls: list[list[str]] = []
     fail: list[str] = []
 
-    def run(cmd, **kwargs):
+    def answer(cmd) -> tuple[int, str]:
         calls.append(cmd)
         if fail:
             Path(cmd[-1]).write_bytes(b"half")
-            return subprocess.CompletedProcess(cmd, 1, "", fail[0])
+            return 1, fail[0]
         Path(cmd[-1]).write_bytes(b"mp4 with sound")
-        return subprocess.CompletedProcess(cmd, 0, "", "")
+        return 0, ""
+
+    def run(cmd, **kwargs):
+        code, err = answer(cmd)
+        return subprocess.CompletedProcess(cmd, code, "", err)
+
+    class Ffmpeg:
+        def __init__(self, cmd, **kwargs) -> None:
+            self.cmd, self.returncode = cmd, None
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc) -> None:
+            return None
+
+        def communicate(self, timeout=None):
+            self.returncode, err = answer(self.cmd)
+            return "", err
+
+        def poll(self):
+            return self.returncode
 
     monkeypatch.setattr(subprocess, "run", run)
+    monkeypatch.setattr(subprocess, "Popen", Ffmpeg)
     return calls, fail
 
 
@@ -188,3 +211,51 @@ def test_a_later_processing_assembles_with_the_offset_the_recording_left(tmp_pat
     assert kept == meta.RecordedVideo(offset=0.7)
     assert all(c[c.index("-itsoffset") + 1] == "0.7" for c in calls)
     assert (base / "video.mp4").exists() and not video.pending(base)
+
+
+def test_a_stopped_assembly_kills_ffmpeg_and_leaves_the_screen_recording(tmp_path, monkeypatch):
+    """Processing stopped (on raises) while ffmpeg runs: it is stopped, the half-written file
+    goes, screen.mov stays for the next processing and the stop goes on to the caller."""
+    monkeypatch.setenv("MNEMA_FFMPEG", "/opt/ffmpeg")
+    stopped: list[str] = []
+
+    class Ffmpeg:
+        def __init__(self, cmd, **kwargs) -> None:
+            self.cmd, self.returncode = cmd, None
+            Path(cmd[-1]).write_bytes(b"half")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc) -> None:
+            return None
+
+        def communicate(self, timeout=None):
+            raise subprocess.TimeoutExpired(self.cmd, timeout or 0)  # still writing
+
+        def poll(self):
+            return self.returncode
+
+        def terminate(self) -> None:
+            stopped.append("terminate")
+            self.returncode = -15
+
+        def wait(self, timeout=None):
+            return self.returncode
+
+    class Stop(BaseException):
+        pass
+
+    monkeypatch.setattr(subprocess, "Popen", Ffmpeg)
+    base = folder(tmp_path, "mic")
+    ticks: list[str] = []
+
+    def on(fraction, message) -> None:
+        ticks.append(message)
+        if len(ticks) > 3:  # a few ticks of a running ffmpeg, then "Stop processing"
+            raise Stop
+
+    with pytest.raises(Stop):
+        video.assemble(base, run_with(0.4), on)
+    assert stopped == ["terminate"]
+    assert sorted(p.name for p in base.iterdir()) == ["mic.wav", "screen.mov"]

@@ -6,6 +6,7 @@
   "Mnema is updating. You can start recording after the update": "Идёт обновление Mnema. Запись можно начать после него",
   "Recording not found": "Запись не найдена",
   "Audio deleted from recordings: {n}": "Звук удалён у записей: {n}",
+  "Audio and video deleted from recordings: {n}": "Звук и видео удалены у записей: {n}",
   "This frees {size}. The texts stay.": "Освободится {size}. Тексты останутся.",
   "This frees {size}. The texts stay only on this Mac.": "Освободится {size}. Тексты останутся только на этом Mac.",
   "This frees {size}. The texts stay only on this computer.": "Освободится {size}. Тексты останутся только на этом компьютере.",

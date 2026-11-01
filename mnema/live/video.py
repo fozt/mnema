@@ -80,7 +80,8 @@ def mux(base: Path, offset: float | None, on: Progress = noop) -> Path:
                 "-f",
                 "mp4",
                 str(part),
-            ]  # fmt: skip
+            ],  # fmt: skip
+            on=on,  # a stop or a quit raises in on: ffmpeg is killed, not left running
         )
         os.replace(part, base / VIDEO_FILE)
     except BaseException:
@@ -132,17 +133,18 @@ def finish(base: Path, run: meta.Run, on: Progress = noop) -> None:
         run.remarks.append(note.text)
 
 
-def assemble(base: Path, run: meta.Run | None = None) -> None:
+def assemble(base: Path, run: meta.Run | None = None, on: Progress = noop) -> None:
     """The first step of processing a recording with a screen.mov: finish(), and the history
     keeps the video facts for every later processing (meta.set_video). run — the run of a
-    just-finished recording; without it, the facts the recording left in its history."""
+    just-finished recording; without it, the facts the recording left in its history. An
+    exception raised by on (processing stopped) stops the assembly, screen.mov stays."""
     if run is None:
         kept = meta.recorded_video(base)
         run = meta.Run()
         if kept is not None:
             run.video = meta.VideoRun(offset=kept.offset, error=kept.error)
             run.notes = list(kept.notes)
-    finish(base, run)
+    finish(base, run, on)
     keep(base, run)
 
 

@@ -68,6 +68,7 @@ class LibraryView(BaseModel):
 
 class CleanupResult(BaseModel):
     removed: int = 0  # recordings whose audio went to the Trash
+    video: bool = False  # a screen video went with it
     errors: list[str] = Field(default_factory=list)
 
 
@@ -434,6 +435,7 @@ def cleanup_audio(
                 audio = [n for n in sorted(found.files) if _cleaned(n)]
                 for name in audio:
                     trash(found.path / name)
+                    result.video = result.video or name in VIDEOS
                 result.removed += bool(audio)
         except (OSError, ValueError, LibraryError):
             name = card.title or card.path.name

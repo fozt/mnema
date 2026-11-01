@@ -277,6 +277,17 @@ def _video_history(prepared: Any) -> None:
         prepared.run.notes.append(video_failed(screen.error))
 
 
+def _keep_offset(base: Path, offset: float) -> None:
+    """The first frame came: its offset goes into the recording's history at once, so a crash
+    or a force quit mid-recording still leaves the video its shift (video.keep adds the rest)."""
+    try:
+        with FILES_LOCK:
+            kept = meta.recorded_video(base) or meta.RecordedVideo()
+            meta.set_video(base, kept.model_copy(update={"offset": offset}))
+    except OSError:
+        logger.warning("the video offset of %s is not in its history", base, exc_info=True)
+
+
 def _carry_video(folder: Path) -> None:
     """A processing appended its run: the recording's video and its remarks go into it."""
     try:
@@ -404,6 +415,8 @@ class BarRuntime:
         self._cancel = False
         self._tasks: list[_Task] = []  # the processing queue; the first runs (state.jobs shows it)
         self._worker: threading.Thread | None = None  # the "mnema-bar-process" thread
+        self._no_assembly = threading.Event()  # cleared while a video is being assembled
+        self._no_assembly.set()
         self._started = 0.0
         self._paused_at: float | None = None
         self._paused_total = 0.0
@@ -1416,7 +1429,12 @@ class BarRuntime:
                 busy=self._held,  # queued and processing recordings are left alone
                 trash=self._platform.trash,
             )
-            self.state.notice = _("Audio deleted from recordings: {n}", n=result.removed)
+            if result.video:
+                self.state.notice = _(
+                    "Audio and video deleted from recordings: {n}", n=result.removed
+                )
+            else:
+                self.state.notice = _("Audio deleted from recordings: {n}", n=result.removed)
             self.state.error = "\n".join(result.errors)
             self._library_changed()
 
@@ -1764,9 +1782,12 @@ class BarRuntime:
         self._env_changed()
 
     def close(self) -> None:
-        """The app quits: stop the sync."""
+        """The app quits: stop the sync; a video assembly ends its ffmpeg first (quitting
+        interrupts it), so no orphan keeps writing into the folder."""
         if self._sync is not None:
             self._sync.close()
+        if not self._no_assembly.wait(timeout=5):
+            logger.warning("the video assembly did not end before quitting")
 
     def _processing_label(self) -> str:
         """The server by name, as in the settings; without a name — by address."""
@@ -1876,6 +1897,7 @@ class BarRuntime:
             parse_offset,
             recording_length,
         )
+        from ..live.video import video_file
         from .range_pick import RangeRequest
         from .range_pick import whole as whole_part
         from .state import result_name, title_of
@@ -1894,7 +1916,8 @@ class BarRuntime:
             name=current,
             replace=self.prefs.replace_original,
             can_replace=is_recording_folder(folder)
-            and folder.resolve() != library_root().resolve(),
+            and folder.resolve() != library_root().resolve()
+            and video_file(folder) is None,  # the video stays in the full one: never replaced
             asr=self.prefs.asr,
             asrs=asr_options(self.menu_env(), self.prefs.asr),
             sources=sources,
@@ -2139,10 +2162,11 @@ class BarRuntime:
         fresh = task.prepared is not None  # just recorded
         # tracks from the "Process recording" window (a just-finished recording uses all)
         chosen = task.tracks if job.kind is JobKind.RECOVER else None
-        self._assemble_video(task, base)
         try:
             while True:
                 try:
+                    if not self._assemble_video(task, base):
+                        return None  # quitting: the recording stays "Not processed"
                     if fresh:
                         prepared = task.prepared
                         assert prepared is not None
@@ -2540,6 +2564,12 @@ class BarRuntime:
             self.state.error = _failure_text(e, failed)
             if prepared is not None and any(w.path.exists() for w in prepared.writers.values()):
                 self.state.last_result = prepared.base  # the recording is intact: it can be opened
+                if getattr(prepared, "screen", None) is not None and prepared.base.is_dir():
+                    from ..live.video import keep
+
+                    if prepared.run.video is None:
+                        _video_history(prepared)
+                    keep(prepared.base, prepared.run)  # its later processing assembles the video
         finally:
             with FILES_LOCK, self._lock:
                 self._prepared = self._session = None
@@ -2583,28 +2613,48 @@ class BarRuntime:
         prepared = self._prepared
         screen = getattr(prepared, "screen", None) if prepared is not None else None
         if screen is not None:
+            before = screen.offset
             screen.event(state, reason, offset)
+            if screen.offset is not None and screen.offset != before:
+                _keep_offset(prepared.base, screen.offset)
         if state == "failed":
             self._on_change()
 
-    def _assemble_video(self, task: _Task, base: Path) -> None:
+    def _assemble_video(self, task: _Task, base: Path) -> bool:
         """The first step of processing a recording with a screen.mov (just recorded, or left
         by a quit or a crash): video.mp4 with its sound, always here, wherever the text is made;
-        the card shows the step without a share. A failure is a remark, processing goes on."""
+        the card shows the step without a share. A failure is a remark, processing goes on.
+        "Stop processing" or another language kills ffmpeg and raises FinalizeCancelled as any
+        step does; quitting kills it too and returns False: processing ends without a trace."""
         from ..live import video
 
         if not video.pending(base):
-            return
+            return True
+
+        def stoppable(_fraction: float | None, _message: str) -> None:
+            if task.stop or self.quit_requested:
+                raise FinalizeCancelled
+
         job = task.job
         job.stage = _(video.ASSEMBLING)
+        self._no_assembly.clear()
         self._on_change()
         try:
-            video.assemble(base, task.prepared.run if task.prepared is not None else None)
+            video.assemble(
+                base, task.prepared.run if task.prepared is not None else None, stoppable
+            )
+        except FinalizeCancelled:
+            if not self.quit_requested:
+                raise
+            logger.info("quitting: the video of %s is assembled at its next processing", base)
+            return False
         except Exception:  # noqa: BLE001 - the recording and its sound stay as they are
             logger.exception("the video of %s was not assembled", base)
         finally:
             job.stage = ""
+            self._no_assembly.set()
             self._on_change()
+        return True
 
     # ── GUI timer ──────────────────────────────────────────────────────────────
 

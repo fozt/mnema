@@ -1732,23 +1732,31 @@ def test_process_part_replaces_full_recording(monkeypatch, tmp_path) -> None:
 
 
 def test_full_recording_with_a_video_is_not_trashed(monkeypatch, tmp_path) -> None:
-    """The checkbox is on but the full recording has the screen video: a part has none, so the
-    full one stays next to the part, and its notes say why."""
+    """The full recording has the screen video and a part has none: the window offers no
+    checkbox (even an answer carrying it keeps the full one), and a part asked to replace it
+    directly leaves the full one next to the part, its notes saying why."""
     from mnema.bar.range_pick import RangeAnswer
+    from mnema.live.recording_client import recover_on_node
 
     def answer(req):
         return RangeAnswer(start="0:00:30", end="0:01:30", title=req.name, replace=True)
 
-    rt, _platform, folder, lengths = _range_setup(monkeypatch, tmp_path, answer)
+    rt, platform, folder, lengths = _range_setup(monkeypatch, tmp_path, answer)
     (folder / "video.mp4").write_bytes(b"screen with sound")
     rt.handle("process_folder")
     rt.join(timeout=10)
 
+    assert platform.requests[0].can_replace is False
     assert lengths == [60.0, 60.0]
     assert not (tmp_path / "trash").exists() and (folder / "video.mp4").exists()
     part = tmp_path / "Созвон из архива (0.00.30–0.01.30)"
     assert (part / "transcript.txt").exists() and not (part / "video.mp4").exists()
-    assert "Полная запись оставлена: в ней видео" in _details(part)
+
+    result, _full = recover_on_node(
+        folder, rt._config(), None, start=10.0, end=20.0, replace_original=platform.trash
+    )
+    assert not (tmp_path / "trash").exists() and (folder / "video.mp4").exists()
+    assert "Полная запись оставлена: в ней видео" in _details(result.base)
 
 
 def test_process_whole_recording_with_own_title_and_errors(monkeypatch, tmp_path) -> None:

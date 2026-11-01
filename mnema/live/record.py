@@ -168,21 +168,23 @@ class ScreenRecorder:
         reason, stopped (the file is closed). A stopped nobody asked for: the user stopped the
         capture from the menu bar, the video simply ends there."""
         with self._lock:
-            if state == "started" and self._state == "starting":
-                self._state = "running"
-                if offset is not None:
+            if state == "started" and self._state in ("starting", "stopping"):
+                if self._state == "starting":
+                    self._state = "running"
+                if offset is not None:  # a first frame just before the stop keeps its shift too
                     lead = self._sent_at - self.origin if self.origin is not None else 0.0
                     self.offset = max(0.0, lead + offset)
             elif state == "failed":
                 logger.warning("screen video failed: %s", reason)
                 self.error = self.error or reason or "writer"
                 self._state = "done"
+                self._answer.set()
             elif state == "stopped":
                 if self._state in ("starting", "running"):
                     logger.info("the screen video was stopped in the app")
                     self.ended = True
                 self._state = "done"
-            self._answer.set()
+                self._answer.set()  # only now the file is closed: stop() waits for this
 
     def pause(self) -> None:
         if self.running:  # while starting too: the app keeps it for the first frame
