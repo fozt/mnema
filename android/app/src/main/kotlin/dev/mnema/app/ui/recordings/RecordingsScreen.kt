@@ -219,6 +219,7 @@ fun RecordingsScreen(graph: AppGraph, onOpen: (File) -> Unit, onDeleted: (Record
         model.delete(item.dir, forever, onDeleted = { onDeleted(item) }, onFailed = failed)
     }
     val move: (RecordingItem, String, Boolean) -> Unit = { item, target, create -> model.move(item.dir, target, create) }
+    val rename: (RecordingItem, String) -> Unit = model::rename
     val today = LocalDate.now(zone)
     RereadWhileShown(model.rereading)
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
@@ -277,7 +278,7 @@ fun RecordingsScreen(graph: AppGraph, onOpen: (File) -> Unit, onDeleted: (Record
                 if (newest != null) {
                     item(key = key(newest), contentType = "newest") {
                         RecordingActions(newest, MaterialTheme.shapes.extraLarge, syncing, trash, sections,
-                            onDelete = { forever, failed -> delete(newest, forever, failed) }, onMove = move) { actions, onMenu ->
+                            onDelete = { forever, failed -> delete(newest, forever, failed) }, onMove = move, onRename = rename) { actions, onMenu ->
                             NewestCard(newest, today, zone, sectionTag(newest, section), onClick = { onOpen(newest.dir) }, onLongClick = onMenu, modifier = actions)
                         }
                     }
@@ -286,7 +287,7 @@ fun RecordingsScreen(graph: AppGraph, onOpen: (File) -> Unit, onDeleted: (Record
                 itemsIndexed(rest, key = { _, item -> key(item) }, contentType = { _, _ -> "recording" }) { index, item ->
                     val shape = segmentShape(index, rest.size)
                     RecordingActions(item, shape, syncing, trash, sections,
-                        onDelete = { forever, failed -> delete(item, forever, failed) }, onMove = move) { actions, onMenu ->
+                        onDelete = { forever, failed -> delete(item, forever, failed) }, onMove = move, onRename = rename) { actions, onMenu ->
                         RecordingCard(item, today, zone, shape, sectionTag(item, section), onClick = { onOpen(item.dir) }, onLongClick = onMenu, modifier = actions)
                     }
                 }
@@ -298,7 +299,7 @@ fun RecordingsScreen(graph: AppGraph, onOpen: (File) -> Unit, onDeleted: (Record
 
 /**
  * Card actions in the list: a right-to-left swipe opens the same dialog as Delete on the recording screen; a long press opens
- * a menu with Move to section and Delete recording. A recording being recorded or processed is neither moved nor deleted.
+ * a menu with Rename, Move to section and Delete recording ([cardActions]), renaming by the recording screen's rule.
  */
 @Composable
 private fun RecordingActions(
@@ -309,6 +310,7 @@ private fun RecordingActions(
     sections: List<String>,
     onDelete: (forever: Boolean, onFailed: () -> Unit) -> Unit,
     onMove: (RecordingItem, String, Boolean) -> Unit,
+    onRename: (RecordingItem, String) -> Unit,
     content: @Composable (actions: Modifier, onMenu: () -> Unit) -> Unit,
 ) {
     val state = rememberSwipeToDismissBoxState()
@@ -316,15 +318,21 @@ private fun RecordingActions(
     var asking by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
     var moving by remember { mutableStateOf(false) }
+    var renaming by remember { mutableStateOf(false) }
     val deletable = canDelete(item)
-    val moveBlocked = moveBlocked(item)
+    val menuActions = cardActions(item)
+    val onAction: (DetailAction) -> Unit = { action ->
+        when (action) {
+            DetailAction.RENAME, DetailAction.TITLE -> renaming = true
+            DetailAction.MOVE -> moving = true
+            DetailAction.DELETE -> asking = true
+            else -> Unit
+        }
+    }
     val back = { scope.launch { state.reset() } }
     // the actions belong to the card itself: the screen reader focuses it, not the swipe wrapper
     val actions = Modifier.semantics {
-        customActions = listOfNotNull(
-            CustomAccessibilityAction(MOVE_TO_SECTION) { moving = true; true }.takeIf { moveBlocked == null },
-            CustomAccessibilityAction(DetailAction.DELETE.title) { asking = true; true }.takeIf { deletable },
-        )
+        customActions = menuActions.filter { it.enabled }.map { CustomAccessibilityAction(it.action.title) { onAction(it.action); true } }
     }
     SwipeToDismissBox(
         state = state,
@@ -336,10 +344,24 @@ private fun RecordingActions(
         Box {
             content(actions) { menu = true }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, shape = MaterialTheme.shapes.large) {
-                CardMenuItem(MOVE_TO_SECTION, moveBlocked) { menu = false; moving = true }
-                CardMenuItem(DetailAction.DELETE.title, null, enabled = deletable, danger = true) { menu = false; asking = true }
+                menuActions.forEach { entry ->
+                    CardMenuItem(entry.action.title, entry.blocked, entry.enabled, danger = entry.action == DetailAction.DELETE) {
+                        menu = false
+                        onAction(entry.action)
+                    }
+                }
             }
         }
+    }
+    if (renaming) {
+        RenameDialog(
+            current = currentTitle(item),
+            onSave = { title ->
+                renaming = false
+                onRename(item, title)
+            },
+            onDismiss = { renaming = false },
+        )
     }
     if (moving) {
         MoveToSectionDialog(
@@ -370,7 +392,7 @@ private fun RecordingActions(
 
 // an unavailable item says why, as in the recording screen's More menu
 @Composable
-private fun CardMenuItem(title: String, blocked: String?, enabled: Boolean = blocked == null, danger: Boolean = false, onClick: () -> Unit) {
+private fun CardMenuItem(title: String, blocked: String?, enabled: Boolean, danger: Boolean, onClick: () -> Unit) {
     DropdownMenuItem(
         text = {
             Column {

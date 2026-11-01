@@ -140,6 +140,14 @@ class RecordingsViewModel(
         }
     }
 
+    /** Rename from the card menu, by the same rule as on the recording screen; on failure the reason shows in the snackbar. */
+    fun rename(item: RecordingItem, title: String) {
+        if (!renames(item, title)) return
+        viewModelScope.launch {
+            if (store.rename(item.dir, title) == null) notice.value = store.failure.value ?: RENAME_FAILED
+        }
+    }
+
     /** Recordings vanished on the phone: delete them everywhere or restore them from the server. */
     fun resolveBulk(restore: Boolean) {
         val controller = sync ?: return
@@ -317,7 +325,7 @@ class RecordingViewModel(
     /** The Title dialog: empty means a name from the time; the same title changes nothing; a processing recording is named by its processing. */
     fun rename(title: String) {
         val detail = (state.value as? DetailState.Shown)?.detail ?: return
-        if (renameBlocked(detail.item) != null || title.trim() == currentTitle(detail)) return
+        if (!renames(detail.item, title)) return
         viewModelScope.launch {
             val target = store.rename(detail.item.dir, title)
             if (target == null) _failure.value = store.failure.value ?: RENAME_FAILED else follower.moved(target)
@@ -565,6 +573,19 @@ fun moveBlocked(item: RecordingItem): String? = when {
 /** No renaming while recording: a one-line caption. A processing recording gets a title, and processing names the folder. */
 fun renameBlocked(item: RecordingItem): String? = RENAME_AFTER.takeIf { item.recordingNow }
 
+/** The Title dialog changes something: not while recording, and not to the same title. */
+fun renames(item: RecordingItem, title: String): Boolean = renameBlocked(item) == null && title.trim() != currentTitle(item)
+
+/** One item of the card's long-press menu in the list; [blocked] says why it is unavailable. */
+data class CardAction(val action: DetailAction, val blocked: String? = null, val enabled: Boolean = blocked == null)
+
+/** The card's long-press menu, as on the desktop card: rename as on the recording screen, move to section, delete. */
+fun cardActions(item: RecordingItem): List<CardAction> = listOf(
+    CardAction(namingAction(item), renameBlocked(item)),
+    CardAction(DetailAction.MOVE, moveBlocked(item)),
+    CardAction(DetailAction.DELETE, enabled = canDelete(item)),
+)
+
 /** A processing recording gets a title that processing gives the folder at the end; others are renamed at once. */
 fun namingAction(item: RecordingItem): DetailAction =
     if (!item.recordingNow && isProcessing(item.state)) DetailAction.TITLE else DetailAction.RENAME
@@ -622,10 +643,14 @@ fun continuesFailedRun(detail: RecordingDetail, unchanged: Boolean, retrying: Bo
     retrying && unchanged && detail.retryContinues
 
 /** Title in the Title and Reprocess dialogs: the one set for running processing, else the recording's own; empty if untitled. */
-fun currentTitle(detail: RecordingDetail): String = detail.item.pendingTitle ?: shownTitle(detail)
+fun currentTitle(detail: RecordingDetail): String = currentTitle(detail.item)
+
+fun currentTitle(item: RecordingItem): String = item.pendingTitle ?: shownTitle(item)
 
 /** Title from the folder name; empty if untitled. */
-fun shownTitle(detail: RecordingDetail): String = if (detail.item.timeTitle) "" else detail.item.title
+fun shownTitle(detail: RecordingDetail): String = shownTitle(detail.item)
+
+fun shownTitle(item: RecordingItem): String = if (item.timeTitle) "" else item.title
 
 /** The node did not answer: Automatic and the saved choice under its id; engines, as on desktop, are known only from the node. */
 fun fallbackAsrChoices(selected: String? = null): List<AsrOption> = withSelected(listOf(AsrOption(AUTO_ASR, AUTO_TITLE)), selected)
