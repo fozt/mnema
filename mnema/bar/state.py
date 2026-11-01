@@ -37,7 +37,7 @@ SUMMARIZING = "Writing the summary and title…"  # the only step of a SUMMARIZE
 NO_SECTION = "No section"  # the recording lies in the library root
 MOVE_TO_SECTION = "Move to section"
 NEW_SECTION = "New section…"
-SOURCE_TITLES = {"mic": "Microphone", "system": "System audio"}
+SOURCE_TITLES = {"mic": "Microphone", "system": "System audio", "screen": "Screen"}
 
 
 def source_name(label: str) -> str:
@@ -117,6 +117,7 @@ class BarPrefs(BaseModel):
     recognition: Recognition = Recognition.MAC
     mic: bool = True
     system: bool = True
+    screen: bool = False  # the screen video too (Mac)
     summary: bool = True  # summary.txt of the whole recording, and the title from it
     asr: str = "auto"  # the engine within the place: auto | parakeet | "provider/model"
     summary_lang: str | None = None  # None — the language of the conversation

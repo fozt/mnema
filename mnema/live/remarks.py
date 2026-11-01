@@ -303,6 +303,53 @@ def recording_failed(reason: str) -> Remark:
     )
 
 
+# the screen video of the recording (Mac): why it is missing or cut short; the audio is intact.
+# reason → cause, effect, hint, short cause
+_NO_VIDEO = "The recording has no video"
+_VIDEO_FAILURES = {
+    "permission": (
+        "No permission to record the screen",
+        _NO_VIDEO,
+        "Allow Mnema to record the screen in System Settings, Privacy & Security, and restart "
+        "Mnema",
+        "No screen recording permission",
+    ),
+    "no_space": (
+        "Less than 2 GB of free disk space",
+        _NO_VIDEO,
+        "Free up disk space",
+        "Not enough disk space",
+    ),
+    "display_lost": (
+        "The recorded screen was disconnected",
+        "The video stops at that point",
+        "",
+        "Screen disconnected",
+    ),
+    "writer": (
+        "Screen recording failed",
+        "The video may be missing or incomplete",
+        "",
+        "Screen recording failed",
+    ),
+}
+
+
+def video_failed(reason: str) -> Remark:
+    """The screen video did not start or broke off (ScreenRecorder.error); the sound is kept."""
+    key = reason if reason in _VIDEO_FAILURES else "writer"
+    cause, effect, hint, short = _VIDEO_FAILURES[key]
+    return Remark(
+        step=Step.RECORD,
+        cause=_(cause),
+        effect=_(effect),
+        hint=_(hint) if hint else "",
+        short=_(short),
+        short_effect=_("no video"),
+        code=f"video_{key}",
+    )
+
+
 def node_asr_reason(error: Exception) -> str:
     """Why recognition failed: a cloud refusal in the user's words, otherwise only where it
     failed (the engine's text may point to a terminal)."""

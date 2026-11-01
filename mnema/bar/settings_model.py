@@ -323,10 +323,11 @@ def settings_model(
         symbol="mic",
         sections=[
             SettingsSection(
-                title=_("Audio sources"),
+                title=_("Sources") if env.mac else _("Audio sources"),
                 fields=[
                     _toggle(_("Microphone"), "toggle_mic", prefs.mic),
                     _toggle(_("System audio"), "toggle_system", prefs.system),
+                    *([_toggle(_("Screen"), "toggle_screen", prefs.screen)] if env.mac else []),
                 ],
             ),
             SettingsSection(title=_("Processing"), fields=processing),

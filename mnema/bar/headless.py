@@ -41,6 +41,7 @@ from .protocol import (
     NotifyMsg,
     QuitMsg,
     RangeAsk,
+    ScreenMsg,
     SettingsMsg,
     StateMsg,
     TitleAsk,
@@ -233,6 +234,11 @@ class ProtocolPlatform:
     def open_settings(self, tab: str) -> None:
         self.channel.send(SettingsMsg(tab=tab))
 
+    def screen(self, op: str, path: Path | None = None) -> None:
+        if self.channel.closed:
+            raise OSError("the app is gone")
+        self.channel.send(ScreenMsg.model_validate({"op": op, "path": str(path or "")}))
+
 
 def _keys(node: Any) -> set[str]:
     """Action keys of the panel model (buttons, items, cards), except disabled ones."""
@@ -358,6 +364,8 @@ class Engine:
             self._feed = None
         elif kind == "form_event":
             self.platform.form_event(msg)
+        elif kind == "screen_event":
+            rt.screen_event(msg.state, msg.reason, msg.offset)
         elif kind == "panel":
             self._open = msg.open
             if msg.open:
@@ -366,6 +374,7 @@ class Engine:
             rt.tick()
         elif kind == "eof":  # the app closed: cancel windows, save the recording
             self.platform.cancel_all()
+            rt.screen_event("stopped")  # no answer comes any more: its video closed with it
             rt.handle("quit_now")
         elif kind == "signal":  # logging out: no question
             rt.handle("quit_now")

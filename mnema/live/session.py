@@ -116,6 +116,12 @@ class Recorder(Protocol):
     def stop(self) -> None: ...
 
 
+class Screen(Recorder, Protocol):
+    """The screen video (record.ScreenRecorder): its failure is its own, the audio goes on."""
+
+    origin: float | None  # time.monotonic() of the audio start, set before start()
+
+
 class LiveSession:
     """Loop: read source blocks → feed/poll ASR → accumulate committed segments in a Track;
     at a sentence boundary translate (if set) and show; on stop drain and return the tracks.
@@ -135,14 +141,16 @@ class LiveSession:
         on_copy: Callable[[str], bool] | None = None,
         stop_after_silence: float = 0.0,
         on_started: Callable[[], None] | None = None,
+        screen: Screen | None = None,
     ) -> None:
         self._on_started = on_started
+        self._screen = screen
         self._sources = list(sources)
         self._make = transcriber_factory
         self._translator = translator
         self._dialog = dialog
         self._view = view
-        # several recorders: a WAV track per source plus an optional screen (ffmpeg)
+        # several recorders: a WAV track per source
         if recorder is None:
             self._recorders: list[Recorder] = []
         elif isinstance(recorder, Iterable):
@@ -212,16 +220,22 @@ class LiveSession:
 
         started_sources: list[AudioSource] = []
         started_recorders: list[Recorder] = []
+        screen_started = False
         try:
             # registered before start(): it may open a resource and fail on the next step
             for r in self._recorders:
                 started_recorders.append(r)
                 r.start()
+            audio_start = time.monotonic()  # the app's host time clock, not self._clock
             for s in self._sources:
                 started_sources.append(s)
                 s.start()
             if self._on_started is not None:
                 self._on_started()
+            if self._screen is not None:  # after the audio: the video waits for its first frame
+                self._screen.origin = audio_start
+                screen_started = True
+                self._screen.start()
             for name, tr in transcribers.items():  # warmup only after recording started
                 try:
                     start = getattr(tr, "start_warmup", None)
@@ -242,6 +256,11 @@ class LiveSession:
                     close()
             raise
         finally:
+            if screen_started and self._screen is not None:  # before the audio stops
+                try:
+                    self._screen.stop()
+                except Exception:  # noqa: BLE001 - the video never takes the audio with it
+                    _log.warning("live: the screen video did not stop", exc_info=True)
             stops: list[tuple[Callable[[], None], str]] = [
                 (s.stop, track_stopped(s.name)) for s in reversed(started_sources)
             ]

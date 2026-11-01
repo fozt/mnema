@@ -1150,3 +1150,65 @@ def test_session_failure_texts_are_english_in_english_ui() -> None:
     assert ("mic", marker, None) in view.committed
     assert ("mic", "⏹ Auto-stop: 1 min of silence") in auto.statuses
     assert not [t for _, t in auto.statuses if _cyrillic(t)]
+
+
+class _LoggedSource(FakeSource):
+    def __init__(self, name: str, nblocks: int, log: list[str]) -> None:
+        super().__init__(name, nblocks)
+        self._log = log
+
+    def start(self):
+        super().start()
+        self._log.append(f"start {self.name}")
+
+    def stop(self):
+        super().stop()
+        self._log.append(f"stop {self.name}")
+
+
+class _LoggedScreen:
+    """The screen video: started after the audio, stopped before it; its failure is its own."""
+
+    def __init__(self, log: list[str], error: str = "") -> None:
+        self._log = log
+        self.origin: float | None = None
+        self.error = ""
+        self._fail = error
+
+    def start(self):
+        self._log.append("start screen")
+        self.error = self._fail
+
+    def stop(self):
+        self._log.append("stop screen")
+
+
+def test_screen_starts_after_the_audio_and_stops_before_it() -> None:
+    log: list[str] = []
+    mic, system = _LoggedSource("mic", 2, log), _LoggedSource("system", 2, log)
+    screen = _LoggedScreen(log)
+    session = LiveSession(
+        [mic, system], lambda s: FakeTranscriber([]), recorder=FakeRecorder(), screen=screen
+    )
+    session.run()
+    assert log == [
+        "start mic",
+        "start system",
+        "start screen",
+        "stop screen",
+        "stop system",
+        "stop mic",
+    ]
+    assert screen.origin is not None  # the audio start, for the video offset
+
+
+def test_screen_failure_does_not_stop_the_audio() -> None:
+    """No permission to record the screen: the audio is read to its end, the recording is not
+    called incomplete."""
+    log: list[str] = []
+    mic = _LoggedSource("mic", 3, log)
+    session = LiveSession(
+        [mic], lambda s: FakeTranscriber([]), screen=_LoggedScreen(log, error="permission")
+    )
+    session.run()
+    assert mic._blocks == [] and session.recording_error is None
