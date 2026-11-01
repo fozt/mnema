@@ -77,20 +77,27 @@ def code_files(app: Path) -> list[str]:
     return [rel for rel, _path in _entries(app) if is_code(rel)]
 
 
-def runtime_key(app: Path) -> str:
-    """sha256 over the runtime: each file or link by its path, its type, the executable bits of a
+def runtime_files(app: Path) -> dict[str, str]:
+    """The runtime by file: each file or link by its path → its type, the executable bits of a
     file and the sha256 of its content, or the target of a link."""
-    digest = hashlib.sha256()
+    files = {}
     for rel, path in _entries(app):
         if is_code(rel):
             continue
         mode = path.lstat().st_mode
         if stat.S_ISLNK(mode):
-            entry = f"link\0\0{os.readlink(path)}"
+            files[rel] = f"link\0\0{os.readlink(path)}"
         elif stat.S_ISREG(mode):
-            entry = f"file\0{mode & 0o111:o}\0{_sha256(path)}"
+            files[rel] = f"file\0{mode & 0o111:o}\0{_sha256(path)}"
         else:
             raise ValueError(f"{rel}: neither a file nor a link")
+    return files
+
+
+def runtime_key(app: Path) -> str:
+    """sha256 over runtime_files, in path order."""
+    digest = hashlib.sha256()
+    for rel, entry in runtime_files(app).items():
         digest.update(os.fsencode(f"{rel}\0{entry}\n"))
     return digest.hexdigest()
 

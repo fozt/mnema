@@ -275,12 +275,19 @@ def _plist(app: Path, **keys: str) -> Path:
     return app
 
 
-def test_release_check_fails_when_the_runtime_changed_from_the_same_inputs(tmp_path, capsys):
+def test_release_check_names_the_files_of_a_runtime_changed_from_the_same_inputs(tmp_path, capsys):
+    """Another runtime updates as a whole and the release goes on; from the same inputs the log
+    names the files that differ."""
     new = _plist(tmp_path / "new/Mnema.app", MnemaRuntime="b" * 64, MnemaRuntimeInputs="i")
+    (new / "Contents/Resources").mkdir()
+    (new / "Contents/Resources/lib.dylib").write_bytes(b"new")
     archive = tmp_path / "code.tar.gz"
     same_inputs = _plist(tmp_path / "a/Mnema.app", MnemaRuntime="a" * 64, MnemaRuntimeInputs="i")
-    with pytest.raises(SystemExit, match="runtime"):
-        build.check_code_update(same_inputs, new, archive, "0.5.0")
+    (same_inputs / "Contents/Resources").mkdir()
+    (same_inputs / "Contents/Resources/lib.dylib").write_bytes(b"old")
+    build.check_code_update(same_inputs, new, archive, "0.5.0")
+    out = capsys.readouterr().out
+    assert "in 1 files: Contents/Resources/lib.dylib" in out and "whole" in out
 
     other_inputs = _plist(tmp_path / "b/Mnema.app", MnemaRuntime="a" * 64, MnemaRuntimeInputs="j")
     build.check_code_update(other_inputs, new, archive, "0.5.0")

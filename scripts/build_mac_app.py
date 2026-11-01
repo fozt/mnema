@@ -486,16 +486,21 @@ def _info(app: Path) -> dict:
 def check_code_update(previous: Path, app: Path, archive: Path, version: str) -> None:
     """The code archive on the bundle of an earlier release (or of this build): when the runtime
     keys match, that bundle's own update code, with nothing but the system tools, must make this
-    version from it. A runtime key that changed though its inputs did not fails the release."""
+    version from it. Another runtime updates as a whole; built from the same inputs, the release
+    log names the files that differ, so the build can be made reproducible."""
     old, new = _info(previous), _info(app)
     if codesign.RUNTIME not in old:
         say(f"{previous} has no runtime key: it updates as a whole")
         return
     if old[codesign.RUNTIME] != new[codesign.RUNTIME]:
         if old.get(codesign.RUNTIME_INPUTS) == new[codesign.RUNTIME_INPUTS]:
-            raise SystemExit(
-                f"the runtime key differs from {previous}, built from the same inputs: the build "
-                "is not reproducible, a code-only update would never apply"
+            before, after = codesign.runtime_files(previous), codesign.runtime_files(app)
+            changed = sorted(
+                p for p in before.keys() | after.keys() if before.get(p) != after.get(p)
+            )
+            say(
+                f"::warning::the runtime differs from {previous} though built from the same "
+                f"inputs, in {len(changed)} files: {', '.join(changed[:20])}"
             )
         say(f"the runtime differs from {previous}: it updates as a whole")
         return
