@@ -19,7 +19,8 @@ serve several people, each with their own devices, library and model.
 ## Features
 
 - **One-click call recording** from the macOS menu bar, the Linux top panel or an Android phone.
-  Your microphone and the other side of the call are kept as two separate tracks.
+  Your microphone and the other side of the call are kept as two separate tracks. On a Mac it
+  can also record the screen into one `video.mp4` with the sound.
 - **Local speech recognition** with Parakeet Ultra: 25 European languages, on the Neural Engine
   of your Mac or on the CPU of your server. No audio leaves your machines unless you choose cloud
   recognition (OpenAI), which is also the only place for the languages Parakeet doesn't know.
@@ -73,6 +74,16 @@ Requirements: Apple Silicon, macOS 14.2 or later.
    the model before saving. With a server connected, the model and its key are saved on the
    server, under your name; without one, on this Mac.
 4. Click *Start recording*. macOS asks for microphone and system audio access the first time.
+
+**Screen video.** Turn on *Screen* next to *Microphone* and *System audio* to record the screen
+the active window is on, together with the sound. macOS asks for screen recording access when you
+turn it on; after allowing it, quit and reopen Mnema. When the recording is processed, the folder
+gets one `video.mp4` with the sound. *Settings → Recording → Video quality*: 1080p (default, small
+text stays readable, up to about 1 GB per hour) or 720p (about half the size). Mnema's own windows
+never show in the video, in screen sharing or in screenshots. While the screen is recorded, macOS
+shows its recording icon in the menu bar; share a window rather than the whole screen in a call to
+keep it out of the share. The video stays on this Mac: it is not sent to a server and does not
+sync. *Delete audio and video of processed recordings…* removes it with the audio.
 
 The speech model (about 630 MB) is not in the app: Mnema downloads it once, when you turn on
 recognition *On this Mac* or make the first recording without it, and shows the progress. It
