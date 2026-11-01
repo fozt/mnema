@@ -221,7 +221,7 @@ fun RecordingsScreen(graph: AppGraph, onOpen: (File) -> Unit, onDeleted: (Record
     }
     val move: (RecordingItem, String, Boolean) -> Unit = { item, target, create -> model.move(item.dir, target, create) }
     val today = LocalDate.now(zone)
-    RefreshWhileShown(model::refresh)
+    RereadWhileShown(model.rereading)
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
 
     Scaffold(
@@ -441,6 +441,15 @@ internal fun RefreshWhileShown(refresh: () -> Unit) {
                 delay(REFRESH_MS)
             }
         }
+    }
+}
+
+/** [rereading] goes on while the screen is visible; the screen's model keeps when it last read, across visits. */
+@Composable
+internal fun RereadWhileShown(rereading: Rereading) {
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(lifecycle, rereading) {
+        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) { rereading.whileShown() }
     }
 }
 

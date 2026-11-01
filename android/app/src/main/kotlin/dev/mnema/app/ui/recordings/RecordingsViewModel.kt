@@ -43,7 +43,12 @@ import java.util.Locale
 import kotlin.math.roundToInt
 import kotlin.math.roundToLong
 import kotlin.coroutines.CoroutineContext
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.seconds
+import kotlin.time.TimeMark
+import kotlin.time.TimeSource
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -56,6 +61,7 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -66,7 +72,10 @@ class RecordingsViewModel(
     // the chosen server runs another Mnema version: which side to update, above the sync errors
     serverNotice: Flow<String?> = flowOf(null),
     private val compute: CoroutineContext = Dispatchers.Default,
+    clock: TimeSource = TimeSource.Monotonic,
 ) : ViewModel() {
+    /** The list is reread while shown; coming back from a recording does not reread it before it is due. */
+    val rereading = Rereading(REREAD_PERIOD, clock, read = false, reread = store::refresh)
     val query = MutableStateFlow("")
     // null means all recordings, the empty string means recordings in the root without a section.
     val section = MutableStateFlow<String?>(null)
@@ -87,8 +96,6 @@ class RecordingsViewModel(
     val cleanup = MutableStateFlow<CleanupDialog?>(null)
     val notice = MutableStateFlow<String?>(null)
     private var cleaning = false
-
-    fun refresh() = store.refresh()
 
     fun askCleanup() {
         if (cleaning) return
@@ -216,8 +223,13 @@ class RecordingViewModel(
     settings: Flow<Settings> = flowOf(Settings()),
     private val loadAsr: suspend (Settings) -> List<AsrOption> = { fallbackAsrChoices() },
     private val io: CoroutineContext = Dispatchers.IO,
+    clock: TimeSource = TimeSource.Monotonic,
 ) : ViewModel() {
-    private val follower = FolderFollower(root, File(handle.get<String>(FOLDER_ARG).orEmpty()), recording = handle[IDENTITY_ARG])
+    private val startFolder = File(handle.get<String>(FOLDER_ARG).orEmpty())
+    private val startId: String? = handle[IDENTITY_ARG]
+    // it reads the folder: built on the first load, off the main thread
+    private val follower by lazy { FolderFollower(root, startFolder, recording = startId) }
+    private val reloads = MutableStateFlow(0)
     private val _deleted = MutableStateFlow(false)
     private val _failure = MutableStateFlow<String?>(null)
     private val _opened = MutableStateFlow<File?>(null)
@@ -233,11 +245,12 @@ class RecordingViewModel(
     val opened: StateFlow<File?> = _opened.asStateFlow()
 
     @OptIn(ExperimentalCoroutinesApi::class)
-    val state: StateFlow<DetailState> = combine(store.items, settings) { _, current -> current }
+    val state: StateFlow<DetailState> = combine(store.items, settings, reloads) { _, current, _ -> current }
         .mapLatest { load(it) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), DetailState.Loading)
 
-    fun refresh() = store.refresh()
+    /** While shown it rereads only this recording: the helper and processing change its folder on their own. */
+    val rereading = Rereading(REREAD_PERIOD, clock, read = true) { reloads.update { it + 1 } }
 
     fun retry() = schedule(summaryOnly = (state.value as? DetailState.Shown)?.detail?.retrySummaryOnly == true)
 
@@ -350,6 +363,24 @@ class RecordingViewModel(
 }
 
 private const val STOP_TIMEOUT_MS = 5_000L
+private val REREAD_PERIOD = 5.seconds
+
+/**
+ * Rereads every [period] while its screen is shown ([whileShown]); showing the screen again does not restart the period, a
+ * reread comes when it is due. [read] — the screen has just been read, the first reread waits a period.
+ */
+class Rereading(private val period: Duration, private val clock: TimeSource, read: Boolean, private val reread: () -> Unit) {
+    private var last: TimeMark? = if (read) clock.markNow() else null
+
+    suspend fun whileShown(): Nothing {
+        while (true) {
+            last?.let { delay(period - it.elapsedNow()) }
+            reread()
+            last = clock.markNow()
+        }
+    }
+}
+
 private val DELETE_FAILED: String get() = tr("Could not delete the recording")
 private val NOT_ACCEPTED: String get() = tr("The recording cannot be processed: no audio")
 private val REPROCESS_FAILED: String get() = tr("Could not start processing")

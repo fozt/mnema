@@ -47,6 +47,8 @@ class FolderRecordingStore(
     private val io: CoroutineContext = Dispatchers.IO,
     private val trash: (File) -> Unit = { throw IOException(NO_TRASH) },
     private val busy: () -> Set<String> = { busyRecordings(root, recordingNow(), hasWork) },
+    // whether one recording is busy, for its screen: no walk of the library and no files lock (busyRecording)
+    private val busyFolder: (File) -> Boolean = { busyRecording(root, it, recordingNow(), hasWork) },
     private val changed: () -> Unit = {},
     private val prepare: suspend () -> Unit = {},
     // the folder texts were confirmed by the last sync with the selected server (SyncController.textsOnServer); null — no server selected
@@ -104,10 +106,10 @@ class FolderRecordingStore(
         publish()
     }
 
+    /** One recording's files only: a sync or processing holding the files lock does not hold up its screen. */
     override suspend fun detail(dir: File): RecordingDetail? = withContext(io) {
-        try { prepare() } catch (_: IOException) { /* the card is shown, file actions are refused */ }
         val safe = recordingDirectory(root, dir)?.takeIf { isLibraryRecord(root, it, knownSections()) } ?: return@withContext null
-        synchronized(filesLock) { ensureIdentity(safe) }
+        if (recordingId(safe) == null) synchronized(filesLock) { ensureIdentity(safe) }
         val item = item(safe) ?: return@withContext null
         checkTrash()
         val summary = read(File(dir, RecordingFolder.SUMMARY))?.let(::parseSummaryFile)
@@ -162,7 +164,7 @@ class FolderRecordingStore(
 
     /** The audio of one recording, by the same rule as the processed-audio cleanup. */
     override suspend fun clearAudio(dir: File, forever: Boolean): Boolean = mutate(dir) { safe ->
-        val record = cleanable(safe, busy(), textsOnServer()) ?: throw IOException(NOT_CLEANABLE)
+        val record = cleanable(safe, isBusy(safe), textsOnServer()) ?: throw IOException(NOT_CLEANABLE)
         val withTrash = checkTrash()
         soundFiles(record.dir).orEmpty().forEach { discard(it, forever, withTrash, trash) }
     }
@@ -174,7 +176,7 @@ class FolderRecordingStore(
             // one snapshot of the choice, so the list and the question about where texts stay refer to one server
             val onServer = textsOnServer()
             val active = busy()
-            AudioCleanup(libraryFolders(root, knownSections()).records.mapNotNull { cleanable(it, active, onServer) }, checkTrash(), onServer != null)
+            AudioCleanup(libraryFolders(root, knownSections()).records.mapNotNull { cleanable(it, isBusy(it, active), onServer) }, checkTrash(), onServer != null)
         } catch (e: IOException) {
             problem.value = e.message ?: CLEANUP_FAILED
             null
@@ -194,7 +196,7 @@ class FolderRecordingStore(
                 synchronized(filesLock) {
                     val active = busy()
                     cleanup.records.count { planned ->
-                        val current = recordingDirectory(root, planned.dir)?.let { cleanable(it, active, onServer) }
+                        val current = recordingDirectory(root, planned.dir)?.let { cleanable(it, isBusy(it, active), onServer) }
                         if (current == null || current.id != planned.id) return@count false
                         try {
                             soundFiles(current.dir).orEmpty().forEach { discard(it, !cleanup.trash, withTrash, trash) }
@@ -218,8 +220,8 @@ class FolderRecordingStore(
 
     // the desktop rule (fixture audio-cleanup-v1) for the cleanup and for one recording's audio: processed by history, the last
     // run, stopped ones included, finished, no new run going, with a selected server the texts are confirmed by sync; audio is plain files
-    private fun cleanable(dir: File, active: Set<String>, onServer: ((File) -> Boolean)?): CleanupRecord? {
-        if (isBusy(dir, active)) return null
+    private fun cleanable(dir: File, busy: Boolean, onServer: ((File) -> Boolean)?): CleanupRecord? {
+        if (busy) return null
         val state = item(dir)?.state
         if ((state != ProcessingState.Done && state !is ProcessingState.NoSummary) || !processed(Meta.read(dir))) return null
         val sound = soundFiles(dir)?.takeIf { it.isNotEmpty() } ?: return null
@@ -266,7 +268,7 @@ class FolderRecordingStore(
     }
 
     private fun canClearAudio(dir: File): Boolean = try {
-        cleanable(dir, busy(), textsOnServer()) != null
+        cleanable(dir, busyFolder(dir), textsOnServer()) != null
     } catch (_: IOException) { false }
 
     private fun publish() {

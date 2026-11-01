@@ -8,6 +8,7 @@ import dev.mnema.app.processing.ProcessState
 import dev.mnema.app.processing.ProcessStateFile
 import dev.mnema.app.processing.TrackState
 import dev.mnema.app.sync.NativeTrash
+import dev.mnema.app.sync.filesLock
 import dev.mnema.app.transcript.Meta
 import java.util.TimeZone
 import kotlinx.serialization.json.Json
@@ -25,6 +26,10 @@ import dev.mnema.app.ui.recordings.reportFiles
 import java.io.File
 import java.time.LocalDateTime
 import java.time.ZoneId
+import java.util.concurrent.Callable
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
@@ -516,6 +521,32 @@ class FolderRecordingStoreTest {
         assertEquals(60, store().byName().size)
         // it used to ask about every recording once per recording: 3600 WorkManager queries, seconds on a phone
         assertEquals(0, queries)
+    }
+
+    @Test fun aRecordingsScreenReadsOnlyItsFolderWhileASyncHoldsTheFilesLock() {
+        val opened = processedLibrary(60).first()
+        var queries = 0
+        working = { queries++; false }
+        // wired as in the app: a change checks the whole library under the lock
+        val store = FolderRecordingStore(root, CoroutineScope(Dispatchers.Unconfined), { recordingNow }, { working(it) }, Dispatchers.Unconfined,
+            busy = { busyRecordings(root, recordingNow, { working(it) }) })
+        val held = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val sync = Executors.newSingleThreadExecutor()
+        val screen = Executors.newSingleThreadExecutor()
+        try {
+            sync.submit { synchronized(filesLock) { held.countDown(); release.await() } }
+            held.await()
+            // a hang guard, not a measurement: the screen used to wait for the lock as long as the sync held it
+            val detail = screen.submit(Callable { runBlocking { store.detail(opened) } }).get(30, TimeUnit.SECONDS)!!
+            assertEquals("Суть.", detail.summary?.about)
+            // only its own finished work, not every recording the phone processed
+            assertEquals(1, queries)
+        } finally {
+            release.countDown()
+            sync.shutdown()
+            screen.shutdown()
+        }
     }
 
     @Test fun theFirstScanShowsWhatItReadSoFarAndALaterScanReplacesTheListOnlyWhenDone() {
