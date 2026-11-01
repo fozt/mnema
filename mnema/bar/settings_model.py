@@ -17,6 +17,7 @@ from .protocol import (
     Tone,
 )
 from .state import (
+    VIDEO_QUALITIES,
     BarPrefs,
     LocalModel,
     MenuEnv,
@@ -257,6 +258,18 @@ def _update_status(env: MenuEnv) -> SettingsField:
     return status
 
 
+def _screen_rows(prefs: BarPrefs) -> list[SettingsField]:
+    """The screen video on the Mac: the toggle and its quality, from the next recording."""
+    quality = [
+        Choice(key=f"video_quality:{value}", title=value, checked=prefs.video_quality == value)
+        for value in VIDEO_QUALITIES
+    ]
+    return [
+        _toggle(_("Screen"), "toggle_screen", prefs.screen),
+        _choice(_("Video quality"), quality, value=prefs.video_quality),
+    ]
+
+
 def settings_model(
     prefs: BarPrefs,
     env: MenuEnv,
@@ -327,7 +340,7 @@ def settings_model(
                 fields=[
                     _toggle(_("Microphone"), "toggle_mic", prefs.mic),
                     _toggle(_("System audio"), "toggle_system", prefs.system),
-                    *([_toggle(_("Screen"), "toggle_screen", prefs.screen)] if env.mac else []),
+                    *(_screen_rows(prefs) if env.mac else []),
                 ],
             ),
             SettingsSection(title=_("Processing"), fields=processing),

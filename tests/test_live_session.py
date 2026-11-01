@@ -1212,3 +1212,21 @@ def test_screen_failure_does_not_stop_the_audio() -> None:
     )
     session.run()
     assert mic._blocks == [] and session.recording_error is None
+
+
+class _BrokenScreen(_LoggedScreen):
+    def start(self):
+        super().start()
+        raise RuntimeError("the app protocol broke")
+
+
+def test_screen_start_error_does_not_stop_the_audio() -> None:
+    """The screen recorder itself raised at start: the audio is read to its end, the video
+    error is kept for the remark and the video is still stopped."""
+    log: list[str] = []
+    mic = _LoggedSource("mic", 3, log)
+    screen = _BrokenScreen(log)
+    session = LiveSession([mic], lambda s: FakeTranscriber([]), screen=screen)
+    session.run()
+    assert mic._blocks == [] and session.recording_error is None
+    assert screen.error == "writer" and log[-2:] == ["stop screen", "stop mic"]

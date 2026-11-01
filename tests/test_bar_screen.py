@@ -66,6 +66,8 @@ class _App:
             **(answers or {}),
         }
         self.calls: list[tuple[str, str, Path | None]] = []
+        self.qualities: list[str] = []  # of every start
+        self.frames = False  # start writes a screen.mov, as a capture with frames does
 
     def notify(self, title: str, message: str, path: Path | None) -> None:
         self.calls.append((title, message, path))
@@ -78,10 +80,13 @@ class _App:
     def confirm(self, title, message, ok, on_done, *, cancel="") -> None:
         on_done(True)
 
-    def screen(self, op: str, path: Path | None = None) -> None:
+    def screen(self, op: str, path: Path | None = None, *, quality: str = "1080p") -> None:
         self.log.append(f"{op} screen")
         if path is not None:
             self.paths.append(path)
+            self.qualities.append(quality)
+            if self.frames:
+                path.write_bytes(b"hevc frames")
         answer = self.answers.get(op)
         if answer is not None and self.rt is not None:
             self.rt.screen_event(*answer)
@@ -248,9 +253,42 @@ def test_settings_show_the_screen_with_the_sources_on_the_mac() -> None:
     prefs = BarPrefs(screen=True)
     mac = settings_model(prefs, MenuEnv(mac=True)).tabs[0].sections[0]
     linux = settings_model(prefs, MenuEnv()).tabs[0].sections[0]
-    assert mac.title == "Источники" and [f.key for f in mac.fields][-1] == "toggle_screen"
-    assert mac.fields[-1].checked is True
+    assert mac.title == "Источники" and [f.key for f in mac.fields][-2] == "toggle_screen"
+    assert mac.fields[-2].checked is True
     assert "toggle_screen" not in [f.key for f in linux.fields]
+    assert "Качество видео" not in [f.title for f in linux.fields]
+
+
+def test_video_quality_is_a_mac_setting_of_the_next_recording(mac, monkeypatch, tmp_path) -> None:
+    """«Качество видео» under the screen toggle: 1080p by default, 720p when chosen; remembered,
+    and the next recording's video starts at it. Linux has neither the row nor the setting."""
+    prefs = BarPrefs()
+    [row] = [
+        f
+        for f in settings_model(prefs, MenuEnv(mac=True)).tabs[0].sections[0].fields
+        if f.title == "Качество видео"
+    ]
+    assert row.value == "1080p" and row.enabled
+    assert [(c.key, c.title, c.checked) for c in row.choices] == [
+        ("video_quality:1080p", "1080p", True),
+        ("video_quality:720p", "720p", False),
+    ]
+    rt, app = mac()
+    rt.handle("video_quality:720p")
+    rt.handle("video_quality:4k")  # not a quality: the choice stays
+    assert load_prefs(tmp_path / "bar.json").video_quality == "720p"
+    _record(rt, app)
+    assert app.qualities == ["720p"]
+    [row] = [
+        f
+        for f in settings_model(rt.prefs, MenuEnv(mac=True)).tabs[0].sections[0].fields
+        if f.title == "Качество видео"
+    ]
+    assert row.value == "720p" and [c.checked for c in row.choices] == [False, True]
+
+    monkeypatch.setattr(base, "STANDALONE", False)
+    rt.handle("video_quality:1080p")
+    assert rt.prefs.video_quality == "720p"
 
 
 def test_engine_drives_the_app_recorder_over_the_protocol(mac, tmp_path) -> None:
@@ -358,3 +396,101 @@ def test_processing_again_tells_about_the_video_once_per_processing(mac, monkeyp
         ["video_permission"],
         ["video_permission"],
     ]
+
+
+@pytest.fixture
+def ffmpeg(monkeypatch):
+    """ffmpeg at its process boundary: it holds each assembly until the test lets it go, then
+    writes the output file (the last argument)."""
+    import subprocess
+
+    monkeypatch.setenv("MNEMA_FFMPEG", "/opt/ffmpeg")
+    calls: list[list[str]] = []
+    entered, go = threading.Event(), threading.Event()
+    real = subprocess.run
+
+    def run(cmd, **kwargs):
+        if not cmd or cmd[0] != "/opt/ffmpeg":
+            return real(cmd, **kwargs)
+        calls.append(cmd)
+        entered.set()
+        assert go.wait(timeout=10)
+        Path(cmd[-1]).write_bytes(b"mp4 with sound")
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    yield calls, entered, go
+    go.set()
+
+
+def test_the_video_is_assembled_as_the_first_step_of_processing(mac, ffmpeg) -> None:
+    """Stop ends the recording at once; the processing of the recording first assembles
+    video.mp4, the card says so without a share, and the history keeps the offset."""
+    from mnema.bar.state import step_line
+
+    calls, entered, go = ffmpeg
+    rt, app = mac()
+    app.frames = True
+    rt.handle("start")
+    assert _Source.reading.wait(timeout=10)
+    folder = rt.active_folder
+    assert folder is not None
+    rt.handle("stop")
+    assert entered.wait(timeout=10)
+    # the assembly is held, yet the recording is over: the panel can start a new one
+    deadline = time.monotonic() + 10
+    while rt.state.phase != Phase.IDLE:
+        assert time.monotonic() < deadline, "the recording waits for the video"
+        time.sleep(0.01)
+    [job] = rt.state.jobs
+    assert job.running and step_line(job) == "Собираю видео…"
+    go.set()
+    rt.join(timeout=20)
+    [cmd] = calls
+    assert float(cmd[cmd.index("-itsoffset") + 1]) >= 0.5  # the app's offset from the audio start
+    done = next(folder.parent.iterdir())
+    assert (done / "video.mp4").exists() and not (done / "screen.mov").exists()
+    run = _video(done)
+    assert run["video"]["error"] == "" and run["video"]["offset"] >= 0.5
+
+
+def test_a_screen_recording_left_by_quitting_is_assembled_when_processed(mac, ffmpeg, monkeypatch):
+    """Quitting mid-recording leaves screen.mov and does not wait for an assembly; "Process…"
+    on the next launch assembles it with the offset the recording left."""
+    calls, _entered, go = ffmpeg
+    go.set()
+    rt, app = mac()
+    app.frames = True
+    rt.handle("start")
+    assert _Source.reading.wait(timeout=10)
+    folder = rt.active_folder
+    assert folder is not None
+    rt.handle("quit")
+    rt.join(timeout=20)
+    assert rt.can_exit and calls == [] and (folder / "screen.mov").exists()
+    _processed_later(monkeypatch)
+    later, _app = mac()
+    later.recover(folder)
+    later.join(timeout=20)
+    [cmd] = calls
+    assert float(cmd[cmd.index("-itsoffset") + 1]) >= 0.5
+    assert (folder / "video.mp4").exists() and not (folder / "screen.mov").exists()
+    assert _video(folder)["video"]["error"] == ""
+
+
+def test_video_stopped_from_the_menu_bar_ends_it_without_a_remark(mac) -> None:
+    """The user stopped sharing with the system indicator: the app says stopped unasked; the
+    sound goes on to the stop, the screen row shows it off, the history keeps the offset and
+    has no video remark."""
+    rt, app = mac()
+
+    def stopped_in_the_app() -> None:
+        rt.screen_event("stopped")
+        rt.tick()
+        assert [m.muted for m in rt.state.meters if m.label == "screen"] == [True]
+
+    folder = _record(rt, app, then=stopped_in_the_app)
+    assert "stop screen" not in app.log and _frames(folder / "mic.wav") > 0
+    run = _video(folder)
+    assert run["video"]["error"] == "" and run["video"]["offset"] >= 0.5
+    assert not [n for n in run["notes"] if n["code"].startswith("video")]

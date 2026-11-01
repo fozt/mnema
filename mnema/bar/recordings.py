@@ -75,6 +75,7 @@ class CleanupPlan(BaseModel):
     records: int = 0
     bytes: int = 0
     reason: str = ""  # records == 0: why there is nothing to delete, as a notice
+    video: bool = False  # the screen video goes too: the question says "audio and video"
 
 
 AFTER_SYNC = "Audio can be deleted after syncing with the server"
@@ -391,13 +392,13 @@ def cleanup_plan(
             relative = card.path.relative_to(root).as_posix()
             if {card.id, str(card.path), relative} & busy():
                 continue
-            sizes = [
-                f.stat().st_size for f in card.path.iterdir() if _cleaned(f.name) and f.is_file()
-            ]
+            files = [f for f in card.path.iterdir() if _cleaned(f.name) and f.is_file()]
+            sizes = [f.stat().st_size for f in files]
         except (OSError, ValueError):
             continue
         plan.records += 1
         plan.bytes += sum(sizes)
+        plan.video = plan.video or any(f.name in VIDEOS for f in files)
     return plan
 
 

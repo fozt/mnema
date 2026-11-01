@@ -13,6 +13,7 @@ import threading
 from collections.abc import Iterator, Mapping, Sequence
 from enum import StrEnum
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -38,6 +39,8 @@ NO_SECTION = "No section"  # the recording lies in the library root
 MOVE_TO_SECTION = "Move to section"
 NEW_SECTION = "New section…"
 SOURCE_TITLES = {"mic": "Microphone", "system": "System audio", "screen": "Screen"}
+VideoQuality = Literal["720p", "1080p"]
+VIDEO_QUALITIES: tuple[VideoQuality, ...] = ("1080p", "720p")  # the screen video, best first
 
 
 def source_name(label: str) -> str:
@@ -118,6 +121,7 @@ class BarPrefs(BaseModel):
     mic: bool = True
     system: bool = True
     screen: bool = False  # the screen video too (Mac)
+    video_quality: VideoQuality = "1080p"  # the screen video from the next recording
     summary: bool = True  # summary.txt of the whole recording, and the title from it
     asr: str = "auto"  # the engine within the place: auto | parakeet | "provider/model"
     summary_lang: str | None = None  # None — the language of the conversation

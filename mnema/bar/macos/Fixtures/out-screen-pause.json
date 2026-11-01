@@ -1,5 +1,6 @@
 {
   "type": "screen",
   "op": "pause",
-  "path": ""
+  "path": "",
+  "quality": "1080p"
 }

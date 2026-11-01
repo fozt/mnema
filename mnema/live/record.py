@@ -20,14 +20,10 @@ logger = logging.getLogger(__name__)
 SCREEN_FILE = "screen.mov"  # the app's video while recording
 VIDEO_FILE = "video.mp4"  # the video with the recording's sound
 SCREEN_MIN_FREE = 2 * 2**30  # less free space: no video, the audio keeps the disk
-SCREEN_START_WAIT = 10.0  # seconds for the app to report the first frame
 SCREEN_STOP_WAIT = 30.0  # seconds for the app to finish the file
 
 
 _WAV_LIMIT = 0xFFFFFFFF - 44 - 2**20  # data length limit of the WAV header, with a margin
-
-SCREEN_FILE = "screen.mov"  # the screen while recording (the Mac app writes it)
-VIDEO_FILE = "video.mp4"  # the screen with the sound, assembled after the recording
 
 
 class WavTrackWriter:
@@ -126,7 +122,8 @@ class ScreenRecorder:
     (ScreenCaptureKit); this side starts, pauses and stops it through the app protocol: send(op,
     path) is Platform.screen, the app's answers come to event(). The Recorder contract of the
     session; a failure never stops the audio: error holds its reason (permission, no_space,
-    display_lost, writer) for the remark.
+    display_lost, writer) for the remark. start() does not wait for the app: a stop pressed while
+    the video is starting stops it at once; the app reports a capture without frames itself.
     """
 
     def __init__(
@@ -134,21 +131,19 @@ class ScreenRecorder:
         path: Path,
         send: Callable[[str, Path | None], None],
         *,
-        start_wait: float = SCREEN_START_WAIT,
         stop_wait: float = SCREEN_STOP_WAIT,
     ) -> None:
         self.path = Path(path)
         self._send = send
-        self._start_wait = start_wait
         self._stop_wait = stop_wait
         self.origin: float | None = None  # time.monotonic() of the audio start, set by the session
         self.offset: float | None = None  # seconds from the audio start to the first frame
         self.error = ""
+        self.ended = False  # the user stopped it from the menu bar indicator: no failure
         self._lock = threading.Lock()
         self._answer = threading.Event()
-        self._state = "idle"  # idle | starting | running | stopping | lost | done
+        self._state = "idle"  # idle | starting | running | stopping | done
         self._sent_at = 0.0
-        self._paused = False  # asked while the video was starting: sent once it runs
 
     @property
     def running(self) -> bool:
@@ -165,22 +160,13 @@ class ScreenRecorder:
             return
         with self._lock:
             self._state = "starting"
-            self._answer.clear()
             self._sent_at = time.monotonic()  # the app counts offset from the start it got
-        if not self._tell("start", self.path):
-            return
-        if not self._answer.wait(self._start_wait):
-            logger.warning("the app did not start the screen video")
-            with self._lock:
-                self.error = self.error or "writer"
-                if self._state == "starting":
-                    self._state = "lost"  # it may still start: stop tells it anyway
-        elif self._paused and self._state == "running":
-            self._tell("pause")
+        self._tell("start", self.path)
 
     def event(self, state: str, reason: str = "", offset: float | None = None) -> None:
         """The app's answer: started (offset — from its start to the first frame), failed with a
-        reason, stopped (the file is closed)."""
+        reason, stopped (the file is closed). A stopped nobody asked for: the user stopped the
+        capture from the menu bar, the video simply ends there."""
         with self._lock:
             if state == "started" and self._state == "starting":
                 self._state = "running"
@@ -192,17 +178,18 @@ class ScreenRecorder:
                 self.error = self.error or reason or "writer"
                 self._state = "done"
             elif state == "stopped":
+                if self._state in ("starting", "running"):
+                    logger.info("the screen video was stopped in the app")
+                    self.ended = True
                 self._state = "done"
             self._answer.set()
 
     def pause(self) -> None:
-        self._paused = True
-        if self._state == "running":
+        if self.running:  # while starting too: the app keeps it for the first frame
             self._tell("pause")
 
     def resume(self) -> None:
-        self._paused = False
-        if self._state == "running":
+        if self.running:
             self._tell("resume")
 
     def stop(self) -> None:
@@ -211,10 +198,6 @@ class ScreenRecorder:
             if state in ("starting", "running"):
                 self._state = "stopping"
                 self._answer.clear()
-            elif state == "lost":
-                self._state = "done"
-        if state == "lost":
-            self._tell("stop")  # a late start closes its file; no answer is awaited
         if state not in ("starting", "running") or not self._tell("stop"):
             return
         if not self._answer.wait(self._stop_wait):

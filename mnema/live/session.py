@@ -120,6 +120,7 @@ class Screen(Recorder, Protocol):
     """The screen video (record.ScreenRecorder): its failure is its own, the audio goes on."""
 
     origin: float | None  # time.monotonic() of the audio start, set before start()
+    error: str  # why there is no full video (record.ScreenRecorder reasons), "" — none
 
 
 class LiveSession:
@@ -232,10 +233,14 @@ class LiveSession:
                 s.start()
             if self._on_started is not None:
                 self._on_started()
-            if self._screen is not None:  # after the audio: the video waits for its first frame
+            if self._screen is not None:  # after the audio; it does not wait for the first frame
                 self._screen.origin = audio_start
                 screen_started = True
-                self._screen.start()
+                try:
+                    self._screen.start()
+                except Exception:  # noqa: BLE001 - the video never takes the audio with it
+                    _log.warning("live: the screen video did not start", exc_info=True)
+                    self._screen.error = self._screen.error or "writer"
             for name, tr in transcribers.items():  # warmup only after recording started
                 try:
                     start = getattr(tr, "start_warmup", None)

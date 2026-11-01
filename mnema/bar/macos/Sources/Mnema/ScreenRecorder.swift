@@ -19,24 +19,36 @@ struct DisplayInfo: Equatable {
     var frame: CGRect  // CGDisplayBounds: the same coordinates as the window bounds
 }
 
+/// How a capture stream ended by itself.
+enum StreamEnd: Equatable {
+    case byUser  // stopped from the menu bar indicator: the video simply ends there
+    case failed(ScreenFailure)
+}
+
 /// The rules of the screen video: frame size, encoder, the display to capture, failure codes.
 enum ScreenCapture {
-    static let maxWidth = 1920
     static let frameRate: Int32 = 15
-    static let bitRate = 2_000_000
     static let keyFrameInterval: Double = 10  // seconds
     static let fragmentInterval = CMTime(value: 10, timescale: 1)  // a broken-off file plays up to here
+    static let firstFrameWait: Double = 5  // seconds of unpaused capture without a frame: a failure
 
-    /// At most 1920 pixels wide, the screen's proportions, even sides (HEVC 4:2:0).
-    static func frameSize(pixelWidth: Int, pixelHeight: Int) -> FrameSize {
-        let width = min(maxWidth, pixelWidth) / 2 * 2
+    /// The widest frame of a quality: 1280 or 1920 pixels.
+    static func maxWidth(_ quality: VideoQuality) -> Int { quality == .hd ? 1280 : 1920 }
+
+    /// The average bitrate of a quality: 1.2 or 2 Mbit/s.
+    static func bitRate(_ quality: VideoQuality) -> Int { quality == .hd ? 1_200_000 : 2_000_000 }
+
+    /// At most the quality's width (and the screen's own), the screen's proportions, even sides
+    /// (HEVC 4:2:0).
+    static func frameSize(pixelWidth: Int, pixelHeight: Int, quality: VideoQuality = .fullHD) -> FrameSize {
+        let width = min(maxWidth(quality), pixelWidth) / 2 * 2
         let height = Double(pixelHeight) * Double(width) / Double(max(pixelWidth, 1))
         return FrameSize(width: width, height: 2 * Int((height / 2).rounded()))
     }
 
     /// AVAssetWriterInput settings: hardware HEVC at an average bitrate, a key frame at least every
     /// 10 s, no frame reordering, BT.709 like the captured frames.
-    static func outputSettings(_ size: FrameSize) -> [String: Any] {
+    static func outputSettings(_ size: FrameSize, quality: VideoQuality = .fullHD) -> [String: Any] {
         [
             AVVideoCodecKey: AVVideoCodecType.hevc,
             AVVideoWidthKey: size.width,
@@ -47,7 +59,7 @@ enum ScreenCapture {
                 AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_709_2,
             ],
             AVVideoCompressionPropertiesKey: [
-                AVVideoAverageBitRateKey: bitRate,
+                AVVideoAverageBitRateKey: bitRate(quality),
                 AVVideoExpectedSourceFrameRateKey: Int(frameRate),
                 AVVideoMaxKeyFrameIntervalDurationKey: keyFrameInterval,
                 AVVideoAllowFrameReorderingKey: false,
@@ -86,6 +98,16 @@ enum ScreenCapture {
         return stream && whileRecording ? .displayLost : .writer
     }
 
+    /// A stream that stopped by itself: the user stopped sharing from the menu bar (no failure),
+    /// otherwise a failure; before the first frame it is the writer's, after it the display.
+    static func end(of error: Error, afterFirstFrame: Bool) -> StreamEnd {
+        let error = error as NSError
+        if error.domain == SCStreamErrorDomain && error.code == SCStreamError.Code.userStopped.rawValue {
+            return .byUser
+        }
+        return .failed(failure(error, whileRecording: afterFirstFrame))
+    }
+
     private static func outOfSpace(_ error: NSError) -> Bool {
         switch (error.domain, error.code) {
         case (AVFoundationErrorDomain, AVError.Code.diskFull.rawValue), (NSPOSIXErrorDomain, Int(ENOSPC)),
@@ -121,6 +143,17 @@ struct PauseTimeline {
         return time - shift
     }
 
+    /// Capture time from start to time without the pauses in it: the wait for the first frame
+    /// does not run while paused.
+    func active(from start: CMTime, to time: CMTime) -> CMTime {
+        let paused = pauses.reduce(CMTime.zero) { sum, pause in
+            let from = max(pause.start, start)
+            let to = min(pause.end ?? time, time)
+            return to > from ? sum + (to - from) : sum
+        }
+        return max(.zero, time - start - paused)
+    }
+
     /// The end of the video at a stop; stopped while paused — where that pause began.
     func end(at time: CMTime) -> CMTime {
         let open = pauses.last.flatMap { $0.end == nil ? $0.start : nil }
@@ -144,6 +177,9 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
     private let queue = DispatchQueue(label: "mnema.screen", qos: .userInitiated)
     private var phase = Phase.idle
     private var generation = 0  // a start; late answers of an earlier one are ignored
+    private var opening = false  // an open() is in flight: it may still create or remove the file
+    private var pending: (() -> Void)?  // a start waiting for that open() to settle
+    private var byUser = false  // the capture was stopped from the menu bar: stopped is sent unasked
     private var silent = false  // the engine is gone: no events
     private var answerStop = false  // the engine sent stop and waits for stopped
     private var stream: SCStream?
@@ -162,26 +198,15 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
     var active: Bool { queue.sync { phase != .idle } }
 
     /// Call on the main thread: the front window is read here, at the start.
-    func start(path: String) {
+    func start(path: String, quality: VideoQuality = .fullHD) {
         let at = Self.now()
         let window = Self.frontWindow()
         queue.async { [self] in
             silent = false
             guard phase == .idle else { return emit(.failed(.writer)) }
-            guard CGPreflightScreenCaptureAccess() else {
-                if !asked {
-                    asked = true
-                    DispatchQueue.main.async { _ = CGRequestScreenCaptureAccess() }
-                }
-                return emit(.failed(.permission))
-            }
-            generation += 1
-            phase = .starting
-            timeline = PauseTimeline()
-            startedAt = at
-            (sessionStart, lastFrame) = (.invalid, .invalid)
-            let started = generation
-            Task { await open(URL(fileURLWithPath: path), window: window, generation: started) }
+            let begin = { [self] in self.begin(path: path, quality: quality, window: window, at: at) }
+            // a capture stopped while starting: its open() still owns the file at this path
+            if opening { pending = begin } else { begin() }
         }
     }
 
@@ -203,7 +228,9 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
             if report { answerStop = true } else { silent = true }
             if let then { waiters.append(then) }
             switch phase {
-            case .idle: finished(nil)
+            case .idle:
+                pending = nil  // a start still waiting is dropped with the stop
+                finished(nil)
             case .starting, .running: close(at: at, failure: nil)
             case .closing: break
             }
@@ -212,8 +239,36 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
 
     // ── on the queue ──────────────────────────────────────────────────────────
 
-    private func open(_ url: URL, window: CGRect?, generation started: Int) async {
+    private func begin(path: String, quality: VideoQuality, window: CGRect?, at: CMTime) {
+        guard CGPreflightScreenCaptureAccess() else {
+            if !asked {
+                asked = true
+                DispatchQueue.main.async { _ = CGRequestScreenCaptureAccess() }
+            }
+            return emit(.failed(.permission))
+        }
+        generation += 1
+        phase = .starting
+        opening = true
+        byUser = false
+        timeline = PauseTimeline()
+        startedAt = at
+        (sessionStart, lastFrame) = (.invalid, .invalid)
+        let started = generation
+        Task { await open(URL(fileURLWithPath: path), quality: quality, window: window, generation: started) }
+    }
+
+    /// The open() of a start is over: a start that waited for it goes now.
+    private func settled() {
+        opening = false
+        let next = pending
+        pending = nil
+        next?()
+    }
+
+    private func open(_ url: URL, quality: VideoQuality, window: CGRect?, generation started: Int) async {
         var opened: AVAssetWriter?  // until the queue takes it, cancelled here
+        defer { queue.async { [self] in settled() } }  // after cancelWriting removed its file
         do {
             let content = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: true)
             let displays = content.displays.map { DisplayInfo(id: $0.displayID, frame: CGDisplayBounds($0.displayID)) }
@@ -224,12 +279,13 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
             let filter = SCContentFilter(display: display, excludingApplications: own, exceptingWindows: [])
             let mode = CGDisplayCopyDisplayMode(display.displayID)
             let size = ScreenCapture.frameSize(
-                pixelWidth: mode?.pixelWidth ?? display.width, pixelHeight: mode?.pixelHeight ?? display.height)
+                pixelWidth: mode?.pixelWidth ?? display.width, pixelHeight: mode?.pixelHeight ?? display.height,
+                quality: quality)
 
             let writer = try AVAssetWriter(outputURL: url, fileType: .mov)
             writer.movieFragmentInterval = ScreenCapture.fragmentInterval
             writer.initialMovieFragmentInterval = CMTime(value: 2, timescale: 1)
-            let input = AVAssetWriterInput(mediaType: .video, outputSettings: ScreenCapture.outputSettings(size))
+            let input = AVAssetWriterInput(mediaType: .video, outputSettings: ScreenCapture.outputSettings(size, quality: quality))
             input.expectsMediaDataInRealTime = true
             guard writer.canAdd(input) else { throw writer.error ?? CocoaError(.fileWriteUnknown) }
             writer.add(input)
@@ -247,12 +303,12 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
             opened = nil
             guard current else { return writer.cancelWriting() }
             try await stream.startCapture()
-            queue.asyncAfter(deadline: .now() + 5) { [self] in
-                // no frame at all (a sleeping display): the engine is not left waiting
-                if generation == started, phase == .running, !lastFrame.isValid {
-                    close(at: Self.now(), failure: .writer)
-                }
+            let capturing = queue.sync { generation == started && phase == .running }
+            guard capturing else {  // stopped while it was starting
+                try? await stream.stopCapture()
+                return
             }
+            queue.async { [self] in watch(started, since: Self.now()) }
         } catch {
             NSLog("Mnema: screen capture did not start: %@", "\(error)")
             opened?.cancelWriting()  // also removes the file
@@ -260,6 +316,19 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
                 if generation == started, phase == .starting || phase == .running {
                     close(at: Self.now(), failure: ScreenCapture.failure(error, whileRecording: false))
                 }
+            }
+        }
+    }
+
+    /// No frame at all (a sleeping display): the engine is not left waiting. Paused time does not
+    /// count, since a pause writes no frames.
+    private func watch(_ started: Int, since: CMTime) {
+        queue.asyncAfter(deadline: .now() + 1) { [self] in
+            guard generation == started, phase == .running, !lastFrame.isValid else { return }
+            if timeline.active(from: since, to: Self.now()).seconds >= ScreenCapture.firstFrameWait {
+                close(at: Self.now(), failure: .writer)
+            } else {
+                watch(started, since: since)
             }
         }
     }
@@ -318,8 +387,13 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
     func stream(_ stream: SCStream, didStopWithError error: Error) {
         NSLog("Mnema: screen capture stopped: %@", "\(error)")
         queue.async { [self] in
-            if stream === self.stream, phase == .running {
-                close(at: Self.now(), failure: ScreenCapture.failure(error, whileRecording: true))
+            guard stream === self.stream, phase == .running else { return }
+            switch ScreenCapture.end(of: error, afterFirstFrame: lastFrame.isValid) {
+            case .byUser:
+                byUser = true
+                close(at: Self.now(), failure: nil)
+            case .failed(let failure):
+                close(at: Self.now(), failure: failure)
             }
         }
     }
@@ -348,8 +422,8 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
         phase = .idle
         (stream, writer, input) = (nil, nil, nil)
         if let failure { emit(.failed(failure)) }
-        if answerStop { emit(.stopped) }
-        answerStop = false
+        if answerStop || byUser { emit(.stopped) }  // stopped from the menu bar: the engine is told
+        (answerStop, byUser) = (false, false)
         let done = waiters
         waiters = []
         DispatchQueue.main.async { done.forEach { $0() } }

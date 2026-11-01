@@ -289,6 +289,12 @@ enum ScreenOp: String, Codable, Hashable {
     case start, pause, resume, stop
 }
 
+/// ScreenMsg.quality: the frame width and bitrate of the screen video (ScreenCapture).
+enum VideoQuality: String, Codable, Hashable {
+    case hd = "720p"
+    case fullHD = "1080p"
+}
+
 /// ScreenEventMsg.reason: why the screen video did not start or broke off.
 enum ScreenFailure: String, Codable, Hashable {
     case permission
@@ -311,10 +317,10 @@ enum Outgoing: Decodable {
     case form(id: Int, ask: FormAsk?)  // nil closes the window (saved)
     case notify(NotifyMsg)
     case settings(tab: String)  // open the settings window on a tab
-    case screen(op: ScreenOp, path: String)  // path: screen.mov, only with start
+    case screen(op: ScreenOp, path: String, quality: VideoQuality)  // path: screen.mov, only with start
     case quit
 
-    private enum Keys: String, CodingKey { case type, panel, id, ask, tab, op, path }
+    private enum Keys: String, CodingKey { case type, panel, id, ask, tab, op, path, quality }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: Keys.self)
@@ -328,7 +334,9 @@ enum Outgoing: Decodable {
         case "settings": self = .settings(tab: try c.decode(String.self, forKey: .tab))
         case "screen":
             self = .screen(
-                op: try c.decode(ScreenOp.self, forKey: .op), path: try c.decodeIfPresent(String.self, forKey: .path) ?? "")
+                op: try c.decode(ScreenOp.self, forKey: .op),
+                path: try c.decodeIfPresent(String.self, forKey: .path) ?? "",
+                quality: try c.decodeIfPresent(VideoQuality.self, forKey: .quality) ?? .fullHD)
         case "quit": self = .quit
         default:
             throw DecodingError.dataCorruptedError(
@@ -426,7 +434,7 @@ enum Incoming: Encodable, Hashable {
 
 enum Wire {
     /// = protocol.VERSION; a newer engine (updated without `mnema-bar install`) shows App is out of date.
-    static let version = 1
+    static let version = 2
 
     static let decoder: JSONDecoder = {
         let d = JSONDecoder()

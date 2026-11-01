@@ -349,6 +349,7 @@ class ScreenMsg(BaseModel):
     type: Literal["screen"] = "screen"
     op: Literal["start", "pause", "resume", "stop"]
     path: str = ""  # start only: the absolute path of screen.mov
+    quality: Literal["720p", "1080p"] = "1080p"  # start only: frame width and bitrate
 
 
 class QuitMsg(BaseModel):
@@ -471,6 +472,15 @@ def _settings_sample(*, idle: bool = True, update: SettingsField = _UPDATE_FOUND
                                 checked=True,
                             ),
                             f(kind=FieldKind.TOGGLE, title="Экран", key="toggle_screen"),
+                            f(
+                                kind=FieldKind.CHOICE,
+                                title="Качество видео",
+                                value="1080p",
+                                choices=[
+                                    c(key="video_quality:1080p", title="1080p", checked=True),
+                                    c(key="video_quality:720p", title="720p"),
+                                ],
+                            ),
                         ],
                     ),
                     SettingsSection(
@@ -1099,6 +1109,9 @@ def _samples() -> dict[str, BaseModel]:
         ),
         "out-settings": SettingsMsg(tab="server"),
         "out-screen-start": ScreenMsg(op="start", path=f"{_HOME}/2026-09-30_10-05/screen.mov"),
+        "out-screen-start-720p": ScreenMsg(
+            op="start", path=f"{_HOME}/2026-09-30_10-05/screen.mov", quality="720p"
+        ),
         "out-screen-pause": ScreenMsg(op="pause"),
         "out-screen-stop": ScreenMsg(op="stop"),
         "out-quit": QuitMsg(),
