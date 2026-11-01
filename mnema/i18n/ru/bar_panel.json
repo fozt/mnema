@@ -40,6 +40,7 @@
   "Processing: {name} · {n} min": "Обработка: {name} · {n} мин",
   "Process…": "Обработать…",
   "Queued": "В очереди",
+  "Permission needed": "Нужно разрешение",
   "Queued: {n}": "В очереди: {n}",
   "Quit Mnema": "Завершить Mnema",
   "Recording in progress": "Идёт запись",

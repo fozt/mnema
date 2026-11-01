@@ -6,11 +6,13 @@ and the recording thread are real."""
 from __future__ import annotations
 
 import json
+import shutil
 import sys
 import threading
 import time
 import types
 import wave
+from collections import namedtuple
 from pathlib import Path
 
 import pytest
@@ -22,6 +24,8 @@ from mnema.bar.state import BarPrefs, MenuEnv, Phase, load_prefs
 from mnema.core import base
 from mnema.live import meta
 from mnema.live.models import LiveResult
+
+_Usage = namedtuple("_Usage", "total used free")
 
 
 class _Source:
@@ -102,6 +106,8 @@ def mac(monkeypatch, tmp_path):
     monkeypatch.delenv("MNEMA_RUNNER", raising=False)
     monkeypatch.setenv("MNEMA_LIVE_DIR", str(tmp_path / "notes"))
     monkeypatch.setitem(sys.modules, "sounddevice", types.SimpleNamespace())
+    # the disk has room for a video whatever the test machine's disk holds
+    monkeypatch.setattr(shutil, "disk_usage", lambda p: _Usage(2**40, 0, 2**40))
     log: list[str] = []
     monkeypatch.setattr(_Source, "reading", threading.Event())
     monkeypatch.setattr(
@@ -201,11 +207,7 @@ def test_no_permission_keeps_the_sound_and_leaves_a_remark(mac) -> None:
 
 
 def test_little_free_space_starts_no_video(mac, monkeypatch) -> None:
-    import shutil
-    from collections import namedtuple
-
-    usage = namedtuple("usage", "total used free")
-    monkeypatch.setattr(shutil, "disk_usage", lambda p: usage(2**40, 2**40 - 2**30, 2**30))
+    monkeypatch.setattr(shutil, "disk_usage", lambda p: _Usage(2**40, 2**40 - 2**30, 2**30))
     rt, app = mac()
     folder = _record(rt, app)
     assert not [e for e in app.log if e.endswith("screen")]
@@ -401,25 +403,56 @@ def test_processing_again_tells_about_the_video_once_per_processing(mac, monkeyp
 @pytest.fixture
 def ffmpeg(monkeypatch):
     """ffmpeg at its process boundary: it holds each assembly until the test lets it go, then
-    writes the output file (the last argument)."""
+    writes the output file (the last argument); killed, it stops with a half-written file.
+    Returns the commands, "entered", "go" and the commands that were killed."""
     import subprocess
 
     monkeypatch.setenv("MNEMA_FFMPEG", "/opt/ffmpeg")
     calls: list[list[str]] = []
+    killed: list[list[str]] = []
     entered, go = threading.Event(), threading.Event()
-    real = subprocess.run
+    real = subprocess.Popen
 
-    def run(cmd, **kwargs):
-        if not cmd or cmd[0] != "/opt/ffmpeg":
-            return real(cmd, **kwargs)
-        calls.append(cmd)
-        entered.set()
-        assert go.wait(timeout=10)
-        Path(cmd[-1]).write_bytes(b"mp4 with sound")
-        return subprocess.CompletedProcess(cmd, 0, "", "")
+    class Ffmpeg:
+        def __init__(self, cmd, **kwargs) -> None:
+            self.cmd, self.returncode = cmd, None
+            calls.append(cmd)
+            Path(cmd[-1]).write_bytes(b"half")
+            entered.set()
 
-    monkeypatch.setattr(subprocess, "run", run)
-    yield calls, entered, go
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc) -> None:
+            return None
+
+        def communicate(self, timeout=None):
+            if not go.wait(timeout):
+                raise subprocess.TimeoutExpired(self.cmd, timeout or 0)
+            Path(self.cmd[-1]).write_bytes(b"mp4 with sound")
+            self.returncode = 0
+            return "", ""
+
+        def poll(self):
+            return self.returncode
+
+        def terminate(self) -> None:
+            killed.append(self.cmd)
+            self.returncode = -15
+
+        def kill(self) -> None:
+            self.terminate()
+
+        def wait(self, timeout=None):
+            return self.returncode
+
+    def popen(cmd, **kwargs):
+        if cmd and cmd[0] == "/opt/ffmpeg":
+            return Ffmpeg(cmd, **kwargs)
+        return real(cmd, **kwargs)
+
+    monkeypatch.setattr(subprocess, "Popen", popen)
+    yield calls, entered, go, killed
     go.set()
 
 
@@ -428,7 +461,7 @@ def test_the_video_is_assembled_as_the_first_step_of_processing(mac, ffmpeg) -> 
     video.mp4, the card says so without a share, and the history keeps the offset."""
     from mnema.bar.state import step_line
 
-    calls, entered, go = ffmpeg
+    calls, entered, go, _killed = ffmpeg
     rt, app = mac()
     app.frames = True
     rt.handle("start")
@@ -457,7 +490,7 @@ def test_the_video_is_assembled_as_the_first_step_of_processing(mac, ffmpeg) -> 
 def test_a_screen_recording_left_by_quitting_is_assembled_when_processed(mac, ffmpeg, monkeypatch):
     """Quitting mid-recording leaves screen.mov and does not wait for an assembly; "Process…"
     on the next launch assembles it with the offset the recording left."""
-    calls, _entered, go = ffmpeg
+    calls, _entered, go, _killed = ffmpeg
     go.set()
     rt, app = mac()
     app.frames = True
@@ -494,3 +527,130 @@ def test_video_stopped_from_the_menu_bar_ends_it_without_a_remark(mac) -> None:
     run = _video(folder)
     assert run["video"]["error"] == "" and run["video"]["offset"] >= 0.5
     assert not [n for n in run["notes"] if n["code"].startswith("video")]
+
+
+def test_the_offset_is_in_the_history_as_soon_as_the_first_frame_comes(mac) -> None:
+    """A crash or a force quit mid-recording leaves the history with the video's shift: the
+    offset is written when the first frame comes, not at the stop."""
+    rt, app = mac()
+    rt.handle("start")
+    assert _Source.reading.wait(timeout=10)
+    folder = rt.active_folder
+    assert folder is not None
+    deadline = time.monotonic() + 10
+    while (kept := meta.recorded_video(folder)) is None:
+        assert time.monotonic() < deadline, "no offset in the history while recording"
+        time.sleep(0.01)
+    assert rt.state.phase == Phase.RECORDING
+    assert kept.offset is not None and kept.offset >= 0.5 and kept.error == ""
+    rt.handle("stop")
+    rt.join(timeout=20)
+
+
+def _assembling(rt: BarRuntime, app: _App, entered: threading.Event) -> tuple[Path, str]:
+    """A recording with frames, stopped: its processing is held in the video assembly."""
+    app.frames = True
+    rt.handle("start")
+    assert _Source.reading.wait(timeout=10)
+    folder = rt.active_folder
+    assert folder is not None
+    rt.handle("stop")
+    assert entered.wait(timeout=10)
+    deadline = time.monotonic() + 10
+    while rt.state.phase != Phase.IDLE:
+        assert time.monotonic() < deadline, "the recording waits for the video"
+        time.sleep(0.01)
+    [job] = rt.state.jobs
+    return folder, job.id
+
+
+def test_stopping_processing_during_the_assembly_kills_ffmpeg(mac, ffmpeg) -> None:
+    """ "Stop processing" while the video is assembled: ffmpeg is killed, its half-written file
+    goes, screen.mov stays and the history says the processing was stopped."""
+    calls, entered, _go, killed = ffmpeg
+    rt, app = mac()
+    folder, job = _assembling(rt, app, entered)
+    rt.handle(f"record:{job}:stop")
+    rt.join(timeout=20)
+    assert killed == calls
+    assert (folder / "screen.mov").exists()
+    assert not (folder / ".mnema-video.mp4").exists() and not (folder / "video.mp4").exists()
+    assert _video(folder)["status"] == "stopped"
+
+
+def test_quitting_during_the_assembly_kills_ffmpeg_before_the_engine_exits(mac, ffmpeg) -> None:
+    """Quit while the video is assembled: closing waits for ffmpeg to be killed, nothing keeps
+    writing into the folder, and the recording stays not processed for its next processing."""
+    calls, entered, _go, killed = ffmpeg
+    rt, app = mac()
+    folder, _job = _assembling(rt, app, entered)
+    rt.handle("quit")  # processing: a question, the app confirms
+    assert rt.can_exit
+    rt.close()
+    assert killed == calls
+    assert (folder / "screen.mov").exists() and not (folder / ".mnema-video.mp4").exists()
+    rt.join(timeout=20)
+    runs = json.loads((folder / meta.META_FILE).read_text(encoding="utf-8"))["runs"]
+    assert runs == []
+
+
+def _screen_row(rt: BarRuntime):
+    env = rt.menu_env()
+    idle = panel_model(rt.state, rt.prefs, env, [], settings_model(rt.prefs, env)).idle
+    assert idle is not None
+    return next(s for s in idle.sources if s.label == "screen")
+
+
+def _screen_toggle(rt: BarRuntime):
+    fields = settings_model(rt.prefs, rt.menu_env()).tabs[0].sections[0].fields
+    return next(f for f in fields if f.key == "toggle_screen")
+
+
+def test_screen_without_permission_says_so_until_the_app_has_it(mac) -> None:
+    """The app reports that macOS does not let it record the screen: a "Screen" that is on says
+    a permission is needed, in the panel and in the settings; off, it says nothing. A recording
+    without it keeps the sound and the permission remark; granted, the status goes."""
+    rt, app = mac({"start": ("failed", "permission", None)})
+    assert _screen_row(rt).status == "" and _screen_toggle(rt).detail == ""
+    rt.screen_access(False)
+    assert _screen_row(rt).on and _screen_row(rt).status == "Нужно разрешение"
+    assert _screen_toggle(rt).detail == "Нужно разрешение"
+    rt.handle("toggle_screen")
+    assert not _screen_row(rt).on and _screen_row(rt).status == ""
+    assert _screen_toggle(rt).detail == ""
+    rt.handle("toggle_screen")
+    folder = _record(rt, app)
+    assert _frames(folder / "mic.wav") > 0
+    assert [n["code"] for n in _video(folder)["notes"]] == ["video_permission"]
+    rt.screen_access(True)
+    assert _screen_row(rt).status == "" and _screen_toggle(rt).detail == ""
+
+
+def test_engine_shows_the_permission_the_app_reports(mac, tmp_path) -> None:
+    """Mnema.app sends "screen_access" over the protocol: the next panel state says a permission
+    is needed by the screen."""
+    import functools
+
+    from test_bar_headless import _line, _Out, _start
+
+    from mnema.bar.headless import Channel, Engine
+    from mnema.bar.protocol import ActionMsg, QuitMsg, ScreenAccessMsg, StateMsg
+
+    def screen_status(m) -> str | None:
+        if not isinstance(m, StateMsg) or m.panel.idle is None:
+            return None
+        return next((s.status for s in m.panel.idle.sources if s.label == "screen"), None)
+
+    mac()
+    out = _Out()
+    runtime = functools.partial(BarRuntime, prefs_file=tmp_path / "bar.json")
+    engine = Engine(Channel(out), runtime=runtime, root=lambda: tmp_path / "notes")
+    thread, app = _start(engine)
+    app.write(_line(ScreenAccessMsg(granted=False)))
+    out.until(lambda m: screen_status(m) == "Нужно разрешение")
+    app.write(_line(ScreenAccessMsg(granted=True)))
+    out.until(lambda m: screen_status(m) == "")
+    app.write(_line(ActionMsg(key="quit")))
+    out.until(lambda m: isinstance(m, QuitMsg))
+    app.close()
+    thread.join(timeout=10)

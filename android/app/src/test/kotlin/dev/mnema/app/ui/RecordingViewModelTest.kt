@@ -306,6 +306,34 @@ class RecordingViewModelTest {
     }
 
     @Test
+    fun aCaseChangeOfItsSectionByTheSyncDoesNotShowTheRecordingAsGone() = runTest {
+        val root = tmp.newFolder("Mnema")
+        val section = File(root, "grass")
+        val dir = recording(section, "2026-10-21_14-35")
+        Meta.ensureRecording(dir, "record") { null }
+        val store = FolderRecordingStore(root, backgroundScope, { null }, { false }, Dispatchers.Unconfined)
+        val model = RecordingViewModel(store, Refusing(), root, SavedStateHandle(mapOf(RecordingViewModel.FOLDER_ARG to dir.path)),
+            io = Dispatchers.Unconfined, clock = testScheduler.timeSource)
+        backgroundScope.launch { model.state.collect {} }
+        backgroundScope.launch { model.rereading.whileShown() }
+        model.state.first { it is DetailState.Shown }
+
+        // between the two renames of changeCase: neither "grass" nor "Grass" is there
+        val temp = File(root, ".mnema-rename-Grass")
+        assertTrue(section.renameTo(temp))
+        advanceTimeBy(5.seconds)
+        runCurrent()
+        assertTrue(model.state.value is DetailState.Shown)
+
+        assertTrue(temp.renameTo(File(root, "Grass")))
+        advanceTimeBy(5.seconds)
+        runCurrent()
+        val shown = model.state.value as DetailState.Shown
+        assertTrue(shown.detail.item.dir.isDirectory)
+        assertEquals("record", shown.detail.item.id)
+    }
+
+    @Test
     fun stopCancelsProcessingAndRefreshesTheCardWithoutDeletingItsSound() = runTest {
         val root = tmp.newFolder("Mnema")
         val dir = File(root, "2026-10-21_14-35").apply { mkdirs() }

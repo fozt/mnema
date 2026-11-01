@@ -278,6 +278,7 @@ class MenuEnv(BaseModel):
     server_version: str | None = None  # Mnema version from its capabilities; None — unknown
     model: str | None = None  # this Mac's model without the key; None — not set (or not a Mac)
     mac: bool = False  # standalone Mac (base.STANDALONE)
+    screen_access: bool = True  # Mac: macOS lets Mnema record the screen (the app reports it)
     asr_choices: list[tuple[str, str]] = Field(default_factory=list)  # the engines of the place
     asr_key: str | None = None  # the cloud recognition key where the cloud recognizes, masked
     asr_model: LocalModel | None = None  # this Mac's recognition model; None — no mnema-asr
@@ -367,6 +368,7 @@ STEP_AT: Mapping[str, int] = _StepIndex()
 
 
 QUEUED = "Queued"
+PERMISSION_NEEDED = "Permission needed"  # "Screen" is on, macOS does not let Mnema record it
 STOP_PROCESSING = "Stop processing"
 UNQUEUE = "Remove from queue"
 SET_TITLE = "Set title…"

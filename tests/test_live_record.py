@@ -2,7 +2,19 @@
 
 from __future__ import annotations
 
+import shutil
 import time
+from collections import namedtuple
+
+import pytest
+
+_Usage = namedtuple("_Usage", "total used free")
+
+
+@pytest.fixture(autouse=True)
+def _roomy_disk(monkeypatch) -> None:
+    """The disk has room for a video whatever the test machine's disk holds."""
+    monkeypatch.setattr(shutil, "disk_usage", lambda p: _Usage(2**40, 0, 2**40))
 
 
 def test_wav_track_writer_writes_valid_wav_with_all_fed_bytes(tmp_path) -> None:
@@ -148,11 +160,7 @@ def test_screen_lost_mid_recording_is_not_stopped_again(tmp_path) -> None:
 
 def test_screen_without_free_space_does_not_start(tmp_path, monkeypatch) -> None:
     """Under 2 GiB free the video does not start: the audio has the disk."""
-    import shutil
-    from collections import namedtuple
-
-    usage = namedtuple("usage", "total used free")
-    monkeypatch.setattr(shutil, "disk_usage", lambda p: usage(10 * 2**30, 9 * 2**30, 2**31 - 1))
+    monkeypatch.setattr(shutil, "disk_usage", lambda p: _Usage(10 * 2**30, 9 * 2**30, 2**31 - 1))
     recorder, app = _screen(tmp_path, {"start": ("started", "", 0.0)})
     recorder.start()
     recorder.stop()
@@ -177,6 +185,36 @@ def test_screen_start_does_not_wait_for_the_first_frame(tmp_path) -> None:
     recorder.stop()
     assert [op for op, _ in app.sent] == ["start", "stop"]
     assert not recorder.running and recorder.error == "" and not recorder.ended
+
+
+def test_screen_first_frame_during_the_stop_does_not_end_the_wait(tmp_path) -> None:
+    """The first frame comes just as the stop goes out: its started keeps the offset, but only
+    stopped (the file is closed) ends the stop; without it the stop gives up as a failure."""
+    from mnema.live.record import ScreenRecorder
+
+    def app(answers):
+        def send(op, path=None):
+            for answer in answers.get(op, []):
+                recorder.event(*answer)
+
+        return send
+
+    recorder = ScreenRecorder(
+        tmp_path / "screen.mov",
+        app({"stop": [("started", "", 0.25), ("stopped", "", None)]}),
+    )
+    recorder.origin = time.monotonic()
+    recorder.start()
+    recorder.stop()
+    assert recorder.error == "" and not recorder.ended and not recorder.running
+    assert recorder.offset is not None and recorder.offset >= 0.25
+
+    recorder = ScreenRecorder(
+        tmp_path / "screen.mov", app({"stop": [("started", "", 0.25)]}), stop_wait=0.0
+    )
+    recorder.start()
+    recorder.stop()
+    assert recorder.error == "writer" and recorder.offset is not None
 
 
 def test_screen_stopped_in_the_app_ends_the_video_without_a_failure(tmp_path) -> None:

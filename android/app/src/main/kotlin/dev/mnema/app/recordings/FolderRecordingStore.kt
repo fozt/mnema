@@ -23,6 +23,7 @@ import java.nio.file.Files
 import java.time.ZoneId
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.CoroutineContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -70,6 +71,7 @@ class FolderRecordingStore(
     private val groups = MutableStateFlow<List<String>>(emptyList())
     private val problem = MutableStateFlow<String?>(null)
     private val bin = MutableStateFlow(true)
+    private val checking = AtomicBoolean(false)
     override val trashAvailable: StateFlow<Boolean> = bin.asStateFlow()
     override val sections: StateFlow<List<String>> = groups.asStateFlow()
     override val failure: StateFlow<String?> = problem.asStateFlow()
@@ -108,6 +110,7 @@ class FolderRecordingStore(
 
     /** One recording's files only: a sync or processing holding the files lock does not hold up its screen. */
     override suspend fun detail(dir: File): RecordingDetail? = withContext(io) {
+        checkHelper()
         val safe = recordingDirectory(root, dir)?.takeIf { isLibraryRecord(root, it, knownSections()) } ?: return@withContext null
         if (recordingId(safe) == null) synchronized(filesLock) { ensureIdentity(safe) }
         val item = item(safe) ?: return@withContext null
@@ -259,6 +262,15 @@ class FolderRecordingStore(
     }
 
     private fun checkTrash(): Boolean = hasTrash().also { bin.value = it }
+
+    // a stale helper heartbeat needs one ping before a change is allowed: in the background, so the screen does not wait for it
+    // and its next reread offers what the answer allows
+    private fun checkHelper() {
+        if (!checking.compareAndSet(false, true)) return
+        scope.launch(io) {
+            try { prepare() } catch (_: IOException) { /* the card is shown, file actions are refused */ } finally { checking.set(false) }
+        }
+    }
 
     private fun isBusy(dir: File, active: Set<String> = busy()): Boolean =
         dir.absolutePath in active || dir.relativeTo(root.canonicalFile).invariantSeparatorsPath in active || recordingId(dir) in active

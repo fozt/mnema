@@ -30,7 +30,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let store = Self.store
         store.sink = { [weak self] msg in
             if case .panel(let open) = msg { self?.panelOpen = open }
+            if case .action(let key) = msg,
+                ScreenAccess.shouldAsk(key: key, panel: store.panel, granted: ScreenAccess.granted)
+            {
+                ScreenAccess.ask()  // turned on: granting now leaves time to restart before a recording
+            }
             self?.bridge.send(msg)
+            if case .panel(true) = msg { self?.reportScreenAccess() }  // granted in System Settings
+            if case .action("toggle_screen") = msg { self?.reportScreenAccess() }
         }
         store.onRestart = { [weak self] in self?.startEngine() }
         store.onOpenLog = { [weak self] in
@@ -74,10 +81,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         engineQuit = false
         do {
             try bridge.start(launch)
+            reportScreenAccess()
             if panelOpen { bridge.send(.panel(open: true)) }
         } catch {
             Self.store.engineDown = true
         }
+    }
+
+    /// The engine shows "Permission needed" by a "Screen" that is on until macOS lets Mnema record.
+    private func reportScreenAccess() {
+        bridge.send(.screenAccess(granted: ScreenAccess.granted))
     }
 
     private func handle(_ msg: Outgoing) {

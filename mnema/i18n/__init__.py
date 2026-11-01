@@ -11,7 +11,7 @@ import contextlib
 import contextvars
 import json
 import os
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from functools import cache
 from pathlib import Path
 
@@ -86,12 +86,27 @@ def from_accept_language(header: str | None) -> str:
     return best
 
 
+def _unique(path: Path) -> Callable[[list[tuple[str, object]]], dict[str, object]]:
+    """A JSON object hook: a key twice in one file is an error (json keeps the last silently)."""
+
+    def pairs(items: list[tuple[str, object]]) -> dict[str, object]:
+        data: dict[str, object] = {}
+        for key, value in items:
+            if key in data:
+                raise ValueError(f"{path.name}: {key!r} appears twice")
+            data[key] = value
+        return data
+
+    return pairs
+
+
 @cache
 def catalog() -> dict[str, str | list[str]]:
-    """Every mnema/i18n/ru/*.json merged; one key in two files must have one value."""
+    """Every mnema/i18n/ru/*.json merged; one key in two files must have one value, one key
+    appears once in a file."""
     merged: dict[str, str | list[str]] = {}
     for path in sorted(_CATALOG_DIR.glob("*.json")):
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=_unique(path))
         for key, value in data.items():
             if key in merged and merged[key] != value:
                 raise ValueError(f"{path.name}: {key!r} differs from another catalog file")

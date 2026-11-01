@@ -367,6 +367,8 @@ class Engine:
             self.platform.form_event(msg)
         elif kind == "screen_event":
             rt.screen_event(msg.state, msg.reason, msg.offset)
+        elif kind == "screen_access":
+            rt.screen_access(msg.granted)
         elif kind == "panel":
             self._open = msg.open
             if msg.open:

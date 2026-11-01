@@ -1445,17 +1445,19 @@ def test_batch_result_is_english(tmp_path, monkeypatch, capsys) -> None:
 
 
 def test_a_folder_walk_skips_the_recording_video(tmp_path):
-    """mnema transcribe <folder> takes a recording's tracks, not its screen video; a video of the
-    same name outside a recording, and one named explicitly, are taken."""
+    """mnema transcribe <folder> takes a recording's tracks, not its screen video nor the video
+    being assembled; hidden files are never taken; a video of the same name outside a recording,
+    and one named explicitly, are taken."""
     from mnema import cli
 
     rec = tmp_path / "2026-11-01_Собеседование"
     rec.mkdir()
-    for name in ("mic.wav", "video.mp4", "screen.mov", ".mnema-meta.json"):
+    for name in ("mic.wav", "video.mp4", "screen.mov", ".mnema-video.mp4", ".mnema-meta.json"):
         (rec / name).write_bytes(b"x")
     other = tmp_path / "Видео"
-    other.mkdir()
+    (other / ".Trash").mkdir(parents=True)
     (other / "video.mp4").write_bytes(b"x")
+    (other / ".Trash" / "old.mp4").write_bytes(b"x")
     assert cli._resolve_sources([str(rec)], want_video=False) == [rec / "mic.wav"]
     assert cli._resolve_sources([str(other)], want_video=True) == [other / "video.mp4"]
     explicit = cli._resolve_sources([str(rec / "video.mp4")], want_video=False)

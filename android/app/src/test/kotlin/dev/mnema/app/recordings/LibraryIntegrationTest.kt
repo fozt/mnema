@@ -243,6 +243,17 @@ class LibraryIntegrationTest {
         assertTrue(detail.summarizable)
     }
 
+    @Test fun aRecordingsScreenChecksAStaleHelperItselfBeforeOfferingToDeleteAudio() = runBlocking {
+        val dir = processed("Звонок", "id")
+        File(dir, "mic.wav").writeText("wav")
+        // the helper's heartbeat is stale: its state is known only after one ping, nothing else asked for it yet
+        var checked = false
+        val store = FolderRecordingStore(root, CoroutineScope(Dispatchers.Unconfined), { null }, { false }, Dispatchers.Unconfined,
+            busyFolder = { !checked }, prepare = { checked = true }, textsOnServer = { { true } })
+        store.detail(dir)
+        assertTrue(store.detail(dir)!!.cleanable)
+    }
+
     @Test fun withoutTrashARecordingAndItsSoundAreDeletedForeverOnlyAfterConsent() = runBlocking {
         val dir = record("Работа/Дейли", "id")
         File(dir, "mic.wav").writeText("wav")

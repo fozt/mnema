@@ -437,6 +437,7 @@ func connectionForm() throws -> FormAsk {
         (.screen(.started(offset: 0.42)), "in-screen-started"),
         (.screen(.failed(.permission)), "in-screen-failed"),
         (.screen(.stopped), "in-screen-stopped"),
+        (.screenAccess(granted: false), "in-screen-access"),
     ]
     for (msg, name) in cases {
         let data = try Wire.encode(msg)

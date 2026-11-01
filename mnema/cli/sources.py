@@ -167,6 +167,11 @@ def _merged_name(files: list[Path], *, want_video: bool = True) -> str:
     return f"{base}_merged{suffix}" if base else f"merged{suffix}"
 
 
+def _hidden(relative: Path) -> bool:
+    """A hidden file or folder of a walk (.mnema-video.mp4 being written, .Trash): not a source."""
+    return any(part.startswith(".") for part in relative.parts)
+
+
 def _recording_video(path: Path) -> bool:
     """The screen video of a Mnema recording: a folder walk takes the recording's tracks."""
     return path.name in (VIDEO_FILE, SCREEN_FILE) and any(
@@ -238,7 +243,10 @@ def _resolve_sources(
             found = sorted(
                 f
                 for f in p.rglob("*")
-                if f.is_file() and f.suffix.lower() in exts and not _recording_video(f)
+                if f.is_file()
+                and f.suffix.lower() in exts
+                and not _hidden(f.relative_to(p))
+                and not _recording_video(f)
             )
             if not found:
                 note = _("No suitable files in the folder: {path}", path=escape(str(p)))

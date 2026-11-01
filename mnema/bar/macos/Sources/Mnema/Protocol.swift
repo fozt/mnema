@@ -391,8 +391,9 @@ enum Incoming: Encodable, Hashable {
     case formEvent(id: Int, rev: Int, op: String, values: [String: String])
     case panel(open: Bool)
     case screen(ScreenEvent)
+    case screenAccess(granted: Bool)
 
-    private enum Keys: String, CodingKey { case type, key, id, value, open, rev, op, values, state, reason, offset }
+    private enum Keys: String, CodingKey { case type, key, id, value, open, rev, op, values, state, reason, offset, granted }
 
     func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: Keys.self)
@@ -428,6 +429,9 @@ enum Incoming: Encodable, Hashable {
             }
             try c.encode(reason, forKey: .reason)
             try c.encode(offset, forKey: .offset)
+        case .screenAccess(let granted):
+            try c.encode("screen_access", forKey: .type)
+            try c.encode(granted, forKey: .granted)
         }
     }
 }
