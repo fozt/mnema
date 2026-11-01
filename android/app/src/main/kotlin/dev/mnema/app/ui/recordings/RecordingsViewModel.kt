@@ -357,6 +357,8 @@ class RecordingViewModel(
     private suspend fun load(settings: Settings): DetailState {
         currentSettings = settings
         val dir = withContext(io) { follower.current() }
+        // sync is changing the case of its folder or section: the screen stays as it was until the next reread
+        if (dir == null && follower.renaming) return lastShown ?: DetailState.Loading
         val detail = dir?.let { store.detail(it) } ?: return lastShown?.takeIf { _deleted.value } ?: DetailState.Gone
         handle[FOLDER_ARG] = detail.item.dir.path
         handle[IDENTITY_ARG] = detail.item.id
@@ -684,7 +686,12 @@ class FolderFollower(private val root: File, start: File, recording: String? = n
         inode = folderFileKey(to)
     }
 
+    /** The last [current] found nothing because sync holds the folder under a temporary case-change name. */
+    var renaming = false
+        private set
+
     fun current(): File? = try {
+        renaming = false
         dir?.let { known ->
             val safe = recordingDirectory(root, known)?.takeIf { isLibraryRecord(root, it) }
             if (safe != null) {
@@ -700,10 +707,22 @@ class FolderFollower(private val root: File, start: File, recording: String? = n
         val moved = recordId?.let { findRecording(root, it) } ?: inode?.let { key ->
             dev.mnema.app.recordings.libraryFolders(root).records.singleOrNull { folderFileKey(it) == key }
         }
-        dir = moved
-        inode = moved?.let(::folderFileKey)
-        moved
+        if (moved == null && inTransit()) {
+            renaming = true // the same recording comes back under its new name: keep following it
+            null
+        } else {
+            dir = moved
+            inode = moved?.let(::folderFileKey)
+            moved
+        }
     } catch (_: IOException) { null }
+
+    // the recording itself, or its section, is between the two renames of a case change (changeCase)
+    private fun inTransit(): Boolean = dev.mnema.app.recordings.libraryFolders(root).renaming.any { temp ->
+        (listOf(temp) + temp.listFiles().orEmpty().filter { it.isDirectory }).any {
+            (recordId != null && recordingId(it) == recordId) || (inode != null && folderFileKey(it) == inode)
+        }
+    }
 
 }
 
