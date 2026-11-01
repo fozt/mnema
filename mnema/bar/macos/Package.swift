@@ -19,7 +19,12 @@ let package = Package(
         .executableTarget(
             name: "Mnema",
             path: "Sources/Mnema",
-            swiftSettings: [.swiftLanguageMode(.v5)]
+            swiftSettings: [.swiftLanguageMode(.v5)],
+            // the screen video (ScreenRecorder)
+            linkerSettings: [
+                .linkedFramework("ScreenCaptureKit"), .linkedFramework("AVFoundation"),
+                .linkedFramework("CoreMedia"),
+            ]
         ),
         // The wire format and the model folder rules, without FluidAudio: its tests build fast.
         .target(

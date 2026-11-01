@@ -2,11 +2,13 @@ import AppKit
 
 /// App lifecycle: the engine is Python inside this process (Bridge), plus its windows and
 /// notifications. Quitting goes through the engine: ⌘Q and "Quit Mnema" ask it ("quit"), logging
-/// out does not ask ("quit_now"): the recording is saved, then the engine sends quit.
+/// out does not ask ("quit_now"): the recording is saved, then the engine sends quit. The screen
+/// video is closed before the app exits and when the engine stops: the file stays readable.
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     static let store = Store()
     private let bridge = Bridge()
+    private let screen = ScreenRecorder()
     private var launch: Launch?
     private var panelOpen = false  // a restarted engine learns the panel is open
     private var engineQuit = false  // the engine itself sent quit
@@ -36,6 +38,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         bridge.onMessage = { [weak self] in self?.handle($0) }
         bridge.onOutdated = { Self.store.outdated = true }
         bridge.onExit = { [weak self] in self?.engineExited(expected: $0) }
+        screen.onEvent = { [weak self] in self?.bridge.send(.screen($0)) }
         Notifications.shared.start { store.send($0) }
         launch = Launch()
         startEngine()
@@ -48,7 +51,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard bridge.running, !engineQuit else { return .terminateNow }
+        guard bridge.running, !engineQuit else {
+            guard screen.active else { return .terminateNow }
+            screen.stop(report: false) { NSApp.reply(toApplicationShouldTerminate: true) }
+            return .terminateLater
+        }
         terminating = true
         bridge.expectExit()
         // Log out, restart, or Quit from outside: no engine question, since a refusal would leave
@@ -98,19 +105,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Notifications.shared.post(note)
         case .settings(let tab):
             store.showSettings(tab)  // click on the server in the panel header
+        case .screen(.start, let path):
+            screen.start(path: path)
+        case .screen(.pause, _):
+            screen.pause()
+        case .screen(.resume, _):
+            screen.resume()
+        case .screen(.stop, _):
+            screen.stop()
         case .quit:
             engineQuit = true
             bridge.expectExit()
-            if terminating {
-                finishTerminating()
-            } else {
-                NSApp.terminate(nil)
+            screen.stop(report: false) { [weak self] in
+                guard let self else { return }
+                if terminating {
+                    finishTerminating()
+                } else {
+                    NSApp.terminate(nil)
+                }
             }
         }
     }
 
     private func engineExited(expected: Bool) {
-        if terminating { return finishTerminating() }
+        if terminating { return screen.stop(report: false) { [weak self] in self?.finishTerminating() } }
+        screen.stop(report: false)  // nobody to stop it: the file is closed now
         guard !expected else { return }
         Self.store.panel = nil  // the icon and panel must not show a frozen recording
         Self.store.formID = nil  // the old engine's window closes without answering the new one
