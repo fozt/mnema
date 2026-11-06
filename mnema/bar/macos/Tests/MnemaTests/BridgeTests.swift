@@ -16,6 +16,39 @@ private func text(_ lines: [Data]) -> [String] {
     #expect(buffer.feed(Data("\n".utf8)).isEmpty)
 }
 
+private func footprint() -> Int {
+    var info = task_vm_info_data_t()
+    var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<natural_t>.size)
+    _ = withUnsafeMutablePointer(to: &info) {
+        $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+            task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
+        }
+    }
+    return Int(info.phys_footprint)
+}
+
+@Test func readingTheEngineKeepsNothingOfWhatItRead() {
+    let pipe = Pipe()
+    let lineCount = 5000
+    let line = Data(repeating: 0x41, count: 40_000) + Data("\n".utf8)  // 200 MB in all
+    DispatchQueue.global().async {
+        for _ in 0..<lineCount { pipe.fileHandleForWriting.write(line) }
+        pipe.fileHandleForWriting.closeFile()
+    }
+    let done = DispatchSemaphore(value: 0)
+    var lines = 0
+    var grown = 0
+    DispatchQueue.global().async {  // like Bridge: measured before this block ends and frees its pool
+        let before = footprint()
+        Bridge.readLines(from: pipe.fileHandleForReading) { lines += $0.count }
+        grown = footprint() - before
+        done.signal()
+    }
+    done.wait()
+    #expect(lines == lineCount)
+    #expect(grown < 50_000_000)
+}
+
 @Test func launchOfATerminalRunTakesTheVenvFromTheEnvironment() {
     let env = [
         "MNEMA_PYTHON": "/dev/python", "MNEMA_LIBPYTHON": "/dev/libpython.dylib",

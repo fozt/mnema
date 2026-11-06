@@ -127,11 +127,7 @@ final class Bridge {
         ended.enter()
         let out = FileHandle(fileDescriptor: fromEngine[0], closeOnDealloc: true)
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            var buffer = LineBuffer()
-            while true {
-                let chunk = out.availableData  // blocks for output; empty means the engine closed it
-                if chunk.isEmpty { break }
-                let lines = buffer.feed(chunk)
+            Self.readLines(from: out) { lines in
                 DispatchQueue.main.async { self?.deliver(lines) }
             }
             ended.leave()
@@ -145,6 +141,23 @@ final class Bridge {
             if code != 0 { NSLog("Mnema: engine exited with error %d", code) }
         }
         ended.notify(queue: .main) { [weak self] in self?.exited() }
+    }
+
+    /// Whole lines from the engine until it closes its output. The caller's block lives as long as
+    /// the engine, so each chunk needs a pool of its own: availableData autoreleases what it reads.
+    static func readLines(from out: FileHandle, _ onLines: ([Data]) -> Void) {
+        var buffer = LineBuffer()
+        var open = true
+        while open {
+            autoreleasepool {
+                let chunk = out.availableData  // blocks for output; empty means the engine closed it
+                if chunk.isEmpty {
+                    open = false
+                } else {
+                    onLines(buffer.feed(chunk))
+                }
+            }
+        }
     }
 
     func send(_ msg: Incoming) {
