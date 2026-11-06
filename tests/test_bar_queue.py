@@ -201,13 +201,13 @@ def test_new_recording_starts_while_previous_is_processed(setup, tmp_path) -> No
     rt, captured, gate, app = setup
     first = _record(rt, captured)
     gate.entered()  # the first one is recognized
-    assert rt.state.phase == Phase.IDLE and rt.state.running is not None
+    assert rt.state.phase == Phase.IDLE and rt.state.running
 
     second = _record(rt, captured, stop=False)  # a new recording while it is recognized
     assert rt.state.phase == Phase.RECORDING and second != first
     items = menu(rt.state, rt.prefs, MenuEnv())  # the tray while recording shows processing too
-    job = rt.state.running
-    assert job is not None and job.folder == first
+    [job] = rt.state.running
+    assert job.folder == first
     assert f"record:{job.id}:stop" in [i.key for i in items]
     rt.handle("toggle_record")
     _until(lambda: rt.state.phase == Phase.IDLE and second in rt.job_folders())

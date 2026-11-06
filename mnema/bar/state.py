@@ -223,7 +223,7 @@ class BarState(BaseModel):
     paused: bool = False
     elapsed: float = 0.0  # recording length without pauses, s
     meters: list[SourceMeter] = Field(default_factory=list)
-    jobs: list[Job] = Field(default_factory=list)  # processing queue; the running one is first
+    jobs: list[Job] = Field(default_factory=list)  # processing queue, running and waiting
     notice: str = ""  # warning before or during recording (no server, server down)
     last_result: Path | None = None  # transcript.txt, or the folder when there is no text
     last_warnings: list[Remark] = Field(default_factory=list)
@@ -239,13 +239,13 @@ class BarState(BaseModel):
     sync_errors: list[str] = Field(default_factory=list)
 
     @property
-    def running(self) -> Job | None:
-        """The job processing now."""
-        return next((job for job in self.jobs if job.running), None)
+    def running(self) -> list[Job]:
+        """The jobs processing now."""
+        return [job for job in self.jobs if job.running]
 
     @property
     def waiting(self) -> list[Job]:
-        """Jobs waiting behind the running one."""
+        """Jobs waiting for their turn."""
         return [job for job in self.jobs if not job.running]
 
     @property
@@ -540,11 +540,12 @@ def _move_last(folder: Path, sections: Sequence[str]) -> MenuItem:
 
 
 def _processing_items(state: BarState) -> list[MenuItem]:
-    """Processing in the tray, idle or recording: which recording and for how long, the step in
-    5% steps, language, transcript, own title, stop; how many wait."""
+    """Processing in the tray, idle or recording, for each running recording: which one and for
+    how long, the step in 5% steps, language, transcript, own title, stop; how many wait."""
     items: list[MenuItem] = []
-    job = state.running
-    if job is not None:
+    for job in state.running:
+        if items:
+            items.append(MenuItem(separator=True))
         name = result_name(job.folder)[:40]
         minutes = int(job.elapsed // 60)  # shows the process is alive during a long step
         heading = (

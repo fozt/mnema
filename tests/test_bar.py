@@ -143,8 +143,7 @@ def _find(items: list[MenuItem], key: str) -> MenuItem:
 
 def _job_key(rt: BarRuntime, action: str) -> str:
     """An action on the card of the recording being processed."""
-    job = rt.state.running
-    assert job is not None
+    [job] = rt.state.running
     return f"record:{job.id}:{action}"
 
 
@@ -380,10 +379,10 @@ def test_record_start_stop_saves_with_progress_and_notifies(
     def fake_finalize(prepared, tracks, *, on, **kw):
         assert prepared.recording_error == recording_error
         on(0.5, "Офлайн-проход…")
-        assert rt.state.running is not None  # processing is queued, the recording has ended
-        progress.append(rt.state.running.progress)
+        [job] = rt.state.running  # processing is queued, the recording has ended
+        progress.append(job.progress)
         on(None, STEP_MESSAGES["summary"])  # a step start is the caption of the card and the menu
-        stages.append(rt.state.running.stage)
+        stages.append(job.stage)
         txt = prepared.base / "transcript.txt"
         prepared.base.mkdir(parents=True, exist_ok=True)
         txt.write_text("mic: привет\n", encoding="utf-8")
@@ -930,7 +929,7 @@ def test_title_set_during_processing_names_folder(monkeypatch, tmp_path) -> None
     rt: BarRuntime | None = None  # the recognition list may load before rt is assigned
 
     def on_change() -> None:  # the card showed processing and "Set title…" was clicked
-        if rt is not None and rt.state.running is not None and not pressed:
+        if rt is not None and rt.state.running and not pressed:
             pressed.append(True)
             rt.handle(_job_key(rt, "title"))
 
@@ -1149,9 +1148,9 @@ def test_silent_recording_named_late_is_not_unfinished(monkeypatch, tmp_path, cl
     made: list[BarRuntime] = []
 
     def on_change() -> None:  # the card showed processing and "Set title…" was clicked
-        job = made[0].state.running if made else None
-        if job is not None and not hasattr(platform, "later"):
-            made[0].handle(f"record:{job.id}:title")
+        running = made[0].state.running if made else []
+        if running and not hasattr(platform, "later"):
+            made[0].handle(f"record:{running[0].id}:title")
 
     platform = LatePlatform()
     rt = BarRuntime(on_change=on_change, platform=platform, prefs_file=tmp_path / "bar.json")
@@ -1259,7 +1258,8 @@ def test_language_chosen_during_processing_restarts_it(monkeypatch, tmp_path) ->
 
     def fake_finalize(prepared, tracks, *, on, on_lang, **kw):
         on_lang({"mic": "ru"})
-        assert rt.state.running is not None and rt.state.running.languages == {"mic": "ru"}
+        [job] = rt.state.running
+        assert job.languages == {"mic": "ru"}
         rt.handle(_job_key(rt, "lang:en"))  # English chosen in the card menu
         on(0.3, "распознаю…")
         raise AssertionError("обработка не прервалась")
@@ -1268,10 +1268,11 @@ def test_language_chosen_during_processing_restarts_it(monkeypatch, tmp_path) ->
 
     def fake_recover(base, config, connection, *, start, end, retitle, on_base, **kw):
         again.append((base, config.lang, start, end, retitle))
-        assert rt.state.running is not None and rt.state.running.languages == {}
+        [job] = rt.state.running
+        assert job.languages == {}
         renamed = base.rename(base.with_name("2026-10-01_Созвон"))  # titled by content
         on_base(renamed)
-        assert rt.state.running.folder == renamed
+        assert job.folder == renamed
         rt.trash_folder(renamed)
         assert renamed.exists()
         txt = renamed / "transcript.txt"
