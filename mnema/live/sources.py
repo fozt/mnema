@@ -32,14 +32,27 @@ class AudioSource(Protocol):
     getattr: dropped_seconds (float, cumulative), the seconds of audio the source dropped before
     delivering them; speech_energy(start, end), the peak RMS of the delivered stream over the
     interval (used to filter hallucinations on silence).
+
+    origin is the session's audio start (time.monotonic()), set before start(): the source puts
+    silence before its first block and after a break, so sample N of its stream sounded at
+    origin + N / 16000. None means nothing to align to.
     """
 
     name: str
+    origin: float | None
 
     def available(self) -> bool: ...
     def start(self) -> None: ...
     def read(self) -> bytes | None: ...
     def stop(self) -> None: ...
+
+
+def samples_behind(origin: float | None, first_sample_at: float, emitted: int, rate: int) -> int:
+    """Samples of silence a track with `emitted` samples needs before a block that started at
+    first_sample_at on the origin's clock; never negative."""
+    if origin is None:
+        return 0
+    return max(0, round((first_sample_at - origin) * rate) - emitted)
 
 
 def pcm_rms(pcm: bytes) -> float:
@@ -151,6 +164,10 @@ class MicSource:
     b"" and tries to reopen the stream every _REOPEN_INTERVAL within _REOPEN_BUDGET; the new
     stream writes to the same tee, so the WAV track continues. The outcome is in `notice`, which
     the session reads through getattr and marks in the transcript.
+
+    The first block of every stream catches up with the clock: on the first stream that is the
+    delay after origin, on a reopened one the time the microphone was gone. Both are measured
+    against the samples already emitted, so nothing is padded twice.
     """
 
     def __init__(
@@ -169,7 +186,9 @@ class MicSource:
         self._blocksize = blocksize
         self._tee = tee
         self.recording_error: str | None = None
+        self.origin: float | None = None
         self._clock = clock
+        self._emitted = 0  # samples handed to the recording, silence included
         maxblocks = max(1, int(_QUEUE_SECONDS * samplerate / blocksize))
         self._queue: queue.Queue[bytes | None] = queue.Queue(maxsize=maxblocks)
         self._dropped_bytes = 0
@@ -206,6 +225,26 @@ class MicSource:
                 except queue.Empty:  # raced with the reader: there is room now, put again
                     pass
 
+    def _emit(self, pcm: bytes) -> None:
+        """Deliver a frame: first to the recording (tee), then to the dropping queue."""
+        self._emitted += len(pcm) // 2
+        if self._tee is not None:
+            try:
+                self._tee(pcm)
+            except Exception:  # noqa: BLE001 - the session stops capture outside the callback
+                from .remarks import track_stopped
+
+                logger.warning("track %s is not being written", self.name, exc_info=True)
+                self.recording_error = self.recording_error or track_stopped(self.name)
+        self._put_dropping_oldest(pcm)
+
+    def _catch_up(self, frames: int) -> None:
+        """Silence up to the block of `frames` that just arrived, by the clock."""
+        started = self._clock() - frames / self._samplerate
+        behind = samples_behind(self.origin, started, self._emitted, self._samplerate)
+        if behind:
+            self._emit(bytes(behind * 2))
+
     def available(self) -> bool:
         try:
             import sounddevice as sd
@@ -241,19 +280,15 @@ class MicSource:
 
         self._gen += 1
         gen = self._gen
+        first_block = True
 
         def _callback(indata, frames, time, status) -> None:  # noqa: ANN001 - sounddevice contract
             # errors are not raised into the audio thread; the frame is queued as is
-            data = bytes(indata)
-            if self._tee is not None:
-                try:
-                    self._tee(data)
-                except Exception:  # noqa: BLE001 - the session stops capture outside the callback
-                    from .remarks import track_stopped
-
-                    logger.warning("track %s is not being written", self.name, exc_info=True)
-                    self.recording_error = self.recording_error or track_stopped(self.name)
-            self._put_dropping_oldest(data)
+            nonlocal first_block
+            if first_block:
+                first_block = False
+                self._catch_up(frames)
+            self._emit(bytes(indata))
 
         def _finished() -> None:
             # the stream died on its own (device gone, PortAudio error): not our stop(), not an

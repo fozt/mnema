@@ -8,22 +8,27 @@ A CATap (CATapDescription + AudioHardwareCreateProcessTap + an aggregate device)
 system audio recording permission, without screen recording or the sharing indicator. The tap
 delivers float32 at the output device's rate and channel count; numpy converts it to the
 AudioSource contract (PCM16 mono 16 kHz) by averaging channels and decimating (or linear
-interpolation). ObjC and ctypes imports are lazy, so the module imports on any OS (thin client).
+interpolation). The stream follows real time: frames Core Audio lost become silence, and the
+delay before the first block too. ObjC and ctypes imports are lazy, so the module imports on any
+OS (thin client).
 """
 
 from __future__ import annotations
 
 import logging
+import math
 import platform
 import queue
 import shutil
 import subprocess
 import threading
+import time
+from collections.abc import Callable
 from typing import Any
 
 from ..core.base import MediaError
 from ..i18n import _
-from .sources import EnergyChronicle
+from .sources import EnergyChronicle, samples_behind
 
 logger = logging.getLogger(__name__)
 # no commands in app texts: the cause and what to install go to the log
@@ -33,29 +38,92 @@ _TARGET_RATE = 16000
 _QUEUE_SECONDS = 30  # same queue limit as MicSource (see sources.py)
 _TAP_BLOCK_SECONDS = 0.02  # IOProc gets the device buffer (~10-20 ms); estimate for the queue
 _TAP_MIN_MACOS = (14, 2)  # AudioHardwareCreateProcessTap appeared in macOS 14.2
+_GAP_SLACK_SECONDS = 0.05  # a filled gap may carry the track this far ahead of the clock
+_PAREC_LATENCY_MS = 50  # without it the server hands parec about 2 s at a time
 
 
-def to_pcm16_mono(
-    data: bytes, *, rate: float, channels: int, planar: bool, target_rate: int = _TARGET_RATE
-) -> bytes:
-    """float32 frame (planar or interleaved) -> PCM16 mono at target_rate (AudioSource contract).
+_SAMPLE_TIME_VALID = 1 << 0  # kAudioTimeStampSampleTimeValid
+_HOST_TIME_VALID = 1 << 1  # kAudioTimeStampHostTimeValid
 
-    Channels are averaged; with an integer resampling factor groups of samples are averaged (a
-    crude anti-aliasing filter too), otherwise linear interpolation is used.
-    """
+
+def valid_times(flags: int, sample_time: float, host_time: int) -> tuple[float | None, int | None]:
+    """The fields of an AudioTimeStamp that its flags mark valid, the others None."""
+    return (
+        sample_time if flags & _SAMPLE_TIME_VALID else None,
+        host_time if flags & _HOST_TIME_VALID else None,
+    )
+
+
+def _monotonic_timebase() -> tuple[int, int] | None:
+    """(numer, denom) from mHostTime ticks to nanoseconds of time.monotonic(), None if these clocks
+    differ. mHostTime counts mach_absolute_time ticks (CoreAudioBaseTypes.h) and CPython's
+    time.monotonic() is the same ticks scaled by this timebase; one reading of each proves it."""
+    import ctypes
+
+    class _Timebase(ctypes.Structure):
+        _fields_ = [("numer", ctypes.c_uint32), ("denom", ctypes.c_uint32)]
+
+    system = ctypes.CDLL("/usr/lib/libSystem.B.dylib")
+    system.mach_absolute_time.restype = ctypes.c_uint64
+    info = _Timebase()
+    if system.mach_timebase_info(ctypes.byref(info)) != 0 or not info.denom:
+        return None
+    ticks = system.mach_absolute_time()
+    if abs(ticks * info.numer / info.denom / 1e9 - time.monotonic()) > 1.0:
+        logger.warning("time.monotonic() is not the Core Audio host clock")
+        return None
+    return info.numer, info.denom
+
+
+def _mono(data: bytes, *, channels: int, planar: bool) -> Any:
+    """float32 frames, planar or interleaved -> a mono numpy array, channels averaged."""
     import numpy as np
 
     a = np.frombuffer(data, dtype=np.float32)
     if channels > 1 and a.size % channels == 0:
         a = a.reshape((channels, -1) if planar else (-1, channels)).mean(axis=0 if planar else 1)
-    if a.size and rate != target_rate:
+    return a
+
+
+class _Resampler:
+    """float32 mono blocks -> PCM16 at target_rate (AudioSource contract), one per source.
+
+    Positions are absolute, so after any blocks the output has exactly
+    int(total_input * target_rate / rate) samples, and what a block cannot finish waits for the
+    next one. With an integer factor groups of samples are averaged (a crude anti-aliasing
+    filter too), otherwise linear interpolation is used.
+    """
+
+    def __init__(self, rate: float, target_rate: int = _TARGET_RATE) -> None:
+        self._rate = rate
+        self._target = target_rate
         factor = rate / target_rate
-        if factor == int(factor) and a.size % int(factor) == 0:
-            a = a.reshape(-1, int(factor)).mean(axis=1)
+        self._group = int(factor) if factor == int(factor) else 0  # 0: not an integer factor
+        self._held: Any = None  # input the next output still needs
+        self._held_at = 0  # absolute index of its first sample
+        self._fed = 0  # input samples so far
+        self._made = 0  # output samples so far
+
+    def feed(self, mono: Any) -> bytes:
+        import numpy as np
+
+        if not mono.size:
+            return b""
+        buf = mono if self._held is None else np.concatenate((self._held, mono))
+        total = self._fed + mono.size
+        made = int(total * self._target / self._rate)
+        if self._group:
+            used = made * self._group - self._held_at
+            out = buf[:used].reshape(-1, self._group).mean(axis=1)
+            keep = made * self._group
         else:
-            n_out = max(1, round(a.size * target_rate / rate))
-            a = np.interp(np.arange(n_out) * (a.size / n_out), np.arange(a.size), a)
-    return np.clip(np.rint(a * 32768.0), -32768, 32767).astype(np.int16).tobytes()
+            step = self._rate / self._target
+            positions = np.arange(self._made, made) * step - self._held_at
+            out = np.interp(positions, np.arange(buf.size), buf)
+            keep = min(int(made * step), total)
+        self._held = buf[keep - self._held_at :]
+        self._held_at, self._fed, self._made = keep, total, made
+        return np.clip(np.rint(out * 32768.0), -32768, 32767).astype(np.int16).tobytes()
 
 
 class _BufferedSource:
@@ -63,11 +131,21 @@ class _BufferedSource:
     oldest frames, the energy chronicle and a batched read(); platform classes add only the
     capture (a Core Audio tap on macOS, parec on Linux)."""
 
-    def __init__(self, *, label: str, tee: Any, block_seconds: float) -> None:
+    def __init__(
+        self,
+        *,
+        label: str,
+        tee: Any,
+        block_seconds: float,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
         # tee: Callable[[bytes], None]; the recording comes first, frames reach it before the queue
         self.name = label
         self._tee = tee
         self.recording_error: str | None = None
+        self.origin: float | None = None
+        self._clock = clock
+        self._emitted = 0  # samples handed to the recording, silence included
         maxblocks = max(1, int(_QUEUE_SECONDS / block_seconds))
         self._queue: queue.Queue[bytes | None] = queue.Queue(maxsize=maxblocks)
         self._dropped_bytes = 0
@@ -108,6 +186,7 @@ class _BufferedSource:
 
     def _emit(self, pcm: bytes) -> None:
         """Deliver a frame: first to the recording (tee), then to the dropping queue."""
+        self._emitted += len(pcm) // 2
         if self._tee is not None:
             try:
                 self._tee(pcm)
@@ -117,6 +196,12 @@ class _BufferedSource:
                 logger.warning("track %s is not being written", self.name, exc_info=True)
                 self.recording_error = self.recording_error or track_stopped(self.name)
         self._put_dropping_oldest(pcm)
+
+    def _catch_up(self, first_sample_at: float) -> None:
+        """Silence up to a block whose first sample is at this time on the origin's clock."""
+        behind = samples_behind(self.origin, first_sample_at, self._emitted, _TARGET_RATE)
+        if behind:
+            self._emit(bytes(behind * 2))
 
     def _put_dropping_oldest(self, item: bytes | None) -> None:
         """Enqueue without blocking; on overflow drop the oldest frames."""
@@ -141,16 +226,36 @@ class CoreAudioTapSource(_BufferedSource):
     mono 16 kHz into a bounded queue that drops the oldest on overflow, reported through
     dropped_seconds (as in MicSource). It needs only the system audio recording permission
     (asked on first use); the screen is not involved.
+
+    Python runs in a real-time callback and may miss a cycle: the input time stamp shows the jump
+    in the device's sample counter, and that stretch becomes silence. A counter that went back
+    (the device restarted) catches up with the clock instead, like the first block, and a jump
+    forward fills no more than the clock has passed: the counter alone can leap anywhere.
     """
 
-    def __init__(self, *, label: str = "system", tee: Any = None) -> None:
-        super().__init__(label=label, tee=tee, block_seconds=_TAP_BLOCK_SECONDS)
+    def __init__(
+        self,
+        *,
+        label: str = "system",
+        tee: Any = None,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        super().__init__(label=label, tee=tee, block_seconds=_TAP_BLOCK_SECONDS, clock=clock)
         self._ca: Any = None  # CoreAudio CDLL, kept alive because our C objects live in it
         self._tap_id = 0
         self._agg_id = 0
         self._ioproc_id: Any = None
         self._ioproc_ref: Any = None  # CFUNCTYPE object; without a reference GC frees the callback
-        self._fmt: tuple[float, int] | None = None  # tap (rate, channels), kAudioTapPropertyFormat
+        self.timebase: tuple[int, int] | None = None  # mHostTime ticks to ns, read in start()
+        self._next_sample: float | None = None  # device sample right after the last block
+        self._began = False
+        self._lost_frames = 0
+        self.set_format(48000.0, 2)
+
+    def set_format(self, rate: float, channels: int) -> None:
+        """The tap's format, kAudioTapPropertyFormat."""
+        self._fmt = (rate, channels)
+        self._resampler = _Resampler(rate)
 
     def available(self) -> bool:
         if platform.system() != "Darwin":
@@ -186,9 +291,11 @@ class CoreAudioTapSource(_BufferedSource):
         import ctypes
         import uuid as _uuid
 
+        import numpy  # noqa: F401 - loaded here, not on the real-time thread
         import objc
         from Foundation import NSDictionary  # ty: ignore[unresolved-import]
 
+        self.timebase = _monotonic_timebase()
         ca = self._load_coreaudio()  # loading the framework registers its ObjC classes
         self._ca = ca
         CATapDescription = objc.lookUpClass("CATapDescription")  # ty: ignore[unresolved-attribute]
@@ -209,7 +316,7 @@ class CoreAudioTapSource(_BufferedSource):
         self._tap_id = tap_id.value
 
         try:
-            self._fmt = self._read_tap_format(ca, tap_id.value)
+            self.set_format(*self._read_tap_format(ca, tap_id.value))
             # a private aggregate device with one sub-tap: CoreAudio drives the IOProc with the
             # tap's data through it; drift compensation is Apple's advice for taps
             agg_uid = str(_uuid.uuid4())
@@ -248,9 +355,67 @@ class CoreAudioTapSource(_BufferedSource):
     def stop(self) -> None:
         self._stopped = True
         self._teardown()
+        if self._lost_frames:
+            logger.info("system audio: %.2f s lost in capture", self._lost_frames / self._fmt[0])
         self._put_dropping_oldest(None)  # end sentinel, without blocking on a full queue
 
+    def on_input(
+        self,
+        data: bytes,
+        sample_time: float | None,
+        host_time: int | None,
+        *,
+        channels: int = 1,
+        planar: bool = False,
+    ) -> None:
+        """A block from the IOProc, float32; the times are of its first frame, None if not valid."""
+        mono = _mono(data, channels=channels, planar=planar)
+        frames = int(mono.size)
+        if not frames:
+            return
+        known = sample_time is not None and self._next_sample is not None
+        late = round(sample_time - self._next_sample) if known else 0
+        if not self._began or late < 0:
+            self._began = True
+            self._catch_up(self._first_sample_at(host_time, frames))
+        elif late > 0:
+            self._fill_lost(self._real_gap(late, self._first_sample_at(host_time, frames)))
+        if sample_time is not None and (late or self._next_sample is None):
+            self._next_sample = sample_time
+        if self._next_sample is not None:
+            self._next_sample += frames
+        pcm = self._resampler.feed(mono)
+        if pcm:
+            self._emit(pcm)
+
     # ── internals ─────────────────────────────────────────────────────────────
+
+    def _first_sample_at(self, host_time: int | None, frames: int) -> float:
+        """A block's start on the time.monotonic() clock."""
+        if host_time is None or self.timebase is None:
+            return self._clock() - frames / self._fmt[0]
+        numer, denom = self.timebase
+        return host_time * numer / denom / 1e9
+
+    def _real_gap(self, frames: int, first_sample_at: float) -> int:
+        """The device frames of a jump that the origin's clock agrees with."""
+        if self.origin is None:
+            return frames
+        at = first_sample_at + _GAP_SLACK_SECONDS
+        behind = samples_behind(self.origin, at, self._emitted, _TARGET_RATE)
+        return min(frames, math.ceil(behind * self._fmt[0] / _TARGET_RATE))
+
+    def _fill_lost(self, frames: int) -> None:
+        """Lost frames as silence, a second at a time, through the resampler like any audio."""
+        import numpy as np
+
+        self._lost_frames += frames
+        second = int(self._fmt[0])
+        while frames > 0:
+            pcm = self._resampler.feed(np.zeros(min(frames, second), dtype=np.float32))
+            if pcm:
+                self._emit(pcm)
+            frames -= second
 
     @staticmethod
     def _read_tap_format(ca: Any, tap_id: int) -> tuple[float, int]:
@@ -306,18 +471,29 @@ class CoreAudioTapSource(_BufferedSource):
             # the array is oversized; only the first mNumberBuffers entries are read
             _fields_ = [("mNumberBuffers", ctypes.c_uint32), ("mBuffers", _AudioBuffer * 8)]
 
+        class _AudioTimeStamp(ctypes.Structure):
+            _fields_ = [
+                ("mSampleTime", ctypes.c_double),
+                ("mHostTime", ctypes.c_uint64),
+                ("mRateScalar", ctypes.c_double),
+                ("mWordClockTime", ctypes.c_uint64),
+                ("mSMPTETime", ctypes.c_byte * 24),  # SMPTETime, not used
+                ("mFlags", ctypes.c_uint32),
+                ("mReserved", ctypes.c_uint32),
+            ]
+
         ioproc_t = ctypes.CFUNCTYPE(
             ctypes.c_int32,
             ctypes.c_uint32,  # inDevice
             ctypes.c_void_p,  # inNow
             ctypes.POINTER(_AudioBufferList),  # inInputData: the tap's data
-            ctypes.c_void_p,  # inInputTime
+            ctypes.POINTER(_AudioTimeStamp),  # inInputTime: of the first frame
             ctypes.c_void_p,  # outOutputData
             ctypes.c_void_p,  # inOutputTime
             ctypes.c_void_p,  # inClientData
         )
 
-        def ioproc(_dev, _now, in_data, _in_time, _out_data, _out_time, _client) -> int:
+        def ioproc(_dev, _now, in_data, in_time, _out_data, _out_time, _client) -> int:
             try:
                 if not in_data or self._stopped:
                     return 0
@@ -332,12 +508,18 @@ class CoreAudioTapSource(_BufferedSource):
                         chunks.append(ctypes.string_at(buf.mData, buf.mDataByteSize))
                 if not chunks:
                     return 0
-                rate, fmt_ch = self._fmt or (48000.0, 2)
                 planar = n > 1
-                channels = n if planar else max(1, int(abl.mBuffers[0].mNumberChannels or fmt_ch))
-                pcm = to_pcm16_mono(b"".join(chunks), rate=rate, channels=channels, planar=planar)
-                if pcm:
-                    self._emit(pcm)
+                channels = self._fmt[1]
+                channels = n if planar else max(1, int(abl.mBuffers[0].mNumberChannels or channels))
+                sample_time, host_time = None, None
+                if in_time:
+                    stamp = in_time.contents
+                    sample_time, host_time = valid_times(
+                        stamp.mFlags, stamp.mSampleTime, stamp.mHostTime
+                    )
+                self.on_input(
+                    b"".join(chunks), sample_time, host_time, channels=channels, planar=planar
+                )
             except Exception:  # noqa: BLE001 - CoreAudio's real-time thread must not raise
                 pass
             return 0
@@ -397,8 +579,14 @@ class PulseMonitorSource(_BufferedSource):
 
     _BLOCK_SECONDS = 0.1  # stdout is read in 100 ms pieces
 
-    def __init__(self, *, label: str = "system", tee: Any = None) -> None:
-        super().__init__(label=label, tee=tee, block_seconds=self._BLOCK_SECONDS)
+    def __init__(
+        self,
+        *,
+        label: str = "system",
+        tee: Any = None,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        super().__init__(label=label, tee=tee, block_seconds=self._BLOCK_SECONDS, clock=clock)
         self._proc: subprocess.Popen | None = None
         self._reader: threading.Thread | None = None
 
@@ -437,6 +625,7 @@ class PulseMonitorSource(_BufferedSource):
                     "--format=s16le",
                     f"--rate={_TARGET_RATE}",
                     "--channels=1",
+                    f"--latency-msec={_PAREC_LATENCY_MS}",
                 ],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,
@@ -451,6 +640,7 @@ class PulseMonitorSource(_BufferedSource):
         assert self._proc is not None and self._proc.stdout is not None
         chunk = int(_TARGET_RATE * 2 * self._BLOCK_SECONDS)
         stdout = self._proc.stdout
+        first_block = True
         while True:
             try:
                 data = stdout.read(chunk)
@@ -458,6 +648,9 @@ class PulseMonitorSource(_BufferedSource):
                 break
             if not data:  # parec died (the sound server restarted): an end, not silence
                 break
+            if first_block:
+                first_block = False
+                self._catch_up(self._clock() - len(data) / (_TARGET_RATE * 2))
             self._emit(data)
         self._stopped = True
         self._put_dropping_oldest(None)
