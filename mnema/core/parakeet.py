@@ -205,6 +205,13 @@ _EN_COMMON = frozenset(
     "the a an and or but of to in on at for with is are was were be been it this that you i we "
     "they he she not do does did have has had will would can could so if as what yes no".split()
 )
+_RU_LETTERS = frozenset("абвгдеёжзийклмнопрстуфхцчшщъыьэюя")
+_UK_LETTERS = frozenset("абвгґдеєжзиіїйклмнопрстуфхцчшщьюя")
+# everyday English words that are not everyday words of another Latin-script language
+_EN_SURE = frozenset("the and you that this with what they".split())
+_EN_SURE_SHARE = 0.1
+_SCRIPT_SHARE = 0.8  # of a mixed text no language is sure
+_STRAY_SHARE = 0.005
 
 
 def guess_lang(text: str) -> str | None:
@@ -220,6 +227,31 @@ def guess_lang(text: str) -> str | None:
     words = re.findall(r"[a-z']+", text.lower())
     common = sum(1 for w in words if w in _EN_COMMON)
     return "en" if words and common >= len(words) * 0.15 else None
+
+
+def _fits(letters: list[str], alphabet: frozenset[str], marks: str) -> bool:
+    """Nearly all letters are of the alphabet, and the ones its neighbours lack are there."""
+    stray = sum(c not in alphabet for c in letters)
+    marked = sum(c in marks for c in letters)
+    return stray <= len(letters) * _STRAY_SHARE <= marked
+
+
+def sure_lang(text: str) -> str | None:
+    """The language only when the text leaves no doubt, for a hint that forces it on the speech:
+    guess_lang's script alone also fits Bulgarian, Kazakh or Italian."""
+    lower = text.lower()
+    letters = [c for c in lower if c.isalpha()]
+    if not letters:
+        return None
+    cyrillic = [c for c in letters if "\u0400" <= c <= "\u052f"]
+    if len(cyrillic) >= len(letters) * _SCRIPT_SHARE:
+        if _fits(cyrillic, _RU_LETTERS, "ыэ"):
+            return "ru"
+        return "uk" if _fits(cyrillic, _UK_LETTERS, "їє") else None
+    if sum("a" <= c <= "z" for c in letters) < len(letters) * _SCRIPT_SHARE:
+        return None
+    words = re.findall(r"\w+", lower)
+    return "en" if sum(w in _EN_SURE for w in words) >= len(words) * _EN_SURE_SHARE else None
 
 
 def tidy(segments: list[Segment], lang: str | None) -> list[Segment]:

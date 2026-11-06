@@ -76,14 +76,40 @@ def _recognize(wav, *, model="openai/gpt-4o-transcribe", lang=None) -> Transcrip
     return backends.CloudBackend(model, key=KEY).run(wav, lang=lang)
 
 
-RUSSIAN = " ".join(["сегодня обсудили план"] * 15)
-GERMAN = " ".join(["wir können das morgen besprechen"] * 15)
+def _thrice(sample: str) -> str:
+    return " ".join([sample] * 3)
+
+
+RUSSIAN = _thrice(
+    "Сегодня мы быстро обсудили план на неделю, потом посмотрели, что осталось сделать, и "
+    "решили, что выпуск можно отложить до пятницы, если этого захочет руководитель."
+)
+UKRAINIAN = _thrice(
+    "Сьогодні ми поговорили про її роботу, про те, що є вдома, і про їхні плани на вихідні, "
+    "тому наступної зустрічі чекаємо у п'ятницю, коли всі повернуться з відпустки."
+)
+ENGLISH = _thrice(
+    "So I talked to them about the release and they said that the team can ship it this week "
+    "if you are happy with what we have, and then we can see what they want to do next."
+)
+OTHER_LANGUAGES = {
+    "German": "Wir können das morgen besprechen, weil was du gesagt hast, nicht mehr stimmt.",
+    "Italian": "No, no, ma io non so. A me non va. Ti do una mano se vuoi, in casa o al lavoro.",
+    "Danish": "Jeg er glad for at se det. Vi har to biler, og de er ikke til salg for at have ro.",
+    "Tagalog": "Pumunta ako sa bahay at sa palengke, to ang sinabi niya sa akin kahapon no.",
+    "Portuguese": "Eu não sei o que dizer, mas a gente vai falar no trabalho e do que for preciso.",
+    "Kazakh": "Бүгін біз жоспарды талқыладық, содан кейін не істеу керектігін қарап шықтық.",
+    "Belarusian": "Сёння мы абмеркавалі план на тыдзень, і ўсё, што засталося зрабіць да пятніцы.",
+    "Bulgarian": "Днес обсъдихме плана за седмицата и решихме, че можем да отложим всичко.",
+    "Serbian": "Данас смо разговарали о плану за недељу и договорили се шта још треба урадити.",
+    "Mongolian": "Өнөөдөр бид долоо хоногийн төлөвлөгөөг хэлэлцэж, үлдсэн ажлаа ярилцлаа.",
+}
 
 
 def test_each_window_is_one_request_and_keeps_its_time(tmp_path, speech, sent) -> None:
     """Speech across a short pause is one window sent whole; requests go at the same time and
     the windows come back in the order of the recording."""
-    speech += [(1, 6), (7, 12), (20, 22)]
+    speech += [(1, 6), (7, 12), (20, 27)]
     second_asked = threading.Event()
 
     def first(seconds):
@@ -94,15 +120,15 @@ def test_each_window_is_one_request_and_keeps_its_time(tmp_path, speech, sent) -
         second_asked.set()
         return {"text": "Вторая."}
 
-    sent.by_length.update({11.0: first, 2.0: second})
+    sent.by_length.update({11.0: first, 7.0: second})
     tr = _recognize(_track(tmp_path / "mic.wav", 30))
-    assert sorted(c["seconds"] for c in sent.calls) == [2.0, 11.0]
+    assert sorted(c["seconds"] for c in sent.calls) == [7.0, 11.0]
     assert {(c["model"], c["api_key"], c["language"]) for c in sent.calls} == {
         ("openai/gpt-4o-transcribe", KEY, None)
     }
     assert [(s.start, s.end, s.text) for s in tr.segments] == [
         (1.0, 12.0, "Первая длинная реплика."),
-        (20.0, 22.0, "Вторая."),
+        (20.0, 27.0, "Вторая."),
     ]
     assert tr.text == "Первая длинная реплика. Вторая."
 
@@ -161,38 +187,67 @@ def test_the_model_never_hears_the_text_before(tmp_path, speech, monkeypatch) ->
     assert len(set(sentences)) == 20
 
 
-def test_later_requests_get_the_language_the_finished_text_names(tmp_path, speech, sent) -> None:
-    """Requests already running stay without a language, the ones after them have it; the
-    transcript does not claim a language nobody chose."""
-    speech += [(i * 3, i * 3 + 1) for i in range(8)]
-    running = threading.Barrier(backends._CLOUD_REQUESTS)
+def _short_clips_around_speech(speech, sent, tmp_path, *answers: str) -> list[dict]:
+    """A short clip, a window of speech for each answer, a short clip; the short clips' requests."""
+    speech += [(0, 1), *((10 * n, 10 * n + 6) for n in range(1, len(answers) + 1)), (100, 101)]
+    heard = iter(answers)
+    sent.by_length[6.0] = lambda seconds: {"text": next(heard)}
+    _recognize(_track(tmp_path / "mic.wav", 102))
+    return [c for c in sent.calls if c["seconds"] == 1.0]
 
-    def answer(seconds):
-        running.wait(timeout=10)
-        return {"text": RUSSIAN}
 
-    sent.answers.update(dict.fromkeys(range(1, running.parties + 1), answer))
-    tr = _recognize(_track(tmp_path / "mic.wav", 25))
-    languages = [c["language"] for c in sent.calls]
-    assert languages == [None] * running.parties + ["ru"] * (8 - running.parties)
+@pytest.mark.parametrize(("heard", "lang"), [(RUSSIAN, "ru"), (UKRAINIAN, "uk"), (ENGLISH, "en")])
+def test_short_clips_get_the_language_of_the_speech_wherever_they_are(
+    tmp_path, speech, sent, heard, lang
+) -> None:
+    """Speech is left to the model; a clip too short for it is told the language, even the first
+    one; the transcript does not claim a language nobody chose."""
+    speech += [(0, 1), (10, 16), (20, 26), (40, 41)]
+    sent.by_length[6.0] = heard
+    tr = _recognize(_track(tmp_path / "mic.wav", 45))
+    assert {c["language"] for c in sent.calls if c["seconds"] == 6.0} == {None}
+    assert [c["language"] for c in sent.calls if c["seconds"] == 1.0] == [lang, lang]
     assert tr.language is None
 
 
-def test_a_text_that_names_no_language_leaves_it_out(tmp_path, speech, sent) -> None:
-    speech += [(i * 3, i * 3 + 1) for i in range(8)]
-    sent.answers.update(dict.fromkeys(range(1, 9), GERMAN))
-    _recognize(_track(tmp_path / "mic.wav", 25))
+@pytest.mark.parametrize("language", OTHER_LANGUAGES)
+def test_a_language_the_text_cannot_prove_is_left_to_the_model(
+    tmp_path, speech, sent, language
+) -> None:
+    """Script and a few look-alike words are no proof: a Kazakh call must not go out as Ukrainian,
+    or an Italian one as English."""
+    clips = _short_clips_around_speech(speech, sent, tmp_path, _thrice(OTHER_LANGUAGES[language]))
+    assert [c["language"] for c in clips] == [None, None]
+
+
+def test_false_lines_of_short_clips_prove_nothing(tmp_path, speech, sent) -> None:
+    """Tiny clips answer with a boilerplate line; it decides nothing, however many of them."""
+    speech += [(i * 3, i * 3 + 1) for i in range(20)]
+    sent.by_length[1.0] = "Thank you for watching. Thanks for watching!"
+    _recognize(_track(tmp_path / "mic.wav", 61))
     assert {c["language"] for c in sent.calls} == {None}
 
 
-def test_a_few_words_of_tiny_clips_do_not_decide_the_language(tmp_path, speech, sent) -> None:
-    """False lines of tiny clips alone name nothing; the language comes from the speech after."""
-    speech += [(i * 3, i * 3 + 1) for i in range(12)]
-    sent.answers.update(dict.fromkeys(range(1, 7), "Thank you."))
-    sent.answers.update(dict.fromkeys(range(7, 13), RUSSIAN))
-    _recognize(_track(tmp_path / "mic.wav", 37))
-    assert {c["language"] for c in sent.calls} <= {None, "ru"}
-    assert sent.calls[-1]["language"] == "ru"
+def test_an_english_greeting_does_not_decide_a_russian_call(tmp_path, speech, sent) -> None:
+    """Real English at the start and false lines between: the language is of the call as a
+    whole, and no window of speech is ever forced into it."""
+    answers = iter(["Thank you for calling, please hold the line.", RUSSIAN, RUSSIAN])
+    speech += [(0, 6), (10, 11), (20, 26), (30, 31), (40, 46)]
+    sent.by_length[6.0] = lambda seconds: {"text": next(answers)}
+    sent.by_length[1.0] = "Thank you for watching."
+    _recognize(_track(tmp_path / "mic.wav", 50))
+    assert [c["language"] for c in sent.calls if c["seconds"] == 6.0] == [None, None, None]
+    assert [c["language"] for c in sent.calls if c["seconds"] == 1.0] == ["ru", "ru"]
+
+
+def test_half_russian_half_english_names_no_language(tmp_path, speech, sent) -> None:
+    clips = _short_clips_around_speech(speech, sent, tmp_path, RUSSIAN, ENGLISH)
+    assert [c["language"] for c in clips] == [None, None]
+
+
+def test_a_few_words_of_speech_prove_nothing(tmp_path, speech, sent) -> None:
+    clips = _short_clips_around_speech(speech, sent, tmp_path, "Сегодня мы обсудили план.")
+    assert [c["language"] for c in clips] == [None, None]
 
 
 def test_a_busy_service_is_asked_again(tmp_path, speech, sent) -> None:

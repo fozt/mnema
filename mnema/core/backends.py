@@ -217,7 +217,8 @@ NO_CLOUD_KEY = "No OpenAI key for recognition. Set it in Mnema settings on the M
 _CLOUD_PART_S = 150.0  # the models answer up to 2,000 tokens: a longer part would be cut short
 _CLOUD_WINDOW_S = 15.0
 _CLOUD_JOIN_S = 1.5  # a longer pause ends the window
-_CLOUD_LANG_WORDS = 30  # less than this may be a tiny clip's false line
+_CLOUD_SHORT_S = 5.0  # a shorter window may come back as a false line: it is told the language
+_CLOUD_LANG_WORDS = 30
 _CLOUD_REQUESTS = 4
 
 
@@ -267,8 +268,9 @@ def _answer_text(answer: Any) -> str:
 
 class CloudBackend(Engine):
     """OpenAI recognition: this machine's speech search cuts the track into windows, each one
-    request; several requests at once. Without a chosen language, later requests get the one the
-    finished text names. A failure after retries propagates: no other engine takes over."""
+    request; several requests at once. Without a chosen language the model detects it, and short
+    windows go last with the one the longer windows leave no doubt about. A failure after retries
+    propagates: no other engine takes over."""
 
     id = "cloud"
     title, extra, names_lang, cloud = "OpenAI", "parakeet", False, True
@@ -314,29 +316,33 @@ class CloudBackend(Engine):
 
         lock = threading.Lock()
         done: dict[int, str] = {}
+        finished = 0
 
         def report(fraction: float | None, message: str) -> None:
             with lock:
                 on(fraction, message)
 
-        def recognize(index: int) -> None:
-            nonlocal lang
+        def recognize(index: int, language: str | None) -> None:
             s, e = windows[index]
-            text = self._ask(_wav_bytes(wav, s, e), lang, report)
-            with lock:
-                done[index] = text
-                if lang is None:
-                    heard = " ".join(done.values())
-                    if len(heard.split()) >= _CLOUD_LANG_WORDS:
-                        lang = parakeet.guess_lang(heard)
+            done[index] = self._ask(_wav_bytes(wav, s, e), language, report)
 
+        def ask_all(indices: list[int], language: str | None) -> None:
+            nonlocal finished
+            for future in as_completed([pool.submit(recognize, i, language) for i in indices]):
+                future.result()
+                finished += 1
+                report(finished / len(windows), _("Recognizing…"))
+
+        short = int(_CLOUD_SHORT_S * SR)
+        spoken = [i for i, (s, e) in enumerate(windows) if e - s >= short]
+        rest = [i for i, (s, e) in enumerate(windows) if e - s < short]
         on(0.0, _("Recognizing…"))
         pool = ThreadPoolExecutor(_CLOUD_REQUESTS, thread_name_prefix="cloud-asr")
         try:
-            futures = [pool.submit(recognize, i) for i in range(len(windows))]
-            for count, future in enumerate(as_completed(futures), 1):
-                future.result()
-                report(count / len(futures), _("Recognizing…"))
+            ask_all(spoken, lang)
+            heard = " ".join(done[i] for i in spoken)
+            enough = len(heard.split()) >= _CLOUD_LANG_WORDS
+            ask_all(rest, lang or (parakeet.sure_lang(heard) if enough else None))
         finally:
             pool.shutdown(wait=False, cancel_futures=True)
         return [
