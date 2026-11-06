@@ -72,8 +72,8 @@ def _transcribe(
     """Worker body: pick the engine and recognize.
 
     A given language only cleans Parakeet's replies and is told to the cloud. Without one,
-    nothing is detected up front: Parakeet names the language from the text, the cloud detects
-    it itself.
+    nothing is detected up front: Parakeet names the language from the text, the cloud's later
+    requests get the one its finished text names.
     """
     info = probe(src)
     if not info.has_audio:

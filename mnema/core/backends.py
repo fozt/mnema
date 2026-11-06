@@ -18,7 +18,7 @@ from typing import Any, ClassVar, Protocol, runtime_checkable
 
 from ..i18n import _
 from . import asr_engine, base, parakeet, vad
-from .asr_engine import REPLY_GAP_S, SR, Word, group_speech
+from .asr_engine import SR, Word, group_speech
 from .audio import extract_audio
 from .base import MediaError, Progress, noop
 from .models import Segment, Transcript
@@ -215,7 +215,9 @@ def _words_together(src: Path) -> list[Word] | None:
 CLOUD_MODELS = ("openai/gpt-4o-transcribe", "openai/gpt-4o-mini-transcribe")
 NO_CLOUD_KEY = "No OpenAI key for recognition. Set it in Mnema settings on the Mac"
 _CLOUD_PART_S = 150.0  # the models answer up to 2,000 tokens: a longer part would be cut short
-_CLOUD_PROMPT_WORDS = 200
+_CLOUD_WINDOW_S = 15.0
+_CLOUD_JOIN_S = 1.5  # a longer pause ends the window
+_CLOUD_LANG_WORDS = 30  # less than this may be a tiny clip's false line
 _CLOUD_REQUESTS = 4
 
 
@@ -258,28 +260,15 @@ def _wav_bytes(wav: Path, start: int, end: int) -> bytes:
     return out.getvalue()
 
 
-def _utterances(speech: list[tuple[int, int]]) -> list[list[tuple[int, int]]]:
-    """VAD speech (samples) → utterances split at pauses as replies are, each in parts of at most
-    _CLOUD_PART_S; a part follows the previous one of its utterance without a pause."""
-    gap = int(REPLY_GAP_S * SR)
-    out: list[list[tuple[int, int]]] = []
-    for part in group_speech(speech, int(_CLOUD_PART_S * SR), gap):
-        if out and part[0] - out[-1][-1][1] <= gap:
-            out[-1].append(part)
-        else:
-            out.append([part])
-    return out
-
-
 def _answer_text(answer: Any) -> str:
     text = answer.get("text") if isinstance(answer, dict) else getattr(answer, "text", None)
     return str(text or "").strip()
 
 
 class CloudBackend(Engine):
-    """OpenAI recognition: this machine's speech search cuts the track into utterances, each one
-    request (a long one in parts) with the track's previous text as a prompt; several requests
-    at once. A failure after retries propagates: no other engine takes over."""
+    """OpenAI recognition: this machine's speech search cuts the track into windows, each one
+    request; several requests at once. Without a chosen language, later requests get the one the
+    finished text names. A failure after retries propagates: no other engine takes over."""
 
     id = "cloud"
     title, extra, names_lang, cloud = "OpenAI", "parakeet", False, True
@@ -313,56 +302,50 @@ class CloudBackend(Engine):
             wav = src if _is_track(src) else extract_audio(src, Path(tmp) / "audio.wav", on=on)
             on(None, _("Looking for speech…"))
             speech = asr_engine.local_recognizer().speech(wav, max_s=_CLOUD_PART_S)
-            segments = self._recognize(wav, _utterances(speech), lang, on)
+            windows = group_speech(speech, int(_CLOUD_WINDOW_S * SR), int(_CLOUD_JOIN_S * SR))
+            segments = self._recognize(wav, windows, lang, on)
         text = " ".join(s.text for s in segments)
         return Transcript(text=text, segments=segments, language=lang)
 
     def _recognize(
-        self, wav: Path, utterances: list[list[tuple[int, int]]], lang: str | None, on: Progress
+        self, wav: Path, windows: list[tuple[int, int]], lang: str | None, on: Progress
     ) -> list[Segment]:
         from concurrent.futures import ThreadPoolExecutor, as_completed
 
         lock = threading.Lock()
-        done: dict[int, list[Segment]] = {}
+        done: dict[int, str] = {}
 
         def report(fraction: float | None, message: str) -> None:
             with lock:
                 on(fraction, message)
 
-        def heard_before(index: int) -> list[str]:
-            """Words of the track so far: the utterances recognized in a row from the start."""
-            with lock:
-                words: list[str] = []
-                for i in range(index):
-                    if i not in done:
-                        break
-                    words += [w for s in done[i] for w in s.text.split()]
-                return words
-
         def recognize(index: int) -> None:
-            found: list[Segment] = []
-            before = heard_before(index)
-            for s, e in utterances[index]:
-                words = before + [w for x in found for w in x.text.split()]
-                prompt = " ".join(words[-_CLOUD_PROMPT_WORDS:]) or None
-                text = self._ask(_wav_bytes(wav, s, e), lang, prompt, report)
-                if text:
-                    found.append(Segment(start=s / SR, end=e / SR, text=text))
+            nonlocal lang
+            s, e = windows[index]
+            text = self._ask(_wav_bytes(wav, s, e), lang, report)
             with lock:
-                done[index] = found
+                done[index] = text
+                if lang is None:
+                    heard = " ".join(done.values())
+                    if len(heard.split()) >= _CLOUD_LANG_WORDS:
+                        lang = parakeet.guess_lang(heard)
 
         on(0.0, _("Recognizing…"))
         pool = ThreadPoolExecutor(_CLOUD_REQUESTS, thread_name_prefix="cloud-asr")
         try:
-            futures = [pool.submit(recognize, i) for i in range(len(utterances))]
+            futures = [pool.submit(recognize, i) for i in range(len(windows))]
             for count, future in enumerate(as_completed(futures), 1):
                 future.result()
                 report(count / len(futures), _("Recognizing…"))
         finally:
             pool.shutdown(wait=False, cancel_futures=True)
-        return [s for i in range(len(utterances)) for s in done[i]]
+        return [
+            Segment(start=s / SR, end=e / SR, text=done[i])
+            for i, (s, e) in enumerate(windows)
+            if done[i]
+        ]
 
-    def _ask(self, data: bytes, lang: str | None, prompt: str | None, on: Progress) -> str:
+    def _ask(self, data: bytes, lang: str | None, on: Progress) -> str:
         """One request; overload, 5xx and timeouts are retried as for text models."""
         import litellm
 
@@ -373,8 +356,7 @@ class CloudBackend(Engine):
         while True:
             try:
                 answer = litellm.transcription(
-                    model=self.model, file=("utterance.wav", data), api_key=self.key,
-                    language=lang, prompt=prompt,
+                    model=self.model, file=("speech.wav", data), api_key=self.key, language=lang
                 )  # fmt: skip
             except Exception as e:
                 wait = _retry_wait(e, retries, live=False, started=False)

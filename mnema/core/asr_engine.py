@@ -72,8 +72,8 @@ def replies(words: list[Word], *, gap: float = REPLY_GAP_S) -> list[Segment]:
 def group_speech(
     speech: list[tuple[int, int]], max_window: int, max_gap: int
 ) -> list[tuple[int, int]]:
-    """Speech spans (samples, each ≤ max_window) → windows ≤ max_window; neighbours join only
-    across a pause ≤ max_gap."""
+    """Speech spans (samples) → windows; neighbours join only across a pause ≤ max_gap while the
+    window stays ≤ max_window, a longer span stays whole."""
     windows: list[tuple[int, int]] = []
     for s, e in speech:
         if windows and e - windows[-1][0] <= max_window and s - windows[-1][1] <= max_gap:

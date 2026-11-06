@@ -1,6 +1,6 @@
-"""Cloud recognition is an engine: this machine's speech search cuts the track into utterances,
-each one is a single OpenAI request with the track's previous text as a prompt. The boundaries
-are litellm.transcription and this machine's recognizer (on the server, the silero session)."""
+"""Cloud recognition is an engine: this machine's speech search cuts the track into windows, each
+one is a single OpenAI request. The boundaries are litellm.transcription and this machine's
+recognizer (on the server, the silero session)."""
 
 from __future__ import annotations
 
@@ -76,53 +76,123 @@ def _recognize(wav, *, model="openai/gpt-4o-transcribe", lang=None) -> Transcrip
     return backends.CloudBackend(model, key=KEY).run(wav, lang=lang)
 
 
-def test_each_utterance_is_one_request_and_keeps_its_time(tmp_path, speech, sent) -> None:
-    """Speech with pauses up to 0.6 s is one utterance sent whole, however long; requests go at
-    the same time and the replies come back in the order of the recording."""
-    speech += [(1, 20), (20.3, 45), (50, 52)]
+RUSSIAN = " ".join(["сегодня обсудили план"] * 15)
+GERMAN = " ".join(["wir können das morgen besprechen"] * 15)
+
+
+def test_each_window_is_one_request_and_keeps_its_time(tmp_path, speech, sent) -> None:
+    """Speech across a short pause is one window sent whole; requests go at the same time and
+    the windows come back in the order of the recording."""
+    speech += [(1, 6), (7, 12), (20, 22)]
     second_asked = threading.Event()
 
     def first(seconds):
-        assert second_asked.wait(timeout=10), "the second utterance waited for the first"
+        assert second_asked.wait(timeout=10), "the second window waited for the first"
         return {"text": "Первая длинная реплика."}
 
     def second(seconds):
         second_asked.set()
         return {"text": "Вторая."}
 
-    sent.by_length.update({44.0: first, 2.0: second})
-    tr = _recognize(_track(tmp_path / "mic.wav", 60))
-    assert sorted(c["seconds"] for c in sent.calls) == [2.0, 44.0]
+    sent.by_length.update({11.0: first, 2.0: second})
+    tr = _recognize(_track(tmp_path / "mic.wav", 30))
+    assert sorted(c["seconds"] for c in sent.calls) == [2.0, 11.0]
     assert {(c["model"], c["api_key"], c["language"]) for c in sent.calls} == {
         ("openai/gpt-4o-transcribe", KEY, None)
     }
     assert [(s.start, s.end, s.text) for s in tr.segments] == [
-        (1.0, 45.0, "Первая длинная реплика."),
-        (50.0, 52.0, "Вторая."),
+        (1.0, 12.0, "Первая длинная реплика."),
+        (20.0, 22.0, "Вторая."),
     ]
     assert tr.text == "Первая длинная реплика. Вторая."
 
 
-def test_a_long_utterance_goes_in_parts_with_the_text_before_as_prompt(
-    tmp_path, speech, sent
+@pytest.mark.parametrize(
+    ("spans", "windows"),
+    [
+        ([(0, 1), (2.5, 3)], [(0, 3)]),  # a pause of exactly 1.5 s joins
+        ([(0, 1), (2.6, 3)], [(0, 1), (2.6, 3)]),  # a longer one does not
+        ([(0, 7), (8, 15)], [(0, 15)]),  # exactly 15 s
+        ([(0, 7), (8, 15.5)], [(0, 7), (8, 15.5)]),  # a longer window is not made
+        ([(0, 5), (6, 11), (12, 17)], [(0, 11), (12, 17)]),
+        ([(0, 40), (41, 42), (43, 44)], [(0, 40), (41, 44)]),  # one long span stays whole
+        ([(0, 1), (2, 40)], [(0, 1), (2, 40)]),
+    ],
+)
+def test_neighbours_join_across_a_short_pause_within_the_window(
+    tmp_path, speech, sent, spans, windows
 ) -> None:
-    """Continuous speech goes in parts of at most 2.5 minutes, so an answer never reaches the
-    model's output limit; each part's prompt is the last 200 words before it; the chosen language
-    goes to every part."""
+    speech += spans
+    tr = _recognize(_track(tmp_path / "mic.wav", 45))
+    assert len(sent.calls) == len(windows)
+    assert [(s.start, s.end) for s in tr.segments] == windows
+
+
+def test_continuous_speech_goes_in_parts_in_the_chosen_language(tmp_path, speech, sent) -> None:
+    """The parts of speech that never pauses are at most 2.5 minutes each, so an answer never
+    reaches the model's output limit; the chosen language goes to every part, whatever the text
+    says."""
     speech += [(0, 100), (100.3, 200), (200.3, 300)]
-    words = [f"слово{i}" for i in range(250)]
-    sent.answers[1] = " ".join(words)
+    sent.answers.update({1: RUSSIAN, 2: RUSSIAN, 3: RUSSIAN})
     wav = _track(tmp_path / "mic.wav", 301)
-    tr = _recognize(wav, model="openai/gpt-4o-mini-transcribe", lang="ru")
-    first, second, third = sent.calls
-    assert max(c["seconds"] for c in sent.calls) <= 150
-    assert not first.get("prompt")
-    assert second["prompt"] == " ".join(words[-200:])
-    assert third["prompt"].endswith("реплика 2")
-    assert {c["language"] for c in sent.calls} == {"ru"}
+    tr = _recognize(wav, model="openai/gpt-4o-mini-transcribe", lang="en")
+    assert {c["language"] for c in sent.calls} == {"en"}
     assert {c["model"] for c in sent.calls} == {"openai/gpt-4o-mini-transcribe"}
     assert [(s.start, s.end) for s in tr.segments] == [(0.0, 100.0), (100.3, 200.0), (200.3, 300.0)]
-    assert tr.language == "ru"
+    assert tr.language == "en"
+
+
+def test_the_model_never_hears_the_text_before(tmp_path, speech, monkeypatch) -> None:
+    """A service that echoes whatever prompt it gets: every sentence comes out once."""
+    speech += [(i * 3, i * 3 + 1) for i in range(20)]
+    numbers = iter(range(1000))
+    lock = threading.Lock()
+
+    def transcription(**kw):
+        with lock:
+            own = f"фраза номер {next(numbers)}."
+        return {"text": " ".join(filter(None, [kw.get("prompt"), own]))}
+
+    monkeypatch.setattr(litellm, "transcription", transcription)
+    tr = _recognize(_track(tmp_path / "mic.wav", 61))
+    sentences = [s.text for s in tr.segments]
+    assert len(sentences) == 20
+    assert all(s.count("фраза") == 1 for s in sentences)
+    assert len(set(sentences)) == 20
+
+
+def test_later_requests_get_the_language_the_finished_text_names(tmp_path, speech, sent) -> None:
+    """Requests already running stay without a language, the ones after them have it; the
+    transcript does not claim a language nobody chose."""
+    speech += [(i * 3, i * 3 + 1) for i in range(8)]
+    running = threading.Barrier(backends._CLOUD_REQUESTS)
+
+    def answer(seconds):
+        running.wait(timeout=10)
+        return {"text": RUSSIAN}
+
+    sent.answers.update(dict.fromkeys(range(1, running.parties + 1), answer))
+    tr = _recognize(_track(tmp_path / "mic.wav", 25))
+    languages = [c["language"] for c in sent.calls]
+    assert languages == [None] * running.parties + ["ru"] * (8 - running.parties)
+    assert tr.language is None
+
+
+def test_a_text_that_names_no_language_leaves_it_out(tmp_path, speech, sent) -> None:
+    speech += [(i * 3, i * 3 + 1) for i in range(8)]
+    sent.answers.update(dict.fromkeys(range(1, 9), GERMAN))
+    _recognize(_track(tmp_path / "mic.wav", 25))
+    assert {c["language"] for c in sent.calls} == {None}
+
+
+def test_a_few_words_of_tiny_clips_do_not_decide_the_language(tmp_path, speech, sent) -> None:
+    """False lines of tiny clips alone name nothing; the language comes from the speech after."""
+    speech += [(i * 3, i * 3 + 1) for i in range(12)]
+    sent.answers.update(dict.fromkeys(range(1, 7), "Thank you."))
+    sent.answers.update(dict.fromkeys(range(7, 13), RUSSIAN))
+    _recognize(_track(tmp_path / "mic.wav", 37))
+    assert {c["language"] for c in sent.calls} <= {None, "ru"}
+    assert sent.calls[-1]["language"] == "ru"
 
 
 def test_a_busy_service_is_asked_again(tmp_path, speech, sent) -> None:
