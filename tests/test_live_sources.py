@@ -110,6 +110,58 @@ def _flaky_mic(monkeypatch, **kwargs):
     return src, clock, Stream
 
 
+def test_micsource_first_block_starts_at_the_origin(monkeypatch) -> None:
+    """The stream opened late: silence before the first block, and only before it."""
+    recorded: list[bytes] = []
+    src, clock, _ = _flaky_mic(monkeypatch, tee=recorded.append)
+    src.origin = 0.0
+    block = b"\x01\x02" * 1600  # 100 ms
+
+    clock["t"] = 0.6
+    src._stream.cb(block, 1600, None, None)  # began at 0.5
+    clock["t"] = 0.7
+    src._stream.cb(block, 1600, None, None)
+
+    assert b"".join(recorded) == bytes(8000 * 2) + block * 2
+    assert src.read() == b"".join(recorded)  # the live stream sees the same silence
+
+
+def test_micsource_first_block_before_the_origin_adds_nothing(monkeypatch) -> None:
+    recorded: list[bytes] = []
+    src, clock, _ = _flaky_mic(monkeypatch, tee=recorded.append)
+    src.origin = 5.0
+
+    clock["t"] = 4.0
+    src._stream.cb(b"\x01\x02" * 1600, 1600, None, None)
+
+    assert b"".join(recorded) == b"\x01\x02" * 1600
+
+
+def test_micsource_reopened_stream_keeps_real_time(monkeypatch) -> None:
+    """Every reopen fills the time the microphone was gone, counting the silence already there."""
+    recorded: list[bytes] = []
+    src, clock, _ = _flaky_mic(monkeypatch, tee=recorded.append)
+    src.origin = 0.0
+    block = b"\x01\x02" * 1600
+
+    clock["t"] = 0.3
+    src._stream.cb(block, 1600, None, None)  # 0.2 s of silence, then 0.2..0.3
+    for reopen_at in (4.0, 9.0):
+        src._stream.die()
+        clock["t"] = reopen_at
+        src.read()  # reopens the stream
+        clock["t"] = reopen_at + 0.1
+        src._stream.cb(block, 1600, None, None)
+        clock["t"] = reopen_at + 0.2
+        src._stream.cb(block, 1600, None, None)
+
+    samples = sum(len(part) for part in recorded) // 2
+    assert samples == round(9.2 * 16000)
+    assert b"".join(recorded)[-2 * 3200 :] == block * 2  # the last blocks stay at the end
+
+    src.stop()
+
+
 def test_micsource_survives_stream_death_and_reopens(monkeypatch) -> None:
     """A dead stream does not end the source: read() returns b'', once the device is back the
     stream reopens, frames keep coming and `notice` reports the reopening."""

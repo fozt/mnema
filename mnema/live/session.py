@@ -230,6 +230,7 @@ class LiveSession:
             audio_start = time.monotonic()  # the app's host time clock, not self._clock
             for s in self._sources:
                 started_sources.append(s)
+                s.origin = audio_start
                 s.start()
             if self._on_started is not None:
                 self._on_started()

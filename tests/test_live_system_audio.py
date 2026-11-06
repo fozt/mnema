@@ -13,7 +13,7 @@ import types
 
 import pytest
 
-from mnema.live.system_audio import CoreAudioTapSource, to_pcm16_mono
+from mnema.live.system_audio import CoreAudioTapSource
 
 
 def _f32(*vals: float) -> bytes:
@@ -29,7 +29,15 @@ def _i16(data: bytes | None) -> list[int]:
     return np.frombuffer(data, dtype=np.int16).tolist()
 
 
-# ── conversion (pure function, checked by numbers) ─────────────────────────────
+def _converted(data: bytes, *, rate: float, channels: int = 1, planar: bool = False) -> list[int]:
+    written: list[bytes] = []
+    src = CoreAudioTapSource(tee=written.append)
+    src.set_format(rate, channels)
+    src.on_input(data, 0.0, None, channels=channels, planar=planar)
+    return _i16(b"".join(written))
+
+
+# ── conversion (checked by numbers) ───────────────────────────────────────────
 
 
 @pytest.mark.parametrize(
@@ -42,14 +50,14 @@ def _i16(data: bytes | None) -> list[int]:
 def test_convert_planar_stereo_48k_to_mono_16k(samples, planar) -> None:
     pytest.importorskip("numpy")
     # mono 0.5; 48k -> 16k averages triples
-    out = to_pcm16_mono(_f32(*samples), rate=48000, channels=2, planar=planar)
-    assert _i16(out) == [16384, 16384]  # 0.5 * 32768
+    out = _converted(_f32(*samples), rate=48000, channels=2, planar=planar)
+    assert out == [16384, 16384]  # 0.5 * 32768
 
 
 def test_convert_clips_out_of_range_and_scales() -> None:
     pytest.importorskip("numpy")
-    out = to_pcm16_mono(_f32(1.5, -1.5, 0.25, -0.25), rate=16000, channels=1, planar=False)
-    assert _i16(out) == [32767, -32768, 8192, -8192]
+    out = _converted(_f32(1.5, -1.5, 0.25, -0.25), rate=16000)
+    assert out == [32767, -32768, 8192, -8192]
 
 
 def test_convert_non_integer_factor_interpolates() -> None:
@@ -57,8 +65,7 @@ def test_convert_non_integer_factor_interpolates() -> None:
     import numpy as np
 
     ramp = np.linspace(-0.5, 0.5, 441, dtype=np.float32)
-    out = to_pcm16_mono(ramp.tobytes(), rate=44100, channels=1, planar=False)
-    vals = _i16(out)
+    vals = _converted(ramp.tobytes(), rate=44100)
     assert len(vals) == round(441 * 16000 / 44100)  # 160 samples
     assert vals == sorted(vals)  # linear interpolation of a ramp is monotonic
     assert vals[0] == -16384  # the ends are kept: -0.5 * 32768
@@ -66,7 +73,7 @@ def test_convert_non_integer_factor_interpolates() -> None:
 
 def test_convert_empty_is_empty() -> None:
     pytest.importorskip("numpy")
-    assert to_pcm16_mono(b"", rate=48000, channels=2, planar=True) == b""
+    assert _converted(b"", rate=48000, channels=2, planar=True) == []
 
 
 # ── source contract ─────────────────────────────────────────────────────────
