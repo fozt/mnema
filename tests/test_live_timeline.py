@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import ctypes
 import io
+import math
 import struct
 import sys
 import types
@@ -22,6 +23,14 @@ from mnema.live.system_audio import CoreAudioTapSource, PulseMonitorSource, vali
 
 BLOCK_SIZES = (480, 512, 1024, 470)
 SAMPLE_VALID, HOST_VALID = 1, 2
+
+
+class _Clock:
+    def __init__(self, now: float) -> None:
+        self.now = now
+
+    def __call__(self) -> float:
+        return self.now
 
 
 def _tap(rate: float = 48000.0, **kwargs) -> tuple[CoreAudioTapSource, list[bytes]]:
@@ -155,6 +164,66 @@ def test_a_counter_that_went_back_is_no_loss_and_catches_up_with_the_clock() -> 
     assert (samples[320 : 2 * 16000] == 0).all()
 
 
+def test_a_real_gap_is_exact_when_the_clock_agrees() -> None:
+    clock = _Clock(10.02)
+    src, written = _tap(44100.0, clock=clock)
+    src.origin = 10.0
+    src.on_input(_block(882), 0.0, None)
+    clock.now = 13.04  # 3 s lost, the next block is 20 ms long
+    src.on_input(_block(882), 882.0 + 132300, None)
+
+    assert len(_samples(written)) == int((882 * 2 + 132300) * 16000 / 44100)
+
+
+def test_a_counter_that_leaps_ahead_adds_only_the_time_that_passed() -> None:
+    clock = _Clock(10.02)
+    src, written = _tap(clock=clock)
+    src.origin = 10.0
+    src.on_input(_block(960), 0.0, None)
+    clock.now = 10.06
+    src.on_input(_block(960), 48000.0 * 3600, None)  # an hour by the counter, 40 ms by the clock
+
+    assert len(_samples(written)) <= (0.06 + 0.05) * 16000 + 1
+
+
+def test_a_device_back_with_a_counter_far_ahead_keeps_the_track_on_real_time() -> None:
+    """The device was away 2 s and returned 10 min ahead: the track matches the 2 s."""
+    clock = _Clock(10.02)
+    src, written = _tap(clock=clock)
+    src.origin = 10.0
+    src.on_input(_block(960), 0.0, None)
+    clock.now = 12.04
+    src.on_input(_block(960), 48000.0 * 600, None)
+    clock.now = 12.06
+    src.on_input(_block(960), 48000.0 * 600 + 960, None)
+
+    assert 2.06 * 16000 <= len(_samples(written)) <= (2.06 + 0.05) * 16000 + 1
+
+
+def test_the_host_time_of_a_block_outranks_its_arrival() -> None:
+    src, written = _tap(clock=_Clock(10**6))
+    src.timebase = (1, 1)
+    src.origin = 10.0
+    src.on_input(_block(960), 0.0, 10_000_000_000)
+    src.on_input(_block(960), 48000.0 * 3600, 10_040_000_000)
+
+    assert len(_samples(written)) <= (0.06 + 0.05) * 16000 + 1
+
+
+def test_a_counter_that_keeps_leaping_cannot_carry_the_track_ahead() -> None:
+    clock = _Clock(10.02)
+    src, written = _tap(clock=clock)
+    src.origin = 10.0
+    src.on_input(_block(960), 0.0, None)
+    at = 0.0
+    for i in range(1, 200):
+        at += 48000.0
+        clock.now = 10.0 + (i + 1) * 0.02
+        src.on_input(_block(960), at, None)
+
+    assert len(_samples(written)) <= (200 * 0.02 + 0.05) * 16000 + 2
+
+
 def test_first_block_delay_from_the_host_clock() -> None:
     src, written = _tap()
     src.timebase = (125, 3)  # Apple silicon: 24 MHz ticks
@@ -195,10 +264,12 @@ def test_a_block_before_the_origin_adds_no_silence() -> None:
 
 
 def test_silence_reaches_the_live_stream_too() -> None:
-    src, written = _tap()
+    clock = _Clock(100.11)
+    src, written = _tap(clock=clock)
     src.timebase = (1, 1)
     src.origin = 100.0
     src.on_input(_block(480), 0.0, 100_100_000_000)
+    clock.now = 100.13
     src.on_input(_block(480), 480.0 + 480, None)
 
     assert src.read() == b"".join(written)
@@ -245,15 +316,15 @@ def _stamp(sample_time: float, host_time: int, flags: int) -> bytes:
     return struct.pack("<dQdQ24xII", sample_time, host_time, 1.0, 0, flags, 0)
 
 
-def _installed() -> tuple[CoreAudioTapSource, list[bytes], object]:
-    src, written = _tap()
+def _installed(**kwargs) -> tuple[CoreAudioTapSource, list[bytes], object]:
+    src, written = _tap(**kwargs)
     ca = _CoreAudio()
     src._install_ioproc(ca, 1)
     return src, written, ca.proc
 
 
 def test_ioproc_reads_the_time_stamp_of_the_block() -> None:
-    src, written, proc = _installed()
+    src, written, proc = _installed(clock=_Clock(100.13))
     src.timebase = (1, 1)
     src.origin = 100.0
     both = SAMPLE_VALID | HOST_VALID
@@ -393,6 +464,53 @@ def test_parec_track_begins_at_the_origin(monkeypatch) -> None:
         pass
 
     assert b"".join(written) == bytes(4000 * 2) + pcm * 2  # began at 50.25
+
+
+class _Pulse:
+    """parec stdout as the sound server fills it: whole fragments, each when its last byte is
+    captured. Without --latency-msec the fragment is the server's default of 2 s."""
+
+    def __init__(self, cmd: list[str], clock: _Clock, began: float, seconds: float) -> None:
+        asked = [c.split("=")[1] for c in cmd if c.startswith("--latency-msec=")]
+        self._fragment = int(asked[0]) / 1000 if asked else 2.0
+        self._clock, self._began = clock, began
+        self._bytes = int(seconds * 32000)
+        self._read = 0
+
+    def read(self, n: int) -> bytes:
+        n = min(n, self._bytes - self._read)
+        if n:
+            self._read += n
+            fragments = math.ceil(self._read / 32000 / self._fragment - 1e-9)
+            self._clock.now = self._began + fragments * self._fragment
+        return b"\x01\x02" * (n // 2)
+
+
+def test_parec_track_begins_when_capture_began(monkeypatch) -> None:
+    import mnema.live.system_audio as sa
+
+    clock = _Clock(50.0)
+    sink = types.SimpleNamespace(returncode=0, stdout="output\n", stderr="")
+
+    def popen(cmd, **kwargs):
+        return types.SimpleNamespace(
+            stdout=_Pulse(cmd, clock, began=50.05, seconds=4.0),
+            terminate=lambda: None,
+            wait=lambda timeout=None: 0,
+        )
+
+    monkeypatch.setattr(sa.subprocess, "run", lambda *a, **k: sink)
+    monkeypatch.setattr(sa.subprocess, "Popen", popen)
+    written: list[bytes] = []
+    src = PulseMonitorSource(tee=written.append, clock=clock)
+    src.origin = 50.0
+
+    src.start()
+    while src.read() is not None:
+        pass
+
+    samples = _samples(written)
+    assert abs(int(np.flatnonzero(samples)[0]) - 800) <= 800  # within 50 ms of 50.05
 
 
 def test_sources_without_an_origin_keep_their_stream() -> None:

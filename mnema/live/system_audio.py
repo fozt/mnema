@@ -16,6 +16,7 @@ OS (thin client).
 from __future__ import annotations
 
 import logging
+import math
 import platform
 import queue
 import shutil
@@ -37,6 +38,8 @@ _TARGET_RATE = 16000
 _QUEUE_SECONDS = 30  # same queue limit as MicSource (see sources.py)
 _TAP_BLOCK_SECONDS = 0.02  # IOProc gets the device buffer (~10-20 ms); estimate for the queue
 _TAP_MIN_MACOS = (14, 2)  # AudioHardwareCreateProcessTap appeared in macOS 14.2
+_GAP_SLACK_SECONDS = 0.05  # a filled gap may carry the track this far ahead of the clock
+_PAREC_LATENCY_MS = 50  # without it the server hands parec about 2 s at a time
 
 
 _SAMPLE_TIME_VALID = 1 << 0  # kAudioTimeStampSampleTimeValid
@@ -226,7 +229,8 @@ class CoreAudioTapSource(_BufferedSource):
 
     Python runs in a real-time callback and may miss a cycle: the input time stamp shows the jump
     in the device's sample counter, and that stretch becomes silence. A counter that went back
-    (the device restarted) catches up with the clock instead, like the first block.
+    (the device restarted) catches up with the clock instead, like the first block, and a jump
+    forward fills no more than the clock has passed: the counter alone can leap anywhere.
     """
 
     def __init__(
@@ -375,7 +379,7 @@ class CoreAudioTapSource(_BufferedSource):
             self._began = True
             self._catch_up(self._first_sample_at(host_time, frames))
         elif late > 0:
-            self._fill_lost(late)
+            self._fill_lost(self._real_gap(late, self._first_sample_at(host_time, frames)))
         if sample_time is not None and (late or self._next_sample is None):
             self._next_sample = sample_time
         if self._next_sample is not None:
@@ -392,6 +396,14 @@ class CoreAudioTapSource(_BufferedSource):
             return self._clock() - frames / self._fmt[0]
         numer, denom = self.timebase
         return host_time * numer / denom / 1e9
+
+    def _real_gap(self, frames: int, first_sample_at: float) -> int:
+        """The device frames of a jump that the origin's clock agrees with."""
+        if self.origin is None:
+            return frames
+        at = first_sample_at + _GAP_SLACK_SECONDS
+        behind = samples_behind(self.origin, at, self._emitted, _TARGET_RATE)
+        return min(frames, math.ceil(behind * self._fmt[0] / _TARGET_RATE))
 
     def _fill_lost(self, frames: int) -> None:
         """Lost frames as silence, a second at a time, through the resampler like any audio."""
@@ -613,6 +625,7 @@ class PulseMonitorSource(_BufferedSource):
                     "--format=s16le",
                     f"--rate={_TARGET_RATE}",
                     "--channels=1",
+                    f"--latency-msec={_PAREC_LATENCY_MS}",
                 ],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,
