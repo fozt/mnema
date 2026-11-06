@@ -77,6 +77,7 @@ _HISTORY = 6  # points in a source level meter
 _UPDATE_EVERY = 12 * 3600  # Mnema update check interval, s (as on the phone)
 _UPDATE_RETRY = 3600  # the check failed (no network yet after login): try again after, s
 _REPING_EVERY = 30.0  # the server did not answer: ask again at most this often, s
+MAX_REMOTE_JOBS = 3  # recordings at a connected server at once: it has its own queue
 # English source strings, translated where shown
 QUEUED_ALREADY = "This recording is already queued"
 STILL_RECORDING = "This recording is still in progress. You can process it after it stops"
@@ -395,7 +396,8 @@ class _Task:
         self.prepared = prepared  # a just-finished recording: its build
         self.tracks = tracks  # its tracks, or those picked in "Process recording"
         self.part = part or _Part(title=...)
-        self.taken = False  # the processing thread has taken it
+        self.taken = False  # started: it holds a place, its thread runs
+        self.connection: Connection | None = None  # where it runs; None — on this computer
         self.asr = asr  # recognition for this recording; None — from settings when it starts
         self.stop = False  # "Stop processing": keep the audio, make no text
         self.restart = False  # the language was corrected: interrupt and start over
@@ -432,9 +434,10 @@ class BarRuntime:
         self._thread: threading.Thread | None = None
         self._stop_requested = False
         self._cancel = False
-        self._tasks: list[_Task] = []  # the processing queue; the first runs (state.jobs shows it)
-        self._worker: threading.Thread | None = None  # the "mnema-bar-process" thread
-        self._no_assembly = threading.Event()  # cleared while a video is being assembled
+        self._tasks: list[_Task] = []  # the processing queue (state.jobs shows it)
+        self._workers: set[threading.Thread] = set()  # one per started task
+        self._assemblies = 0  # videos being assembled
+        self._no_assembly = threading.Event()  # cleared while any video is being assembled
         self._screen_access = True  # the app reports whether macOS lets it record the screen
         self._no_assembly.set()
         self._started = 0.0
@@ -518,7 +521,7 @@ class BarRuntime:
             self._sync.start()
 
     def _sync_busy(self) -> set[str]:
-        """Hands off: the folder being recorded and the one being processed."""
+        """Hands off: the folder being recorded and the ones being processed."""
         return self._busy(queued=False)
 
     def _held(self) -> set[str]:
@@ -1813,6 +1816,7 @@ class BarRuntime:
             self._download_local_model()
         self._check_server_async()  # name, model and reachability of the server for "Model"
         self._env_changed()
+        self._start_jobs()  # waiting recordings may have a free place in the new place
         return True
 
     def _ask_server_off(self) -> None:
@@ -1915,8 +1919,8 @@ class BarRuntime:
         return find_recording(library_root(), record_id)
 
     def _enqueue(self, task: _Task) -> bool:
-        """To the end of the queue; start the processing thread if it is idle. The same
-        recording already queued — a notice."""
+        """To the end of the queue, and it starts if it may. The same recording already queued
+        — a notice."""
         with self._lock:
             if self.quit_requested:
                 return False
@@ -1929,12 +1933,8 @@ class BarRuntime:
                 self._tasks.append(task)
                 self._sync_jobs()
                 queued = True
-                if self._worker is None:
-                    self._worker = threading.Thread(
-                        target=self._work, daemon=True, name="mnema-bar-process"
-                    )
-                    self._worker.start()
         if queued:  # queued: no longer "Not processed"
+            self._start_jobs()
             self._scan_unfinished()
         self._on_change()
         return queued
@@ -2096,51 +2096,81 @@ class BarRuntime:
         part = _Part(start=start, end=end, title=title, auto_name=auto_name, replace=replace)
         self._enqueue(_Task(job, part=part, asr=asr, tracks=tracks))
 
-    def _work(self) -> None:
-        """The "mnema-bar-process" thread: queue tasks one by one, first in first out; empty —
-        exit (a new task starts the thread again)."""
-        while True:
-            completed: Path | None = None
-            # take a task, find its folder, create the work file and become "running" under
-            # one FILES_LOCK: renaming, moving and sync cannot cut in between, and afterwards
-            # the folder is busy (running)
-            with FILES_LOCK:
-                with self._lock:
-                    if not self._tasks or self.quit_requested:
-                        self._worker = None
-                        return
-                    task = self._tasks[0]
-                    task.taken = True
-                try:
-                    folder = self._begin(task)
-                except Exception:  # noqa: BLE001 - one failed task does not stop the queue
-                    logger.exception("processing of %s did not start", task.job.folder)
-                    folder = None
-                if folder is not None:
-                    with self._lock:
-                        task.job.running = True
-                        task.since, task.began = time.monotonic(), meta.now()
-                        self._sync_jobs()
+    def _start_jobs(self) -> None:
+        """Start what may start now, in queue order. A job picks where it runs here, at its
+        start: at a connected server up to MAX_REMOTE_JOBS at once, on this computer one (a Mac
+        recognizing with the summary on the server counts as this computer). One that has to
+        wait holds back only its own kind."""
+        processing, summary = self.processing_connection(), self.summary_connection()
+        with self._lock:
+            if self.quit_requested:
+                return
+            taken = [t for t in self._tasks if t.taken]
+            remote = sum(t.connection is not None for t in taken)
+            here = len(taken) > remote
+            for task in self._tasks:
+                if task.taken:
+                    continue
+                connection = summary if task.job.kind is JobKind.SUMMARIZE else processing
+                if connection is not None and remote < MAX_REMOTE_JOBS:
+                    remote += 1
+                elif connection is None and not here:
+                    here = True
+                else:
+                    continue
+                task.taken, task.connection = True, connection
+                worker = threading.Thread(
+                    target=self._work, args=(task,), daemon=True, name="mnema-bar-process"
+                )
+                self._workers.add(worker)
+                worker.start()
+
+    def _work(self, task: _Task) -> None:
+        """A "mnema-bar-process" thread: one started task; its end lets the next ones start."""
+        try:
+            self._work_on(task)
+        finally:
+            with self._lock:
+                self._workers.discard(threading.current_thread())
+
+    def _work_on(self, task: _Task) -> None:
+        completed: Path | None = None
+        folder: Path | None = None
+        # find its folder, create the work file and become "running" under one FILES_LOCK:
+        # renaming, moving and sync cannot cut in between, and afterwards the folder is busy
+        with FILES_LOCK:
+            with self._lock:
+                dropped = self.quit_requested or task not in self._tasks
             try:
-                if folder is not None:
-                    self._on_change()
-                    completed = self._run_task(task, folder)
-            except Exception:  # noqa: BLE001 - one failed task does not stop the queue
-                logger.exception("processing of %s failed", task.job.folder)
-            finally:
+                folder = None if dropped else self._begin(task)
+            except Exception:  # noqa: BLE001 - one failed task does not stop the others
+                logger.exception("processing of %s did not start", task.job.folder)
+            if folder is not None:
                 with self._lock:
-                    if task in self._tasks:
-                        self._tasks.remove(task)
+                    task.job.running = True
+                    task.since, task.began = time.monotonic(), meta.now()
                     self._sync_jobs()
-                self._scan_unfinished()
-                self._library_changed()
-                model = self._local_model
-                if model is not None and not model.installed and not model.downloading:
-                    self._reread_local_model()  # the first recording may have downloaded it
-            try:
-                self._after(task, completed)
-            except Exception:  # noqa: BLE001
-                logger.exception("after processing %s", task.job.folder)
+        try:
+            if folder is not None:
+                self._on_change()
+                completed = self._run_task(task, folder)
+        except Exception:  # noqa: BLE001 - one failed task does not stop the others
+            logger.exception("processing of %s failed", task.job.folder)
+        finally:
+            with self._lock:
+                if task in self._tasks:
+                    self._tasks.remove(task)
+                self._sync_jobs()
+            self._start_jobs()
+            self._scan_unfinished()
+            self._library_changed()
+            model = self._local_model
+            if model is not None and not model.installed and not model.downloading:
+                self._reread_local_model()  # the first recording may have downloaded it
+        try:
+            self._after(task, completed)
+        except Exception:  # noqa: BLE001
+            logger.exception("after processing %s", task.job.folder)
 
     def _begin(self, task: _Task) -> Path | None:
         """The start of a task: the folder by id (it may have been renamed or moved while
@@ -2199,7 +2229,7 @@ class BarRuntime:
         try:
             from ..client import MnemaClient
 
-            connection = self.summary_connection()
+            connection = task.connection
             if connection is None and not _base.STANDALONE:
                 self.state.error = _("Server not connected")
                 return
@@ -2220,9 +2250,8 @@ class BarRuntime:
             base = result.base or job.folder
             if base != folder:
                 _MOVED[folder] = base
-            self.state.last_result = result.transcript_txt or base / "transcript.txt"
-            self.state.last_warnings = list(result.remarks)
-            self.state.last_summary = result.summary_md
+            shown = result.transcript_txt or base / "transcript.txt"
+            self._set_last(shown, list(result.remarks), result.summary_md)
             if result.summary_md is not None:
                 self._platform.notify(_("Summary ready"), result_name(base), result.summary_md)
             else:
@@ -2245,7 +2274,7 @@ class BarRuntime:
         from ..live.setup import is_default_name
 
         job, part = task.job, task.part
-        connection = self.processing_connection()
+        connection = task.connection
         whole = part.start is None and part.end is None
         auto_name = part.auto_name
         if auto_name is None:  # by the original name, also on a restart after a rename
@@ -2281,7 +2310,9 @@ class BarRuntime:
                         )  # fmt: skip
                     else:
                         asr = asr_at(task.asr or self.prefs.asr, self._place())
-                        config = self._config().model_copy(update={"lang": job.lang, "asr": asr})
+                        runner = connection.url if connection is not None else None
+                        update = {"lang": job.lang, "asr": asr, "runner": runner}
+                        config = self._config().model_copy(update=update)
                         result, _full = recover_on_node(
                             base,
                             config,
@@ -2305,9 +2336,9 @@ class BarRuntime:
                             replace=part.replace, lang=job.lang, asr=task.asr, tracks=chosen,
                         )  # fmt: skip
                     _carry_video(done)
-                    self._finish(result, done, retry)
+                    shown = self._finish(result, done, retry)
                     # never reached the server: no part, so the full one gets no part title
-                    return None if result.defer_command else self.state.last_result
+                    return None if result.defer_command else shown
                 except FinalizeCancelled as e:
                     folder = getattr(e, "mnema_base", None) or job.folder  # may be renamed
                     recognized = getattr(e, "mnema_recognized", None)
@@ -2321,12 +2352,9 @@ class BarRuntime:
                         with FILES_LOCK:
                             (folder / PROCESSING_MARK).unlink(missing_ok=True)
                         _carry_video(folder)
-                        self.state.last_result = recognized.transcript_txt or folder
-                        self.state.last_warnings = list(recognized.remarks)
-                        self.state.last_summary = None
-                        self._platform.notify(
-                            _("Summary not written"), result_name(folder), self.state.last_result
-                        )
+                        shown = recognized.transcript_txt or folder
+                        self._set_last(shown, list(recognized.remarks), None)
+                        self._platform.notify(_("Summary not written"), result_name(folder), shown)
                         return None
                     if whole:
                         base = job.folder = folder
@@ -2342,7 +2370,7 @@ class BarRuntime:
                 e, _("Could not process the recording. See the Mnema log for details")
             )
             if job.kind is JobKind.RECORD and any(folder.glob("*.wav")):
-                self.state.last_result = folder  # the recording is intact: it can be opened
+                self._set_last(folder, [], None)  # the recording is intact: it can be opened
             return None
 
     def _processing_settings(self, connection: Any) -> dict[str, Any]:
@@ -2419,12 +2447,10 @@ class BarRuntime:
         task.restart = task.stop = True
 
     def _restarting(self, task: _Task) -> bool:
-        """Processing was interrupted by a language change: free the server step, start over."""
+        """Processing was interrupted by a language change: start over (the interrupted step
+        cancelled its server job)."""
         if not task.restart:
             return False
-        from ..client import cancel_active_job
-
-        cancel_active_job()
         job = task.job
         task.stop = task.restart = False
         job.transcript_ready, job.progress, job.stage, job.languages = None, 0.0, "", {}
@@ -2434,45 +2460,47 @@ class BarRuntime:
 
     def _audio_only(self, task: _Task, base: Path) -> None:
         """Processing was stopped: the audio stays, no text — show the folder, no error."""
-        from ..client import cancel_active_job
         from ..live.setup import keep_audio_only
 
-        cancel_active_job()  # a step was running on the server: free it
         keep_audio_only(base, started=task.began)
         _carry_video(base)
-        self.state.last_result = base
-        self.state.last_warnings = []
-        self.state.last_summary = None
+        self._set_last(base, [], None)
         self._platform.notify(
             _("Processing stopped"), _("The audio is saved; you can process it later"), base
         )
 
-    def _finish(self, result: Any, base: Path, retry: Callable[..., None]) -> None:
-        """The processing result: the last recording, remarks, a notification. The chosen
-        server did not answer — the recording waits for it: "Retry" is retry, the same
-        processing."""
+    def _set_last(self, result: Path, warnings: list[Remark], summary: Path | None) -> None:
+        """The last recording of the menu, whole: jobs end side by side."""
+        with self._lock:
+            self.state.last_result = result
+            self.state.last_warnings = warnings
+            self.state.last_summary = summary
+
+    def _finish(self, result: Any, base: Path, retry: Callable[..., None]) -> Path:
+        """The processing result: the last recording, remarks, a notification; returns what
+        the result shows. The chosen server did not answer — the recording waits for it:
+        "Retry" is retry, the same processing."""
         from ..live import remarks
 
         if result.defer_command:  # the remark names the server as in the settings, no command
             down = remarks.server_down(self._processing_label())
             result.remarks = [down if r.step == remarks.Step.SERVER else r for r in result.remarks]
-        self.state.last_warnings = list(result.remarks)
-        self.state.last_summary = result.summary_md
+        ready = None if result.defer_command else result.transcript_txt
+        shown = ready if ready is not None else base
+        self._set_last(shown, list(result.remarks), result.summary_md)
         if result.defer_command:
-            self.state.last_result = base
             self._server_down(base, retry, _("The recording is saved; process it later"))
-        elif result.transcript_txt is not None:
-            self.state.last_result = result.transcript_txt
-            name = result_name(result.transcript_txt)
+        elif ready is not None:
+            name = result_name(ready)
             message = _("{name}, with notes", name=name) if result.refine_warnings else name
             partial = any(r.step == "record" for r in result.remarks)
             heading = _("Incomplete recording processed") if partial else _("Recording processed")
-            self._platform.notify(heading, message, result.transcript_txt)
+            self._platform.notify(heading, message, ready)
         else:
-            self.state.last_result = base
             self._platform.notify(
                 _("Recording saved without a transcript"), result_name(base), base
             )
+        return shown
 
     def stop(self, *, cancel: bool = False) -> None:
         with self._lock:
@@ -2494,8 +2522,12 @@ class BarRuntime:
 
         if (t := self._thread) is not None:
             t.join(left())
-        while (w := self._worker) is not None and w.is_alive():
-            w.join(left())
+        while True:
+            with self._lock:
+                worker = next(iter(self._workers), None)
+            if worker is None:
+                return
+            worker.join(left())
             if end is not None and time.monotonic() >= end:
                 return
 
@@ -2523,7 +2555,7 @@ class BarRuntime:
 
     def _quit_now(self) -> None:
         """Quit: stop and save the recording without processing, drop the queue (it is not
-        kept between launches); quitting interrupts the running processing with no history
+        kept between launches); quitting interrupts every running processing with no history
         entry, the recording stays "Not processed", "Process…" continues the server step with
         the same job."""
         with self._lock:
@@ -2735,7 +2767,9 @@ class BarRuntime:
 
         job = task.job
         job.stage = _(video.ASSEMBLING)
-        self._no_assembly.clear()
+        with self._lock:
+            self._assemblies += 1
+            self._no_assembly.clear()
         self._on_change()
         try:
             video.assemble(
@@ -2750,7 +2784,10 @@ class BarRuntime:
             logger.exception("the video of %s was not assembled", base)
         finally:
             job.stage = ""
-            self._no_assembly.set()
+            with self._lock:
+                self._assemblies -= 1
+                if not self._assemblies:
+                    self._no_assembly.set()
             self._on_change()
         return True
 
@@ -2770,9 +2807,10 @@ class BarRuntime:
             if self.server is not None:
                 self._check_server_async()  # the Mac may have woken before the network
         with self._lock:
-            running = next((t for t in self._tasks if t.job.running), None)
-        if running is not None and running.since is not None:
-            running.job.elapsed = now - running.since
+            running = [t for t in self._tasks if t.job.running]
+        for task in running:
+            if task.since is not None:
+                task.job.elapsed = now - task.since
         if self.state.phase != Phase.RECORDING:
             return
         paused_now = now - self._paused_at if self._paused_at is not None else 0.0

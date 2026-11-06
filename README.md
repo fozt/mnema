@@ -264,7 +264,8 @@ device is deleted on the others at the next sync: into the Trash, or for good on
 one.
 
 Recordings wait in a queue while earlier ones are processed, so a new recording can start at
-any time; the card of the one being processed shows its step and progress.
+any time. On this computer they go one at a time; on a connected server up to three go at once.
+The card of each recording being processed shows its step and progress.
 
 **Language** is detected from the speech. If it comes out wrong, pick it in the menu of the
 recording that is being processed, or in *⋯ → Process recording…* for an existing one; the
