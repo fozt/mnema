@@ -14,9 +14,16 @@ class Segment(BaseModel):
     speaker: str | None = None
 
 
+class Word(BaseModel):
+    text: str  # the word with punctuation, as the model gave it
+    start: float  # seconds from the track start
+    end: float
+
+
 class Transcript(BaseModel):
     text: str
     segments: list[Segment] = Field(default_factory=list)
+    words: list[Word] = Field(default_factory=list)  # empty when the engine gives no word times
     language: str | None = None
     engine: str | None = None  # recognizing engine (parakeet, a cloud model); None if unknown
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import shutil
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import cast
 
@@ -152,7 +153,19 @@ def sweep(app: FastAPI, now: float) -> None:
         app.state.last_sweep = now
 
 
-def register_job_routes(app: FastAPI) -> None:
+def stop_job(app: FastAPI, job_id: str) -> None:
+    """Cooperative cancellation: the flag is checked on every progress callback of the job, a
+    waiting job ends at once. A finished or missing job is a no-op."""
+    with app.state.job_queue.lock:
+        job = app.state.store.get(job_id)
+        if job is not None and job.status not in (JobStatus.DONE, JobStatus.ERROR):
+            app.state.cancels.add(job_id)
+            app.state.job_queue.cancel_pending(job_id)
+
+
+def register_job_routes(app: FastAPI) -> Callable[[JobRequest, Request], dict | JSONResponse]:
+    """Registers the routes and returns job creation, for routes that queue a job of their own."""
+
     @app.post("/api/jobs", response_model=None)
     def create_job(req: JobRequest, request: Request) -> dict | JSONResponse:
         sweep(app, time.time())
@@ -401,8 +414,7 @@ def register_job_routes(app: FastAPI) -> None:
             job = _job_of(app, request, job_id)
             if job.status in (JobStatus.DONE, JobStatus.ERROR):
                 return {"ok": False, "status": job.status}
-            app.state.cancels.add(job_id)
-            app.state.job_queue.cancel_pending(job_id)
+            stop_job(app, job_id)
             return {"ok": True, "status": job.status}
 
     @app.get("/api/jobs/{job_id}")
@@ -420,3 +432,5 @@ def register_job_routes(app: FastAPI) -> None:
             _remove_outputs(app, job_id)
             app.state.cancels.discard(job_id)
             return {"ok": True}
+
+    return create_job

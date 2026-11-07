@@ -145,7 +145,7 @@ class ParakeetBackend(Engine):
             lang = parakeet.guess_lang(" ".join(s.text for s in segments))
         segments = parakeet.tidy(segments, lang)
         text = " ".join(s.text for s in segments).strip()
-        return Transcript(text=text, segments=segments, language=lang)
+        return Transcript(text=text, segments=segments, words=words, language=lang)
 
 
 def _track_wav(src: Path, dst: Path, on: Progress) -> Path:
