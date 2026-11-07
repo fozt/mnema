@@ -1463,6 +1463,33 @@ def _add_user(args, root: Path, store) -> None:
     print(issue_invite(root, url, user=name, hours=args.hours, now=time.time()))
 
 
+def cmd_token(args) -> None:
+    """A service's token in one step: its user, when new, and a device named after it. An
+    invitation would need a second machine; this command already runs on the server."""
+    import os
+    import time
+
+    from ..devices import DeviceStore, devices_db
+    from ..users import user_library
+
+    os.umask(0o077)  # docker exec does not inherit the server's umask
+    _need_server_token()
+    root = _node_root(args)
+    store = DeviceStore(devices_db(root))
+    name = _user_name(args.name)
+    now = time.time()
+    known = store.user(name)
+    if known is None or known.removed:
+        library = user_library(root, name)
+        library.mkdir(mode=0o700, parents=True, exist_ok=True)
+        library.chmod(0o700)
+        store.add_user(name, now=now)
+    code, _expires = store.create_invite(user=name, now=now)
+    claimed = store.claim(code, name, now=now, library=True)
+    assert claimed is not None  # the invitation was made a moment ago in this process
+    print(claimed[1])
+
+
 def cmd_devices(args) -> None:
     """Devices connected to the server; revoke cancels a device token at once."""
     import time

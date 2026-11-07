@@ -362,6 +362,20 @@ def test_a_device_note_shows_in_the_list_until_it_is_removed(tmp_path, capsys):
         _cli("devices", "note", "missing", "текст", "--dir", str(tmp_path))
 
 
+def test_a_token_for_a_service_needs_no_invitation(tmp_path, capsys, monkeypatch):
+    monkeypatch.setenv("MNEMA_TOKEN", "node-token")
+    store = _store(tmp_path)
+    (tmp_path / ".mnema").mkdir(exist_ok=True)
+    _cli("token", "diary", "--dir", str(tmp_path))
+    first = capsys.readouterr().out.strip().splitlines()[-1]
+    caller = store.verify(first, now=NOW + 1)
+    assert caller is not None and caller.user == "diary"
+    _cli("token", "diary", "--dir", str(tmp_path))
+    second = capsys.readouterr().out.strip().splitlines()[-1]
+    assert second != first and store.verify(first, now=NOW + 1) is not None
+    assert [d.name for d in store.devices(user="diary")] == ["diary", "diary"]
+
+
 _V0_SCHEMA = """
 CREATE TABLE invites (
     hash TEXT PRIMARY KEY, created REAL NOT NULL, expires REAL NOT NULL,

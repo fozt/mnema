@@ -17,6 +17,7 @@ from .commands import (
     cmd_merge,
     cmd_mp3,
     cmd_serve,
+    cmd_token,
     cmd_transcribe,
     cmd_translate,
     cmd_update,
@@ -364,6 +365,11 @@ def build_parser() -> argparse.ArgumentParser:
     note.add_argument("text", nargs="?", default="", help=_("the note; empty removes it"))
     note.add_argument("--dir", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
     sp.set_defaults(func=cmd_devices)
+
+    sp = sub.add_parser("token", help=_("a token for a service: its own user and device"))
+    sp.add_argument("name", help=_("service name, for example diary"))
+    sp.add_argument("--dir", help=argparse.SUPPRESS)
+    sp.set_defaults(func=cmd_token)
 
     sp = sub.add_parser("update", help=_("update the installed app"))
     sp.set_defaults(func=cmd_update)

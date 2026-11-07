@@ -39,6 +39,8 @@
   "[{accent}]Mnema server[/]: {url}, folder {root}": "[{accent}]Сервер Mnema[/]: {url}, папка {root}",
   "Name": "Имя",
   "Added": "Добавлено",
+  "a token for a service: its own user and device": "токен для сервиса: свой пользователь и устройство",
+  "service name, for example diary": "имя сервиса, например diary",
   "a note about a device, shown in the list": "заметка об устройстве, видна в списке",
   "the note; empty removes it": "текст заметки; пусто — убрать",
   "Last seen": "Последний раз",

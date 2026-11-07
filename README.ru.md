@@ -394,18 +394,14 @@ claude mcp add mnema -- mnema-mcp
 | API key | токен устройства |
 | Model | `mnema` (подойдёт и `whisper-1`, для клиентов с жёстко заданным именем) |
 
-Каждому сервису нужен свой токен. Выпустите приглашение на сервере и обменяйте код после
-`#invite=` на токен:
+Каждому сервису нужен свой токен. На сервере эта команда создаёт его пользователя и печатает токен:
 
 ```bash
-cd ~/mnema && ./mnema.sh invite
+cd ~/mnema && ./mnema.sh token my-service
 ```
 
-```bash
-curl http://СЕРВЕР:ПОРТ/api/devices/claim -H 'Content-Type: application/json' -d '{"invite": "КОД", "name": "мой сервис", "library": true}'
-```
-
-Сервис работает от того человека, для которого приглашение (`./mnema.sh invite --user anna`), а
+У сервиса свой пользователь, поэтому очередь он делит с вашими записями поровну, и
+а
 `./mnema.sh devices revoke <id>` отключает его, как любое устройство. С пакетом `openai` для
 Python:
 

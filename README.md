@@ -398,18 +398,13 @@ server instead. It needs three settings:
 | API key | a device token |
 | Model | `mnema` (`whisper-1` works too, for clients with a fixed name) |
 
-Give every service a token of its own. Make an invite on the server, and exchange the code after
-`#invite=` for a token:
+Give every service a token of its own. On the server this makes its user and prints the token:
 
 ```bash
-cd ~/mnema && ./mnema.sh invite
+cd ~/mnema && ./mnema.sh token my-service
 ```
 
-```bash
-curl http://SERVER:PORT/api/devices/claim -H 'Content-Type: application/json' -d '{"invite": "CODE", "name": "my service", "library": true}'
-```
-
-The service works as the person the invite is for (`./mnema.sh invite --user anna`), and
+The service gets a user of its own, so it shares the queue fairly with your recordings, and
 `./mnema.sh devices revoke <id>` cuts it off, like any device. With the `openai` package for
 Python:
 
