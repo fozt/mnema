@@ -357,9 +357,10 @@ def compile_bytecode(python: Path, app: Path) -> None:
     bytes wherever the bundle is built: paths from the bundle's folder, a fixed hash seed (sets of
     strings)."""
     lib = python.parent.parent / "lib" / PY
-    cmd = [python, "-I", "-m", "compileall", "-q", "-j0", "--invalidation-mode", "unchecked-hash"]
-    cmd += ["-s", app.parent, "-p", "/"]
-    env = {**os.environ, "PYTHONHASHSEED": "0"}
+    cmd = [python, "-I", "-m", "compileall", "-q", "-f", "-j0"]
+    cmd += ["--invalidation-mode", "unchecked-hash", "-s", app.parent, "-p", "/"]
+    # compileall imports modules too: their bytecode would carry the mtime of this build
+    env = {**os.environ, "PYTHONHASHSEED": "0", "PYTHONDONTWRITEBYTECODE": "1"}
     # a few packages ship files that are not Python 3 (templates, test data): not an error
     subprocess.run([*map(str, cmd), str(lib)], capture_output=True, env=env)
 
