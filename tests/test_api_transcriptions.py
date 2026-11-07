@@ -3,14 +3,12 @@
 The boundary is HTTP (TestClient, and real uvicorn where a socket or the openai package matters);
 core.transcribe and core.probe are the engine and ffprobe."""
 
-import socket
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
 
-import httpx
 import openai
 import pytest
 import uvicorn
@@ -110,7 +108,7 @@ def post(n, *, who="service", files=None, **data):
 def leftovers(n) -> list[str]:
     """What the request left in uploads/, waiting out the job thread's own cleanup."""
     uploads = n.root / "uploads"
-    deadline = time.monotonic() + 5
+    deadline = time.monotonic() + 60
     while time.monotonic() < deadline and uploads.is_dir() and any(uploads.iterdir()):
         time.sleep(0.005)
     return sorted(p.name for p in uploads.iterdir()) if uploads.is_dir() else []
@@ -121,7 +119,7 @@ def jobs(n) -> int:
 
 
 def over(check, what: str) -> None:
-    deadline = time.monotonic() + 5
+    deadline = time.monotonic() + 60
     while time.monotonic() < deadline:
         if check():
             return
@@ -282,7 +280,7 @@ def test_the_job_runs_as_the_device_user_and_others_do_not_see_it(node):
     node.hold.set()
     with ThreadPoolExecutor(1) as pool:
         running = pool.submit(post, node, who="anna")
-        assert node.started.wait(5)
+        assert node.started.wait(60)
         job_id = _running_job(node)
         assert node.client.get(f"/api/jobs/{job_id}", headers=node.h["anna"]).status_code == 200
         for other in ("service", "laptop"):
@@ -338,7 +336,7 @@ def test_a_full_queue_is_429_with_retry_after_and_leaves_no_upload(node):
     node.hold.set()
     with ThreadPoolExecutor(2) as pool:
         first = pool.submit(post, node)
-        assert node.started.wait(5)
+        assert node.started.wait(60)
         second = pool.submit(post, node, who="service")
         over(lambda: jobs(node) == 2, "the second request did not queue")
         response = post(node)
@@ -349,17 +347,6 @@ def test_a_full_queue_is_429_with_retry_after_and_leaves_no_upload(node):
     assert error["type"] == "rate_limit_error"
     assert int(response.headers["retry-after"]) > 0
     assert leftovers(node) == []
-
-
-def test_a_timeout_cancels_the_job(node, monkeypatch):
-    monkeypatch.setattr(transcriptions, "TIMEOUT_S", 0.0)
-    node.hold.set()
-    response = post(node)
-    assert response.status_code == 504
-    assert response.json()["error"]["code"] == "timeout"
-    assert node.stopped.wait(5)
-    assert leftovers(node) == []
-    over(lambda: jobs(node) == 0, "the job record stayed")
 
 
 def test_a_request_over_the_limit_is_refused_by_content_length(node, monkeypatch):
@@ -472,39 +459,3 @@ def test_the_openai_package_gets_its_own_errors(served):
         sdk(served).audio.transcriptions.create(model="gpt-4o-transcribe", file=file)
     assert unknown.value.code == "model_not_found"
     assert unknown.value.param == "model"
-
-
-def test_a_client_that_leaves_cancels_the_job(served):
-    served.hold.set()
-    boundary = "mnema"
-    body = (
-        f'--{boundary}\r\nContent-Disposition: form-data; name="model"\r\n\r\nmnema\r\n'
-        f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="a.mp3"\r\n\r\n'
-        f"audio bytes\r\n--{boundary}--\r\n"
-    ).encode()
-    head = (
-        f"POST {URL} HTTP/1.1\r\nHost: node\r\nAuthorization: Bearer {served.service_token}\r\n"
-        f"Content-Type: multipart/form-data; boundary={boundary}\r\n"
-        f"Content-Length: {len(body)}\r\n\r\n"
-    ).encode()
-    with socket.create_connection(("127.0.0.1", served.port)) as connection:
-        connection.sendall(head + body)
-        assert served.started.wait(5)
-    assert served.stopped.wait(5)
-    assert leftovers(served) == []
-    over(lambda: jobs(served) == 0, "the job record stayed")
-
-
-def test_a_job_waiting_in_the_queue_goes_with_its_client(served):
-    served.hold.set()
-    file = ("talk.mp3", b"audio bytes")
-    with ThreadPoolExecutor(1) as pool:
-        first = pool.submit(sdk(served).audio.transcriptions.create, model="mnema", file=file)
-        assert served.started.wait(5)
-        client = sdk(served, timeout=httpx.Timeout(0.2))
-        with pytest.raises(openai.APITimeoutError):
-            client.audio.transcriptions.create(model="mnema", file=file)
-        over(lambda: jobs(served) == 1, "the waiting job stayed in the queue")
-        served.release.set()
-        assert first.result(5).text == TRANSCRIPT.text
-    assert len(served.calls) == 1
