@@ -171,6 +171,8 @@ class Settings(RuntimeSettings):
     # None: a third of the cores (core.settings.default_workers)
     job_workers: int | None = Field(default=None, ge=1, validation_alias="MNEMA_JOB_WORKERS")
     job_queue_size: int = Field(default=16, ge=0, validation_alias="MNEMA_JOB_QUEUE_SIZE")
+    # one recognition process stays with the model loaded for short jobs (the server only)
+    asr_warm: bool = Field(default=True, validation_alias="MNEMA_ASR_WARM")
     live_connections: int = Field(default=2, ge=1, validation_alias="MNEMA_LIVE_CONNECTIONS")
     live_dir: str | None = Field(default=None, validation_alias="MNEMA_LIVE_DIR")
     # HTTP client (MnemaClient)

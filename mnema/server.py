@@ -26,7 +26,10 @@ from .api.node import register_node_routes
 from .api.storage import register_storage_routes
 from .api.transcriptions import register_transcription_routes
 from .api.uploads import Uploads
+from .core import base
 from .core.base import MediaError
+from .core.settings import job_threads
+from .core.worker import WarmProcess
 from .devices import DeviceStore, devices_db
 from .i18n import _
 from .job_queue import JobQueue
@@ -105,7 +108,15 @@ def create_app(root: Path) -> FastAPI:
     _sweep_outputs(app.state.root / "outputs")
     app.state.uploads = Uploads(app.state.root)
     app.state.uploads.sweep()
-    app.state.job_queue = JobQueue(settings.job_workers, settings.job_queue_size)
+    # the Mac recognizes in mnema-asr, a process of its own already
+    app.state.warm_process = (
+        WarmProcess(job_threads(2)) if settings.asr_warm and not base.STANDALONE else None
+    )
+    app.state.job_queue = JobQueue(
+        settings.job_workers,
+        settings.job_queue_size,
+        release=app.state.warm_process.release if app.state.warm_process else None,
+    )
     app.state.live_slots = threading.BoundedSemaphore(settings.live_connections)
     if swept:
         logging.getLogger(__name__).warning("closed %d job(s) interrupted by a restart", swept)

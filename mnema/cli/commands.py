@@ -6,6 +6,7 @@ import copy
 import functools
 import logging
 import sys
+import threading
 from collections.abc import Callable
 from pathlib import Path
 
@@ -1303,6 +1304,10 @@ def cmd_serve(args) -> None:
     from ..cleanup import remove_old_weights_in_background
 
     remove_old_weights_in_background(server=Settings().container)
+    from ..core.parakeet import downloaded
+
+    if app.state.warm_process is not None and downloaded():
+        threading.Thread(target=app.state.warm_process.preload, daemon=True).start()
     # idle connections outlive the clients' pools (phone 30 s, httpx 5 s), not uvicorn's 5 s
     uvicorn.run(app, host=args.host, port=port, log_level="warning", timeout_keep_alive=75)
 

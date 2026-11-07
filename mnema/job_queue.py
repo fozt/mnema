@@ -75,6 +75,7 @@ class JobQueue:
         cloud_slots: int = 4,
         memory: Callable[[], int | None] | None = None,
         recheck_s: float = MEMORY_RECHECK_S,
+        release: Callable[[], None] | None = None,
     ):
         self.workers = default_workers() if workers is None else workers
         self.short_slots = short_slots
@@ -83,6 +84,7 @@ class JobQueue:
         self.pending_limit = pending
         self.memory = memory  # None — this machine's free memory (available_memory)
         self.recheck_s = recheck_s
+        self.release = release  # gives up memory held between jobs (the warm process)
         self.lock = threading.RLock()
         self._busy = dict.fromkeys(_Lane, 0)
         self._pending: OrderedDict[str, _Task] = OrderedDict()
@@ -149,12 +151,13 @@ class JobQueue:
         reading: list[int | None] = []
 
         def memory_ok() -> bool:
-            if sum(self._busy[lane] for lane in _LOCAL) == 0:
-                return True
             if not reading:
                 reading.append(self._free_memory())
             free = reading[0]
-            return free is None or free >= MEMORY_PER_JOB * (started + 1)
+            enough = free is None or free >= MEMORY_PER_JOB * (started + 1)
+            if not enough and self.release is not None:
+                self.release()
+            return enough or sum(self._busy[lane] for lane in _LOCAL) == 0
 
         mine = None
         for lane in sorted(_Lane, key=lambda lane: lane != keep):

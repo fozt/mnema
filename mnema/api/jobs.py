@@ -15,6 +15,7 @@ from fastapi.responses import JSONResponse
 from .. import core as mc
 from ..core.backends import is_cloud
 from ..core.settings import asr_thread_budget, job_threads
+from ..core.worker import warm
 from ..i18n import _, current, using
 from ..jobs import (
     CANCEL_MESSAGE,
@@ -362,7 +363,8 @@ def register_job_routes(app: FastAPI) -> Callable[[JobRequest, Request], dict | 
         def _execute() -> None:
             # a local job gets its share of the cores as it starts
             threads = None if text or cloud else job_threads(app.state.job_queue.running_local)
-            with using(job.lang), as_user(job.user), asr_thread_budget(threads):
+            process = app.state.warm_process if short else None
+            with using(job.lang), as_user(job.user), asr_thread_budget(threads), warm(process):
                 _execute_job()
 
         def _cancel_pending() -> None:

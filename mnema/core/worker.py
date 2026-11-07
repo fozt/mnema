@@ -10,6 +10,7 @@ from __future__ import annotations
 import atexit
 import collections
 import contextlib
+import contextvars
 import json
 import logging
 import os
@@ -19,7 +20,9 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import weakref
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +41,7 @@ _ACTIVE: weakref.WeakSet[Worker] = weakref.WeakSet()
 _ACTIVE_LOCK = threading.Lock()
 # the environment of a program that is not Python (Worker argv): nothing else is inherited
 HELPER_ENV = ("HOME", "PATH", "TMPDIR", "LANG", "TDT_EMISSION_DELAY_FRAMES")
+WARM_MEMORY_LIMIT = 3 * 1024**3  # above this after a job the warm process is replaced
 
 
 def close_workers() -> None:
@@ -273,27 +277,137 @@ class Worker:
         self.close()
 
 
+class _JobFailed(MediaError):
+    """The process answered with an error: the job failed, the process is fine."""
+
+
+def _serve(worker: Worker, request: dict, status: tuple[float | None, str], on: Progress) -> dict:
+    """One request to a running process; the result event, or its error raised."""
+    worker.send(request)
+    while True:
+        event = worker.receive()
+        if event is None:
+            on(*status)  # cancellation also works while a model loads or a long window runs
+            continue
+        match event.get("type"):
+            case "progress":
+                status = event["fraction"], event["message"]
+                on(*status)
+            case "result":
+                return event
+            case "error":
+                raise _JobFailed(event["message"])
+            case _:
+                raise MediaError(_("Unknown reply from the recognition process"))
+
+
+class WarmProcess:
+    """The server's one recognition process that outlives its jobs, so short jobs skip the
+    start and the model load. Jobs take turns. A cancel or a crash ends it, and it reports its
+    memory after every job: past WARM_MEMORY_LIMIT it is replaced before the next one."""
+
+    def __init__(self, threads: int) -> None:
+        self.threads = threads  # the ONNX sessions keep the count they were made with
+        self._lock = threading.Lock()
+        self._worker: Worker | None = None
+        self._jobs = 0
+
+    def _drop(self) -> None:
+        if self._worker is not None:
+            self._worker.close()
+        self._worker, self._jobs = None, 0
+
+    def _running(self) -> Worker:
+        if self._worker is None or self._worker.process.poll() is not None:
+            self._drop()
+            self._worker = Worker()
+        return self._worker
+
+    def _serve(self, operation: str, payload: dict, on: Progress, status: Any) -> Any:
+        request = {
+            "operation": operation,
+            "payload": {**payload, "threads": self.threads},
+            "keep": True,
+            "language": i18n.current(),  # texts follow the job, not the process's first one
+        }
+        started = time.monotonic()
+        try:
+            event = _serve(self._running(), request, status, on)
+        except _JobFailed:
+            raise
+        except BaseException:  # a cancel: the job is still running in there
+            self._drop()
+            raise
+        self._jobs += 1
+        memory = int(event.get("memory") or 0)
+        logger.info(
+            "warm recognition: %s took %.1f s, job %d, %d MB",
+            operation, time.monotonic() - started, self._jobs, memory // 1024**2,
+        )  # fmt: skip
+        if memory > WARM_MEMORY_LIMIT:
+            logger.warning("warm recognition process replaced at %d MB", memory // 1024**2)
+            self._drop()
+        return event["value"]
+
+    def run(self, operation: str, payload: dict, status: Any, on: Progress) -> Any:
+        while not self._lock.acquire(timeout=0.25):
+            on(*status)  # waiting for its turn, the job can be cancelled
+        try:
+            return self._serve(operation, payload, on, status)
+        finally:
+            self._lock.release()
+
+    def preload(self) -> None:
+        """The model is ready before the first job."""
+        with self._lock:
+            try:
+                self._serve("preload", {}, noop, (None, ""))
+            except Exception:  # noqa: BLE001 - the first job loads it then
+                logger.warning("the recognition model did not load ahead", exc_info=True)
+
+    def release(self) -> None:
+        """Give the memory back to a job that needs it; a working process stays."""
+        if self._lock.acquire(blocking=False):
+            try:
+                if self._worker is not None:
+                    logger.info("warm recognition process stopped: memory is short")
+                self._drop()
+            finally:
+                self._lock.release()
+
+
+_WARM: contextvars.ContextVar[WarmProcess | None] = contextvars.ContextVar("warm", default=None)
+
+
+@contextlib.contextmanager
+def warm(process: WarmProcess | None) -> Iterator[None]:
+    """This job's recognition goes to the warm process, when there is one."""
+    token = _WARM.set(process)
+    try:
+        yield
+    finally:
+        _WARM.reset(token)
+
+
 def run(operation: str, payload: dict, *, on: Progress = noop) -> Any:
     """Progress and errors go to the caller; an exception from the callback stops the worker."""
     status: tuple[float | None, str] = (None, _("Preparing recognition…"))
     on(*status)  # an already cancelled job never starts the process
+    process = _WARM.get()
+    if process is not None and "key" not in payload:  # a user's key never stays in a process
+        return process.run(operation, payload, status, on)
     with Worker() as worker:
-        worker.send({"operation": operation, "payload": payload})
-        while True:
-            event = worker.receive()
-            if event is None:
-                on(*status)  # cancellation also works while a model loads or a long window runs
-                continue
-            match event.get("type"):
-                case "progress":
-                    status = event["fraction"], event["message"]
-                    on(*status)
-                case "result":
-                    return event["value"]
-                case "error":
-                    raise MediaError(event["message"])
-                case _:
-                    raise MediaError(_("Unknown reply from the recognition process"))
+        return _serve(worker, {"operation": operation, "payload": payload}, status, on)["value"]
+
+
+def process_memory() -> int:
+    """This process's resident memory in bytes (the peak where /proc is missing)."""
+    try:
+        return int(Path("/proc/self/statm").read_text().split()[1]) * os.sysconf("SC_PAGE_SIZE")
+    except OSError:
+        import resource
+
+        return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
 
 
 def _execute(operation: str, payload: dict, on: Progress) -> Any:
@@ -304,6 +418,11 @@ def _execute(operation: str, payload: dict, on: Progress) -> Any:
             from .transcribe import _transcribe
 
             value = _transcribe(Path(payload.pop("src")), **payload, on=on)
+        elif operation == "preload":
+            from .parakeet import model
+
+            model()
+            value = None
         else:
             raise MediaError(
                 _("Unknown recognition process operation: {operation}", operation=operation)
@@ -311,20 +430,13 @@ def _execute(operation: str, payload: dict, on: Progress) -> Any:
     return value.model_dump() if value is not None else None
 
 
-def main() -> None:
-    isolate_stdout()
-    setup_child_logging()
+def _answer(line: str) -> bool:
+    """One request from the pipe; whether the process stays for the next one."""
+    keep = False
     try:
-        request = json.loads(sys.stdin.readline())
-
-        # An offline worker gets exactly one job. While it loads or infers, a separate
-        # thread notices stdin closing, even after the parent crashed.
-        def watch_parent() -> None:
-            sys.stdin.read()
-            parent_gone()
-
-        threading.Thread(target=watch_parent, name="asr-parent", daemon=True).start()
-        with contextlib.redirect_stdout(sys.stderr):
+        request = json.loads(line)
+        keep = bool(request.get("keep"))
+        with contextlib.redirect_stdout(sys.stderr), i18n.using(request.get("language")):
             value = _execute(
                 request["operation"],
                 request["payload"],
@@ -332,12 +444,30 @@ def main() -> None:
                     {"type": "progress", "fraction": fraction, "message": message}
                 ),
             )
-        emit({"type": "result", "value": value})
+        emit({"type": "result", "value": value, "memory": process_memory()})
     except Exception as exc:
         from ..llm.redact import redact
 
         logger.exception("recognition failed")  # the traceback goes to the parent's log
         emit({"type": "error", "message": redact(str(exc) or type(exc).__name__)})
+    return keep
+
+
+def main() -> None:
+    isolate_stdout()
+    setup_child_logging()
+    lines: queue.Queue[str] = queue.Queue()
+
+    # A separate thread notices stdin closing while the model loads or infers, even after the
+    # parent crashed.
+    def read_parent() -> None:
+        for line in sys.stdin:
+            lines.put(line)
+        parent_gone()
+
+    threading.Thread(target=read_parent, name="asr-parent", daemon=True).start()
+    while _answer(lines.get()):
+        pass
 
 
 if __name__ == "__main__":
