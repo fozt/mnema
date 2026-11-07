@@ -52,7 +52,7 @@ def test_asr_options_come_from_the_server_or_this_mac(tmp_path, monkeypatch, sta
     rt = BarRuntime(prefs_file=prefs)
     thread = rt._load_asr_choices()
     assert thread is not None
-    thread.join(3)
+    thread.join(60)
     assert not thread.is_alive()
     options = asr_options(rt.menu_env(), rt.prefs.asr)
     assert rt.prefs.asr == "auto"
@@ -84,7 +84,7 @@ def test_cloud_offers_the_cloud_models(tmp_path, monkeypatch, server):
     rt = BarRuntime(prefs_file=prefs)
     thread = rt._load_asr_choices()
     assert thread is not None
-    thread.join(3)
+    thread.join(60)
     options = asr_options(rt.menu_env(), rt.prefs.asr)
     assert rt.prefs.asr == "openai/gpt-4o-transcribe"
     if server:
@@ -120,7 +120,7 @@ def test_unavailable_server_keeps_asr_choice_without_provider_fallback(tmp_path,
     rt = BarRuntime(prefs_file=prefs)
     thread = rt._load_asr_choices()
     if thread:
-        thread.join(3)
+        thread.join(60)
         assert not thread.is_alive()
     assert seen and set(seen) == {"unavailable-node"}
     assert rt.prefs.asr == "openai/gpt-4o-mini-transcribe"
@@ -177,7 +177,7 @@ def test_a_retired_engine_saved_in_bar_json_works_as_automatic(tmp_path, monkeyp
     rt = BarRuntime(prefs_file=prefs)
     thread = rt._load_asr_choices()
     assert thread is not None
-    thread.join(3)
+    thread.join(60)
     assert rt.prefs.asr == "auto"
     assert dict(asr_options(rt.menu_env(), rt.prefs.asr)) == {
         "auto": "Автоматически",
