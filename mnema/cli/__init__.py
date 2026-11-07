@@ -9,7 +9,7 @@ from .. import core as mc
 from ..dispatch import dispatch
 from ..i18n import _
 from .commands import cmd_transcribe, cmd_translate
-from .parser import build_parser
+from .parser import build_parser, server_help
 from .sources import _DOWNLOADED, _out_path, _resolve_sources
 from .ui import banner, console, die, run_streaming, run_with_progress
 
@@ -24,6 +24,9 @@ def main() -> None:
     except ImportError:
         pass
 
+    if sys.argv[1:] == ["--server-help"]:  # for ./mnema.sh -h, not a command of people
+        print(server_help(build_parser()))
+        return
     banner()
     parser = build_parser()
     try:

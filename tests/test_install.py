@@ -402,6 +402,7 @@ def test_server_runs_in_docker_and_writes_only_its_folder(system):
         ["run", "--rm", "--network", "host", image, "python", "-m", "mnema.install_setup", "host"],
         compose(system, "up", "-d", "--wait"),
         ["exec", "-i", "mnema", "mnema", "invite"],
+        ["exec", "-e", "MNEMA_UI_LANG=ru", "mnema", "mnema", "--server-help"],
     ]  # fmt: skip
     assert not [c for c in calls(system) if c[0] in ("uv", "apt-get", "sudo", "chown")]
     folder = server_dir(system)

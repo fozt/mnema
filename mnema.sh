@@ -9,12 +9,14 @@ set -euo pipefail
 # shellcheck source=scripts/common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/scripts/common.sh"
 DIR="$SERVER_DIR"
+NAME="$(sed -n 's/^MNEMA_NAME=//p' "$DIR/.env" 2>/dev/null | tail -n 1 || true)"
+NAME="${NAME:-mnema}"
 
 usage() {
   say "Usage: ./mnema.sh COMMAND, in the folder of install.sh" \
     "Использование: ./mnema.sh КОМАНДА, в папке install.sh"
   echo
-  server_commands
+  server_commands "$NAME"
 }
 
 case "${1:-}" in
@@ -26,8 +28,6 @@ if ! [ -f "$DIR/compose.yaml" ] || ! [ -f "$DIR/.env" ]; then
     "Сервер Mnema не установлен в $DIR. Установите его: ./install.sh server"
   exit 1
 fi
-NAME="$(sed -n 's/^MNEMA_NAME=//p' "$DIR/.env" | tail -n 1)"
-NAME="${NAME:-mnema}"
 
 compose() { docker compose -f "$DIR/compose.yaml" "$@"; }
 

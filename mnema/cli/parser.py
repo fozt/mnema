@@ -33,6 +33,41 @@ class _Parser(argparse.ArgumentParser):
         super().__init__(*args, **kwargs)
 
 
+SERVER_COMMANDS = ("users", "invite", "devices", "token")  # run on the server's machine
+
+
+def _subcommands(parser: argparse.ArgumentParser) -> list[tuple[str, str, argparse.ArgumentParser]]:
+    return [
+        (choice.dest, choice.help or "", action.choices[choice.dest])
+        for action in parser._actions
+        if isinstance(action, argparse._SubParsersAction)
+        for choice in action._choices_actions
+    ]
+
+
+def _operands(parser: argparse.ArgumentParser) -> str:
+    names = [
+        f"[{a.dest.upper()}]" if a.nargs == "?" else a.dest.upper()
+        for a in parser._get_positional_actions()
+        if not isinstance(a, argparse._SubParsersAction)
+    ]
+    return "".join(f" {name}" for name in names)
+
+
+def server_help(parser: argparse.ArgumentParser) -> str:
+    """The list of ./mnema.sh, from the parser itself: it cannot fall behind the commands."""
+    rows: list[tuple[str, str]] = []
+    for name, text, command in _subcommands(parser):
+        if name in SERVER_COMMANDS:
+            rows.append((name + _operands(command), text))
+            rows += [
+                (f"{name} {sub}{_operands(action)}", about)
+                for sub, about, action in _subcommands(command)
+            ]
+    width = max(len(row) for row, _text in rows)
+    return "\n".join(f"  ./mnema.sh {row:<{width}}  {text}" for row, text in rows)
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = _Parser(prog="mnema", description=_("Process meeting recordings."))
     p.add_argument("--version", action="version", version=f"mnema {__version__}")

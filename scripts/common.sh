@@ -18,31 +18,12 @@ say() { if [ -n "$RU" ]; then printf '%s\n' "$2"; else printf '%s\n' "$1"; fi; }
 # The server in Docker: compose.yaml, its .env and the data folder data/
 SERVER_DIR="${MNEMA_SERVER_DIR:-$HOME/mnema-server}"
 
-# The commands of ./mnema.sh, one per line
+# The commands of ./mnema.sh: those of the container $1 from its own parser, so the list cannot
+# fall behind them; update and logs live here. A stopped container shows only these two.
 server_commands() {
-  if [ -n "$RU" ]; then cat <<'HELP'
-  ./mnema.sh users                  люди сервера
-  ./mnema.sh users add ИМЯ          добавить человека и напечатать его приглашение
-  ./mnema.sh users remove ИМЯ       отключить устройства человека, записи остаются
-  ./mnema.sh invite                 приглашение для одного устройства (--hours до 72, --user ИМЯ)
-  ./mnema.sh devices                подключённые устройства
-  ./mnema.sh devices revoke ID      отключить устройство, ID из списка devices
-  ./mnema.sh devices note ID ТЕКСТ  заметка об устройстве
-  ./mnema.sh token ИМЯ              токен для сервиса: свой пользователь и устройство
-  ./mnema.sh update                 новая версия сервера
-  ./mnema.sh logs                   журнал сервера
-HELP
-  else cat <<'HELP'
-  ./mnema.sh users                  the people of the server
-  ./mnema.sh users add NAME         add a person and print their invitation
-  ./mnema.sh users remove NAME      disconnect a person's devices, the recordings stay
-  ./mnema.sh invite                 an invitation for one device (--hours up to 72, --user NAME)
-  ./mnema.sh devices                connected devices
-  ./mnema.sh devices revoke ID      disconnect a device, ID from the devices list
-  ./mnema.sh devices note ID TEXT   a note about a device
-  ./mnema.sh token NAME             a token for a service: its own user and device
-  ./mnema.sh update                 the newest version of the server
-  ./mnema.sh logs                   the server's log
-HELP
-  fi
+  docker exec ${RU:+-e MNEMA_UI_LANG=ru} "$1" mnema --server-help 2>/dev/null || true
+  say "  ./mnema.sh update   the newest version of the server" \
+    "  ./mnema.sh update   новая версия сервера"
+  say "  ./mnema.sh logs     the server's log" \
+    "  ./mnema.sh logs     журнал сервера"
 }

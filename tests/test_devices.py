@@ -376,6 +376,21 @@ def test_a_token_for_a_service_needs_no_invitation(tmp_path, capsys, monkeypatch
     assert [d.name for d in store.devices(user="diary")] == ["diary", "diary"]
 
 
+def test_the_server_help_lists_every_command_from_the_parser():
+    from mnema.cli.parser import build_parser, server_help
+
+    text = server_help(build_parser())
+    for line in (
+        "users add NAME",
+        "invite",
+        "devices revoke ID",
+        "devices note ID [TEXT]",
+        "token NAME",
+    ):
+        assert f"./mnema.sh {line}" in text
+    assert "transcribe" not in text
+
+
 _V0_SCHEMA = """
 CREATE TABLE invites (
     hash TEXT PRIMARY KEY, created REAL NOT NULL, expires REAL NOT NULL,

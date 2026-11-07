@@ -235,7 +235,7 @@ if [ "$MODE" = server ]; then
     "Модель задаётся в приложении Mnema на Mac: Настройки → Запись → Выбрать модель…"
   echo
   say "The server's commands, in $PWD:" "Команды сервера, в папке $PWD:"
-  server_commands
+  server_commands "$NAME"
   exit 0
 fi
 
