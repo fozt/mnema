@@ -33,6 +33,17 @@ def _ffprobe(path: Path, args: list[str]) -> str:
     return run([tool("ffprobe"), "-v", "error", *args, str(path)]).strip()
 
 
+def _last_packet_end(path: Path) -> float:
+    """The length of a file written as a stream, whose header has none (a browser's recording)."""
+    packets = _ffprobe(path, ["-show_entries", "packet=pts_time,duration_time", "-of", "csv=p=0"])
+    for line in reversed(packets.splitlines()):
+        try:
+            return sum(float(field) for field in line.split(",")[:2])
+        except ValueError:  # N/A: this packet has no time
+            continue
+    return 0.0
+
+
 def probe(path: Path) -> MediaInfo:
     path = Path(path)
     if not path.is_file():
@@ -88,7 +99,7 @@ def probe(path: Path) -> MediaInfo:
     try:
         duration = float(dur_raw)
     except ValueError:
-        duration = 0.0
+        duration = _last_packet_end(path) if audio_codec or video_codec else 0.0
 
     return MediaInfo(
         path=path,
