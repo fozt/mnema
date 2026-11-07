@@ -347,6 +347,21 @@ def test_devices_command_lists_and_revokes(tmp_path, capsys):
         _cli("devices", "revoke", "--dir", str(tmp_path))
 
 
+def test_a_device_note_shows_in_the_list_until_it_is_removed(tmp_path, capsys):
+    store = _store(tmp_path)
+    claimed = store.claim(store.create_invite(now=NOW)[0], "MacBook", now=NOW)
+    assert claimed is not None
+    device_id = claimed[0]
+    _cli("devices", "note", device_id, "рабочий Мак", "--dir", str(tmp_path))
+    capsys.readouterr()
+    _cli("devices", "--dir", str(tmp_path))
+    assert "рабочий Мак" in capsys.readouterr().out
+    _cli("devices", "note", device_id, "--dir", str(tmp_path))
+    assert store.devices()[0].note == ""
+    with pytest.raises(SystemExit):
+        _cli("devices", "note", "missing", "текст", "--dir", str(tmp_path))
+
+
 _V0_SCHEMA = """
 CREATE TABLE invites (
     hash TEXT PRIMARY KEY, created REAL NOT NULL, expires REAL NOT NULL,
@@ -395,7 +410,7 @@ def test_an_old_database_belongs_to_the_owner_with_the_same_tokens(tmp_path):
     db = _old_database(tmp_path)
     store = DeviceStore(db)
     assert store.verify("old-token", now=NOW) == Caller(device="old-device", user="owner")
-    assert _version(db) == 1
+    assert _version(db) == 2
     [owner] = store.users()
     assert owner.name == "owner" and owner.library and not owner.removed
     claimed = store.claim("old-code", "ПК", now=NOW + 1)
@@ -424,7 +439,7 @@ def test_two_servers_opening_one_database_at_once(tmp_path, old):
     for thread in threads:
         thread.join()
     assert errors == []
-    assert _version(db) == 1
+    assert _version(db) == 2
     assert [u.name for u in DeviceStore(db).users()] == ["owner"]
 
 

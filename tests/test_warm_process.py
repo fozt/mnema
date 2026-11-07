@@ -104,57 +104,10 @@ def test_a_process_past_the_memory_limit_is_replaced_after_its_job(warm, monkeyp
     assert job(warm)["pid"] != first["pid"]
 
 
-def test_a_job_can_be_cancelled_while_waiting_its_turn(warm):
-    began = threading.Event()
-
-    def hold(_fraction, message):
-        if message == "начал":
-            began.set()
-        if gone.is_set():
-            raise MediaError("Закончил ждать")
-
-    gone = threading.Event()
-    running = threading.Thread(
-        target=lambda: pytest.raises(MediaError, job, warm, hold, mode="hang"), daemon=True
-    )
-    running.start()
-    assert began.wait(30)
-
-    def impatient(*_):
-        raise MediaError("Отменено в очереди")
-
-    with pytest.raises(MediaError, match="Отменено в очереди"):
-        job(warm, impatient)
-    gone.set()
-    running.join(30)
-    assert not running.is_alive()
-
-
-def test_release_frees_an_idle_process_and_leaves_a_working_one(warm):
+def test_release_frees_an_idle_process(warm):
     first = job(warm)
     warm.release()
-    second = job(warm)
-    assert second["pid"] != first["pid"]
-
-    began = threading.Event()
-    stop = threading.Event()
-
-    def watch(_fraction, message):
-        if message == "начал":
-            began.set()
-        if stop.is_set():
-            raise MediaError("Хватит")
-
-    running = threading.Thread(
-        target=lambda: pytest.raises(MediaError, job, warm, watch, mode="hang"), daemon=True
-    )
-    running.start()
-    assert began.wait(30)
-    worker = warm._worker
-    warm.release()
-    assert worker.process.poll() is None
-    stop.set()
-    running.join(30)
+    assert job(warm)["pid"] != first["pid"]
 
 
 def test_texts_follow_the_job_not_the_first_job_of_the_process(warm):

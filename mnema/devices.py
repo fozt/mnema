@@ -30,6 +30,7 @@ INVITE_HOURS = 6.0
 MAX_INVITE_HOURS = 72.0
 DEFAULT_NAME = "Device"  # stored in the claiming client's language
 _NAME_LIMIT = 40
+_NOTE_LIMIT = 200
 _SEEN_EVERY_S = 60.0
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS invites (
@@ -43,7 +44,7 @@ CREATE TABLE IF NOT EXISTS devices (
 """
 
 
-_VERSION = 1
+_VERSION = 2
 
 
 class User(BaseModel):
@@ -60,6 +61,7 @@ class Device(BaseModel):
     last_seen: float | None = None
     revoked: bool = False
     user: str = OWNER
+    note: str = ""
 
 
 class OutdatedClient(Exception):
@@ -91,7 +93,10 @@ def _version(con: sqlite3.Connection) -> int:
 
 
 def _upgrade(con: sqlite3.Connection) -> None:
-    """v0 → v1 inside the caller's transaction: users, and everything so far is the owner's."""
+    """To the current version inside the caller's transaction: users (everything so far is the
+    owner's) and the devices' notes."""
+    if "note" not in {row[1] for row in con.execute("PRAGMA table_info(devices)")}:
+        con.execute("ALTER TABLE devices ADD COLUMN note TEXT NOT NULL DEFAULT ''")
     for table in ("invites", "devices"):
         columns = {row[1] for row in con.execute(f"PRAGMA table_info({table})")}
         if "user" not in columns:
@@ -227,15 +232,15 @@ class DeviceStore:
 
     def devices(self, user: str | None = None) -> list[Device]:
         """Every device, revoked too; with `user` — only that user's."""
-        query = "SELECT id, name, created, last_seen, revoked, user FROM devices"
+        query = "SELECT id, name, created, last_seen, revoked, user, note FROM devices"
         params: tuple[str, ...] = ()
         if user is not None:
             query, params = query + " WHERE user = ?", (user,)
         with closing(self._connect()) as con:
             rows = con.execute(query + " ORDER BY created, id", params).fetchall()
         return [
-            Device(id=i, name=n, created=c, last_seen=seen, revoked=bool(r), user=u)
-            for i, n, c, seen, r, u in rows
+            Device(id=i, name=n, created=c, last_seen=seen, revoked=bool(r), user=u, note=note)
+            for i, n, c, seen, r, u, note in rows
         ]
 
     def users(self) -> list[User]:
@@ -296,6 +301,14 @@ class DeviceStore:
             con.execute("DELETE FROM invites WHERE user = ? AND used_at IS NULL", (name,))
             con.execute("COMMIT")
         return True
+
+    def set_note(self, device_id: str, note: str) -> bool:
+        """The owner's words about a device, for the list; empty removes them."""
+        with closing(self._connect()) as con:
+            changed = con.execute(
+                "UPDATE devices SET note = ? WHERE id = ?", (note.strip()[:_NOTE_LIMIT], device_id)
+            ).rowcount
+        return changed == 1
 
     def revoke(self, device_id: str) -> bool:
         """Revoke a device: its token stops working from the next request."""

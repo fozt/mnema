@@ -1471,6 +1471,10 @@ def cmd_devices(args) -> None:
 
     store = DeviceStore(devices_db(_node_root(args)))
     active = [d for d in store.devices() if not d.revoked]
+    if args.action == "note":
+        if not any(d.id == args.id for d in active) or not store.set_note(args.id, args.text):
+            die(_("No connected device {id}", id=args.id))
+        return
     if args.action == "revoke":
         device = next((d for d in active if d.id == args.id), None)
         if device is None or not store.revoke(device.id):
@@ -1495,7 +1499,8 @@ def cmd_devices(args) -> None:
     for column in (_("Name"), "id", _("User"), _("Added"), _("Last seen")):
         table.add_column(column)
     for d in active:
-        table.add_row(Text(d.name), d.id, d.user, when(d.created), when(d.last_seen))
+        name = f"{d.name}\n{d.note}" if d.note else d.name  # the server's terminal is narrow
+        table.add_row(Text(name), d.id, d.user, when(d.created), when(d.last_seen))
     _cli.console.print(table)
 
 

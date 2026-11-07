@@ -359,6 +359,10 @@ def build_parser() -> argparse.ArgumentParser:
     revoke = actions.add_parser("revoke", help=_("revoke a device"))
     revoke.add_argument("id", help=_("id from the mnema devices list"))
     revoke.add_argument("--dir", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
+    note = actions.add_parser("note", help=_("a note about a device, shown in the list"))
+    note.add_argument("id", help=_("id from the mnema devices list"))
+    note.add_argument("text", nargs="?", default="", help=_("the note; empty removes it"))
+    note.add_argument("--dir", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
     sp.set_defaults(func=cmd_devices)
 
     sp = sub.add_parser("update", help=_("update the installed app"))

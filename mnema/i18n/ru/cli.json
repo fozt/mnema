@@ -39,6 +39,8 @@
   "[{accent}]Mnema server[/]: {url}, folder {root}": "[{accent}]Сервер Mnema[/]: {url}, папка {root}",
   "Name": "Имя",
   "Added": "Добавлено",
+  "a note about a device, shown in the list": "заметка об устройстве, видна в списке",
+  "the note; empty removes it": "текст заметки; пусто — убрать",
   "Last seen": "Последний раз",
   "--merge and --concat cannot be combined: tracks are either parallel (--merge) or back to back.": "--merge и --concat вместе нельзя: дорожки либо ПАРАЛЛЕЛЬНЫ (--merge), либо ВСТЫК.",
   "--no-save and -o make no sense together: either a file at the path or the clipboard without a file.": "--no-save и -o вместе бессмысленны: либо файл по пути, либо в буфер без файла.",

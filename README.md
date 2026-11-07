@@ -162,7 +162,7 @@ cd ~/mnema && ./mnema.sh invite
 | `./mnema.sh users` | People of the server with their devices and models |
 | `./mnema.sh users add NAME` | Add a person and print their invite |
 | `./mnema.sh users remove NAME` | Disconnect all of a person's devices; their recordings stay |
-| `./mnema.sh devices` | Connected devices; `./mnema.sh devices revoke <id>` disconnects one |
+| `./mnema.sh devices` | Connected devices; `./mnema.sh devices note <id> "text"` adds a note, `./mnema.sh devices revoke <id>` disconnects one |
 | `./mnema.sh update` | Pull the latest image and restart the server with it, always: a changed server config applies |
 | `./mnema.sh logs` | Server log |
 
