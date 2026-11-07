@@ -25,7 +25,9 @@ def test_parent_exit_stops_model_process_and_its_native_child(tmp_path, abrupt):
     probe.write_text(
         f"#!{sys.executable}\n"
         "import os, time\nfrom pathlib import Path\n"
-        "Path(os.environ['PROBE_READY']).write_text(str(os.getpid()))\n"
+        "ready = Path(os.environ['PROBE_READY'])\n"
+        "ready.with_suffix('.tmp').write_text(str(os.getpid()))\n"
+        "ready.with_suffix('.tmp').replace(ready)\n"
         "time.sleep(300)\n"
     )
     probe.chmod(0o755)

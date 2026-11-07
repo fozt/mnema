@@ -86,6 +86,15 @@ def test_a_crash_fails_its_job_and_the_next_one_starts_a_new_process(warm):
     assert job(warm)["pid"] != first["pid"]
 
 
+def test_a_crash_never_shows_the_text_of_an_earlier_job(warm):
+    """The earlier job may be another user's: its file name must not reach this one's error."""
+    with pytest.raises(MediaError, match="запись не читается"):
+        job(warm, mode="error")
+    with pytest.raises(MediaError) as crash:
+        job(warm, mode="crash")
+    assert "запись не читается" not in str(crash.value)
+
+
 def test_a_cancel_ends_the_process_and_the_next_job_goes_on(warm):
     first = job(warm)
 

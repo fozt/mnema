@@ -101,6 +101,7 @@ class Worker:
         self._events: queue.Queue[Any] = queue.Queue()
         self._closed = False
         self._close_lock = threading.Lock()
+        self.shared = False  # serves several users' jobs: its stderr stays out of their errors
         if argv is not None:
             env = {k: os.environ[k] for k in HELPER_ENV if k in os.environ}
             env["TMPDIR"] = self._temp.name
@@ -215,7 +216,7 @@ class Worker:
                 logger.warning(
                     "recognition process crashed (exit code %s):\n%s", code, "\n".join(self._tail)
                 )
-            reason = self.failure()
+            reason = "" if self.shared else self.failure()
             if reason:
                 raise MediaError(
                     _(
@@ -321,6 +322,7 @@ class WarmProcess:
         if self._worker is None or self._worker.process.poll() is not None:
             self._drop()
             self._worker = Worker()
+            self._worker.shared = True
         return self._worker
 
     def _serve(self, operation: str, payload: dict, on: Progress, status: Any) -> Any:
