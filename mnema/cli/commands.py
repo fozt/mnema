@@ -1463,6 +1463,15 @@ def _add_user(args, root: Path, store) -> None:
     print(issue_invite(root, url, user=name, hours=args.hours, now=time.time()))
 
 
+NO_DEVICE = "No connected device with the id {id}. The ids are in the list: {command}"
+
+
+def _server_devices() -> str:
+    from ..node import server_command
+
+    return server_command("devices")
+
+
 def cmd_token(args) -> None:
     """A service's token in one step: its user, when new, and a device named after it. An
     invitation would need a second machine; this command already runs on the server."""
@@ -1500,12 +1509,12 @@ def cmd_devices(args) -> None:
     active = [d for d in store.devices() if not d.revoked]
     if args.action == "note":
         if not any(d.id == args.id for d in active) or not store.set_note(args.id, args.text):
-            die(_("No connected device {id}", id=args.id))
+            die(_(NO_DEVICE, id=args.id, command=_server_devices()))
         return
     if args.action == "revoke":
         device = next((d for d in active if d.id == args.id), None)
         if device is None or not store.revoke(device.id):
-            die(_("No connected device {id}", id=args.id))
+            die(_(NO_DEVICE, id=args.id, command=_server_devices()))
             return
         _cli.console.print(
             Text(_("Revoked: {name} {id}", name=device.name, id=device.id)), soft_wrap=True

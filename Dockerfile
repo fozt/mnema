@@ -74,6 +74,10 @@ ENV PATH=/app/.venv/bin:$PATH \
     MNEMA_LIBRARY=true \
     MNEMA_CONTAINER=true \
     PYTHONUNBUFFERED=1
+# The standard library comes without bytecode and the project's files arrive here without it: the
+# user of the image cannot write it, so every start of Python would compile them again.
+RUN python -m compileall -q -j0 /usr/local/lib/python3.12 \
+    /app/.venv/lib/python3.12/site-packages/mnema
 USER mnema
 WORKDIR /data
 VOLUME /data

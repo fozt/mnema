@@ -26,7 +26,9 @@ server_commands() {
   ./mnema.sh users remove ИМЯ       отключить устройства человека, записи остаются
   ./mnema.sh invite                 приглашение для одного устройства (--hours до 72, --user ИМЯ)
   ./mnema.sh devices                подключённые устройства
-  ./mnema.sh devices revoke ID      отключить устройство
+  ./mnema.sh devices revoke ID      отключить устройство, ID из списка devices
+  ./mnema.sh devices note ID ТЕКСТ  заметка об устройстве
+  ./mnema.sh token ИМЯ              токен для сервиса: свой пользователь и устройство
   ./mnema.sh update                 новая версия сервера
   ./mnema.sh logs                   журнал сервера
 HELP
@@ -36,7 +38,9 @@ HELP
   ./mnema.sh users remove NAME      disconnect a person's devices, the recordings stay
   ./mnema.sh invite                 an invitation for one device (--hours up to 72, --user NAME)
   ./mnema.sh devices                connected devices
-  ./mnema.sh devices revoke ID      disconnect a device
+  ./mnema.sh devices revoke ID      disconnect a device, ID from the devices list
+  ./mnema.sh devices note ID TEXT   a note about a device
+  ./mnema.sh token NAME             a token for a service: its own user and device
   ./mnema.sh update                 the newest version of the server
   ./mnema.sh logs                   the server's log
 HELP
