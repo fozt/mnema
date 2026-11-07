@@ -35,6 +35,7 @@ serve several people, each with their own devices, library and model.
 - **Command line** (a separate package) for files and links: transcribe a video or a YouTube
   link, live captions, translate, compress, merge tracks.
 - **MCP server** so Claude and other assistants can transcribe and read your recordings.
+- **OpenAI-compatible API** on your server, so other services can transcribe with your Parakeet.
 - **English and Russian interface**, following the system language.
 
 ## How it works
@@ -386,6 +387,63 @@ where the `mnema` command does. Add it to Claude Code:
 claude mcp add mnema -- mnema-mcp
 ```
 
+### Other services
+
+The server also speaks the OpenAI transcription API, so a service that can use OpenAI can use your
+server instead. It needs three settings:
+
+| Setting | Value |
+|---|---|
+| Base URL | `http://SERVER:PORT/api/v1` |
+| API key | a device token |
+| Model | `parakeet` (`whisper-1` is the same model, for clients with a fixed name) |
+
+Give every service a token of its own. Make an invite on the server, and exchange the code after
+`#invite=` for a token:
+
+```bash
+cd ~/mnema && ./mnema.sh invite
+```
+
+```bash
+curl http://SERVER:PORT/api/devices/claim -H 'Content-Type: application/json' -d '{"invite": "CODE", "name": "my service", "library": true}'
+```
+
+The service works as the person the invite is for (`./mnema.sh invite --user anna`), and
+`./mnema.sh devices revoke <id>` cuts it off, like any device. With the `openai` package for
+Python:
+
+```python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://SERVER:PORT/api/v1", api_key="TOKEN", timeout=3600)
+with open("call.mp3", "rb") as audio:
+    result = client.audio.transcriptions.create(model="parakeet", file=audio)
+print(result.text)
+```
+
+`POST /audio/transcriptions` takes `file`, `model`, `language`, `prompt`, `response_format` (`json`,
+`text`, `srt`, `vtt`, `verbose_json`) and, with `verbose_json`, `timestamp_granularities[]`
+(`segment`, `word`). Errors have the OpenAI format.
+
+- **Models:** only Parakeet. Cloud recognition is not available here, so a service cannot spend the
+  OpenAI key of the person whose token it holds.
+- **Fields without effect:** `prompt` and `temperature` are accepted and change nothing, Parakeet
+  has no such settings. The confidence fields of `verbose_json` segments are fixed placeholders.
+  Streaming is refused.
+- **Languages:** the 25 languages of Parakeet; `language` with another one is refused.
+- **Size:** a request up to 1 GiB, enough for hours of audio, while the disk of a shared server
+  stays safe: the file lies on it twice while it is saved. Longer recordings belong in the apps,
+  which upload in resumable parts.
+- **Time:** a request waits in the same queue as recordings. A full queue answers `429` with
+  `Retry-After`. After one hour, queue included, the job is cancelled and the answer is `504`.
+- **Client timeout:** closing the connection cancels the job. The `openai` package gives up after
+  10 minutes by default, so set its `timeout` as in the example.
+- **What stays:** nothing. The audio and the text are deleted once the answer goes out, and no
+  recording appears in the library.
+- **Plain HTTP:** the server has no TLS of its own, so the service's token and the audio travel
+  in the open. Over a network you do not trust, put a TLS proxy in front of the server.
+
 ## Privacy
 
 - **Audio** stays on the device that recorded it, or goes to your own server when that server
@@ -395,6 +453,8 @@ claude mcp add mnema -- mnema-mcp
 - **Sync** carries texts only: `transcript.txt`, `summary.txt` and processing history, plus
   renames, moves and deletions.
 - **Screen video** is assembled and kept on the Mac that recorded it.
+- **The OpenAI-compatible API** keeps nothing: the audio and the text are deleted once the answer
+  goes out.
 - **Speech models** are downloaded once from Hugging Face, on the Mac at the first use, on the
   server with the first job; recognition itself works offline.
 - **Cloud recognition** sends the audio to OpenAI and is off unless a person chooses *In the

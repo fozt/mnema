@@ -12,6 +12,7 @@ import anyio
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
+from starlette import datastructures
 from starlette.concurrency import run_in_threadpool
 
 from ..i18n import _
@@ -73,6 +74,25 @@ async def _receive_chunk(request: Request, file: Path, offset: int, room: int) -
     return outcome
 
 
+def save_upload(app: FastAPI, file: datastructures.UploadFile, user: str) -> Path:
+    """Saves the file to a fresh uploads/<uuid>/ of the user: equal names never overwrite each
+    other's input. The folder is ephemeral: jobs.py removes it once the job ends."""
+    app.state.uploads.sweep()
+    dest_dir = app.state.root / "uploads" / uuid.uuid4().hex
+    app.state.uploads.writing(dest_dir, user=user)
+    success = False
+    try:
+        dest = target(dest_dir, file.filename or "upload.bin")
+        if dest is None:
+            raise HTTPException(403, _(INVALID_NAME))
+        with open(dest, "wb") as f:
+            shutil.copyfileobj(file.file, f)  # streamed: recordings can be gigabytes
+        success = True
+        return dest
+    finally:
+        app.state.uploads.written(dest_dir, success=success)
+
+
 def register_file_routes(app: FastAPI) -> None:
     def _mine(request: Request, upload_id: str) -> bool:
         """A device uses only uploads of its user; the node token any."""
@@ -82,22 +102,7 @@ def register_file_routes(app: FastAPI) -> None:
 
     @app.post("/api/upload")
     def upload(request: Request, file: UploadFile = File(...)) -> dict:  # noqa: B008
-        # A unique uploads/<uuid>/ per upload: equal names never overwrite each other's input.
-        # The folder is ephemeral: jobs.py removes it once the job ends.
-        app.state.uploads.sweep()
-        dest_dir = app.state.root / "uploads" / uuid.uuid4().hex
-        app.state.uploads.writing(dest_dir, user=request.state.user)
-        success = False
-        try:
-            dest = target(dest_dir, file.filename or "upload.bin")
-            if dest is None:
-                raise HTTPException(403, _(INVALID_NAME))
-            with open(dest, "wb") as f:
-                shutil.copyfileobj(file.file, f)  # streamed: recordings can be gigabytes
-            success = True
-            return {"path": str(dest)}
-        finally:
-            app.state.uploads.written(dest_dir, success=success)
+        return {"path": str(save_upload(app, file, request.state.user))}
 
     @app.post("/api/uploads", status_code=201)
     def start_upload(req: UploadStart, request: Request) -> dict:

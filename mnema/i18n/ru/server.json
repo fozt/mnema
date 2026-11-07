@@ -83,5 +83,17 @@
   "The user was removed": "Пользователь удалён",
   "DeepL did not answer": "DeepL не ответил",
   "Choose a model from the list": "Выберите модель из списка",
-  "The model did not answer in time. Try again": "Модель не ответила вовремя. Попробуйте ещё раз"
+  "The model did not answer in time. Try again": "Модель не ответила вовремя. Попробуйте ещё раз",
+  "The token is not valid": "Токен не подходит",
+  "The form could not be read": "Форму не удалось прочитать",
+  "The request is over the {limit} GiB limit": "Запрос больше предела {limit} ГиБ",
+  "Attach the audio as the file field": "Приложите звук в поле file",
+  "The model field is needed": "Нужно поле model",
+  "Unknown model: {model}. Available: {models}": "Неизвестная модель: {model}. Доступны: {models}",
+  "Unknown response format: {format}": "Неизвестный формат ответа: {format}",
+  "Unknown timestamp granularity: {value}": "Неизвестная точность меток времени: {value}",
+  "Timestamp granularities need the verbose_json response format": "Для меток времени нужен формат ответа verbose_json",
+  "Streaming is not supported": "Потоковый ответ не поддерживается",
+  "The audio could not be read": "Не удалось прочитать звук",
+  "The transcription took too long and was cancelled": "Расшифровка заняла слишком много времени и отменена"
 }

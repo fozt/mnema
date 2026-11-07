@@ -422,3 +422,33 @@ def test_merge_mixed_audio_and_video_inputs_die(monkeypatch, tmp_path) -> None:
 
     with pytest.raises(MediaError, match="нет видеопотока"):
         video.merge([Path("a.mp4"), Path("b.mp3")], tmp_path / "joined.mp4")
+
+
+@pytest.mark.parametrize(
+    ("packets", "duration"),
+    [
+        ("0.000000,0.020000\n6.460000,0.020000\n", 6.48),
+        ("0.0,0.02\n1.5,0.02\nN/A,N/A\n", 1.52),
+        ("", 0.0),
+    ],
+)
+def test_a_file_without_a_length_in_its_header_is_as_long_as_its_packets(
+    tmp_path, monkeypatch, packets, duration
+):
+    """A browser's recording is written as a stream: ffprobe has no format duration for it."""
+    (tmp_path / "packets").write_text(packets)
+    ffprobe = tmp_path / "ffprobe"
+    ffprobe.write_text(
+        f"#!{sys.executable}\n"
+        "import sys\n"
+        'field = sys.argv[sys.argv.index("-show_entries") + 1]\n'
+        'if field == "format=duration": print("N/A")\n'
+        'elif field.startswith("packet="):\n'
+        '    print(open(sys.argv[0].replace("ffprobe", "packets")).read(), end="")\n'
+        'elif sys.argv[sys.argv.index("-select_streams") + 1] == "a": print("opus")\n'
+    )
+    ffprobe.chmod(0o700)
+    monkeypatch.setenv("MNEMA_FFPROBE", str(ffprobe))
+    media = tmp_path / "voice.webm"
+    media.write_bytes(b"x")
+    assert probe(media).duration == pytest.approx(duration)

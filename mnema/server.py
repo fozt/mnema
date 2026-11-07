@@ -24,6 +24,7 @@ from .api.live_translate import register_live_translate_routes
 from .api.model import register_model_routes
 from .api.node import register_node_routes
 from .api.storage import register_storage_routes
+from .api.transcriptions import register_transcription_routes
 from .api.uploads import Uploads
 from .core.base import MediaError
 from .devices import DeviceStore, devices_db
@@ -116,7 +117,8 @@ def create_app(root: Path) -> FastAPI:
     add_language_middleware(app)
     register_storage_routes(app)
     register_library_routes(app)
-    register_job_routes(app)
+    create_job = register_job_routes(app)
+    register_transcription_routes(app, create_job)
     register_file_routes(app)
     register_live_routes(app)
     register_live_translate_routes(app)

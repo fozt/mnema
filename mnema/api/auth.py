@@ -13,6 +13,7 @@ from ..i18n import _
 from ..install_setup import server_token
 from ..jobs import NODE_OWNER
 from ..users import OWNER, Caller, as_user
+from .transcriptions import BAD_TOKEN, OPENAI_PREFIX, openai_error
 
 # The only way in without a token: exchanging an invitation for a device token.
 CLAIM_PATH = "/api/devices/claim"
@@ -57,6 +58,8 @@ def add_auth_middleware(app: FastAPI) -> None:
                 request.app, bearer(request.headers.get("authorization", "")), token
             )
             if found is None:
+                if path.startswith(OPENAI_PREFIX):
+                    return openai_error(401, _(BAD_TOKEN), code="invalid_api_key")
                 return JSONResponse(
                     {"detail": _("A new invitation from the server is needed")}, status_code=401
                 )

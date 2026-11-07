@@ -10,19 +10,11 @@ import wave
 from pathlib import Path
 from typing import Any, Protocol
 
-from pydantic import BaseModel
-
 from .base import Progress, noop
-from .models import Segment
+from .models import Segment, Word
 
 SR = 16000
 REPLY_GAP_S = 0.6  # a longer pause between words starts a new reply
-
-
-class Word(BaseModel):
-    text: str  # the word with punctuation, as the model gave it
-    start: float  # seconds from the track start
-    end: float
 
 
 class Recognizer(Protocol):

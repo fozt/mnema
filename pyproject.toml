@@ -82,6 +82,7 @@ tools = [
     "onnxruntime>=1.20", "numpy",
     # The server's HTTP stack for API tests (TestClient), so CI needs no engines
     "fastapi", "uvicorn[standard]", "python-multipart",
+    "openai",  # a real OpenAI client goes through the transcription route
 ]
 # Default group: plain `uv sync` installs the core and the tools, no recognition engines.
 # Engines and the apps' extras on demand: `uv sync --all-extras`. install.sh and updates
