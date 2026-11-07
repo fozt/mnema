@@ -125,7 +125,7 @@ def test_parakeet_gives_replies_cleaned_by_the_language(monkeypatch, tmp_path) -
         return dest
 
     monkeypatch.setattr(b, "extract_audio", fake_extract)
-    script = {0: 0, 1: 1, 30: 2, 31: 3, 32: 4, 33: 5}  # «Привет.» at 0 s, «Mm-hmm.» at 2.4 s
+    script = {0: 0, 1: 1, 30: 2, 31: 3, 32: 4, 33: 5}  # the WAV starts with 0.3 s of silence
     for lang, texts in (("ru", ["Привет.", "Угу."]), (None, ["Привет.", "Угу."]),
                         ("en", ["Привет.", "Mm-hmm."])):  # fmt: skip
         onnx_stubs.install(
@@ -136,5 +136,5 @@ def test_parakeet_gives_replies_cleaned_by_the_language(monkeypatch, tmp_path) -
         )
         tr = b.ParakeetBackend().run(Path("voice.ogg"), lang=lang)
         assert [s.text for s in tr.segments] == texts
-        assert tr.segments[1].start == pytest.approx(2.4)
+        assert tr.segments[1].start == pytest.approx(2.1)
         assert tr.language == (lang or "ru")

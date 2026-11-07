@@ -18,7 +18,7 @@ from fastapi.testclient import TestClient
 
 from mnema import core
 from mnema.api import transcriptions
-from mnema.core import asr_engine
+from mnema.core import asr_engine, backends
 from mnema.core.backends import ParakeetBackend
 from mnema.core.base import MediaError, noop
 from mnema.core.models import Segment, Transcript, Word
@@ -403,16 +403,20 @@ def test_a_broken_form_is_an_openai_400(node):
 
 
 def test_parakeet_keeps_the_word_times(monkeypatch):
-    words = [Word(text="Hello", start=0.0, end=0.4), Word(text="there.", start=0.5, end=0.9)]
+    """The recognizer hears 0.3 s of silence before the speech: the answer's times do not."""
+    words = [Word(text="Hello", start=0.1, end=0.5), Word(text="there.", start=0.8, end=1.3)]
 
     class Recognizer:
         def words(self, wav, *, on=noop):
             return words
 
     monkeypatch.setattr(asr_engine, "local_recognizer", Recognizer)
-    monkeypatch.setattr("mnema.core.backends._track_wav", lambda src, dst, on: dst)
+    monkeypatch.setattr(backends, "extract_audio", lambda src, dst, **options: dst)
     transcript = ParakeetBackend().run(Path("talk.wav"), lang="en")
-    assert transcript.words == words
+    assert [(w.text, w.start, w.end) for w in transcript.words] == [
+        ("Hello", 0.0, pytest.approx(0.2)),
+        ("there.", pytest.approx(0.5), pytest.approx(1.0)),
+    ]
     assert transcript.text == "Hello there."
 
 

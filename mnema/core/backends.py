@@ -140,6 +140,12 @@ class ParakeetBackend(Engine):
             with tempfile.TemporaryDirectory() as tmp:
                 wav = _track_wav(src, Path(tmp) / "audio.wav", on)
                 words = asr_engine.local_recognizer().words(wav, on=on)
+        words = [
+            w.model_copy(
+                update={"start": max(w.start - _PAD_S, 0.0), "end": max(w.end - _PAD_S, 0.0)}
+            )
+            for w in words
+        ]
         segments = asr_engine.replies(words)
         if lang is None:
             lang = parakeet.guess_lang(" ".join(s.text for s in segments))
@@ -148,8 +154,11 @@ class ParakeetBackend(Engine):
         return Transcript(text=text, segments=segments, language=lang)
 
 
+_PAD_S = 0.3  # silence before the speech in the WAV Parakeet hears, not in the recording
+
+
 def _track_wav(src: Path, dst: Path, on: Progress) -> Path:
-    return extract_audio(src, dst, pad_start_ms=300, on=on)
+    return extract_audio(src, dst, pad_start_ms=int(_PAD_S * 1000), on=on)
 
 
 class _Together:
