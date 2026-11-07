@@ -17,7 +17,7 @@ from mnema.core import asr_engine
 from mnema.core import parakeet as pk
 from mnema.core.asr_engine import Word
 from mnema.core.base import MediaError
-from mnema.core.models import Segment
+from mnema.core.models import Segment, Transcript
 from tests import onnx_stubs
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -350,8 +350,8 @@ def test_replies_break_at_a_pause_longer_than_06s() -> None:
         Word(text="Угу.", start=2.3, end=2.5),  # 0.7 s: a new one
     ]  # fmt: skip
     assert asr_engine.replies(words) == [
-        Segment(start=0.0, end=1.6, text="Привет, как дела?"),
-        Segment(start=2.3, end=2.5, text="Угу."),
+        Segment(start=0.0, end=1.6, text="Привет, как дела?", words=words[:3]),
+        Segment(start=2.3, end=2.5, text="Угу.", words=words[3:]),
     ]
     assert len(asr_engine.replies(words, gap=2.0)) == 1
     assert asr_engine.replies([]) == []
@@ -391,3 +391,22 @@ def test_tidy_applies_russian_cleanup_only_to_russian_calls() -> None:
     segments = [Segment(start=0, end=1, text="Mm-hmm."), Segment(start=1, end=2, text="Uh")]
     assert [s.text for s in pk.tidy(segments, "ru")] == ["Угу."]
     assert [s.text for s in pk.tidy(segments, "en")] == ["Mm-hmm.", "Uh"]
+
+
+def test_a_cleaned_reply_keeps_text_and_word_times_together() -> None:
+    """The filler becomes "Угу." in the reply and in its word times, a dropped reply takes its
+    words along; a transcript built from them never tells two versions of a moment."""
+    words = [
+        Word(text="Mm-hmm", start=0.0, end=0.4),
+        Word(text="Uh", start=2.0, end=2.2),
+        Word(text="Хорошо,", start=4.0, end=4.5),
+        Word(text="договорились.", start=4.6, end=5.2),
+    ]
+    segments = pk.tidy(asr_engine.replies(words), "ru")
+    transcript = Transcript(text=" ".join(s.text for s in segments), segments=segments)
+    assert transcript.text == "Угу. Хорошо, договорились."
+    assert [(w.text, w.start, w.end) for w in transcript.words] == [
+        ("Угу.", 0.0, 0.4),
+        ("Хорошо,", 4.0, 4.5),
+        ("договорились.", 4.6, 5.2),
+    ]

@@ -33,9 +33,9 @@ from .models import JobRequest
 
 OPENAI_PREFIX = "/api/v1/"
 TRANSCRIPTIONS = f"{OPENAI_PREFIX}audio/transcriptions"
-# parakeet, and the name clients send by default. An allow-list on purpose: a cloud model name
+# whisper-1 only for clients with the name built in. An allow-list on purpose: a cloud model name
 # never gets through, so a third-party service cannot spend the OpenAI key of the token's user.
-MODELS = ("parakeet", "whisper-1")
+MODELS = ("mnema", "whisper-1")
 MAX_REQUEST_BYTES = 1024**3  # 9 h of 16 kHz WAV, 18 h of 128 kbps MP3; on disk twice while saved
 TIMEOUT_S = 3600.0  # queue and recognition together; a longer recording belongs in the apps
 POLL_S = 0.25

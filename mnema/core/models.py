@@ -7,25 +7,29 @@ from pydantic import BaseModel, Field
 from .base import fmt_stamp, speaker_word
 
 
-class Segment(BaseModel):
-    start: float
-    end: float
-    text: str
-    speaker: str | None = None
-
-
 class Word(BaseModel):
     text: str  # the word with punctuation, as the model gave it
     start: float  # seconds from the track start
     end: float
 
 
+class Segment(BaseModel):
+    start: float
+    end: float
+    text: str
+    speaker: str | None = None
+    words: list[Word] = Field(default_factory=list)  # empty when the engine gives no word times
+
+
 class Transcript(BaseModel):
     text: str
     segments: list[Segment] = Field(default_factory=list)
-    words: list[Word] = Field(default_factory=list)  # empty when the engine gives no word times
     language: str | None = None
     engine: str | None = None  # recognizing engine (parakeet, a cloud model); None if unknown
+
+    @property
+    def words(self) -> list[Word]:
+        return [w for s in self.segments for w in s.words]
 
     def as_text(self, *, paragraph_gap: float = 1.0) -> str:
         """Readable text: segments joined, a new paragraph at a pause ≥ `paragraph_gap` s.

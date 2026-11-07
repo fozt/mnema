@@ -263,7 +263,10 @@ def tidy(segments: list[Segment], lang: str | None) -> list[Segment]:
     for s in segments:
         text = tidy_ru(s.text)
         if text:
-            out.append(s if text == s.text else s.model_copy(update={"text": text}))
+            word = Word(text=text, start=s.start, end=s.end)
+            out.append(
+                s if text == s.text else s.model_copy(update={"text": text, "words": [word]})
+            )
     return out
 
 

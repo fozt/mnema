@@ -30,13 +30,21 @@ URL = "/api/v1/audio/transcriptions"
 TRANSCRIPT = Transcript(
     text="Привет. Как дела?",
     segments=[
-        Segment(start=0.0, end=1.25, text="Привет."),
-        Segment(start=3661.5, end=3662.0, text="Как дела?"),
-    ],
-    words=[
-        Word(text="Привет.", start=0.0, end=1.25),
-        Word(text="Как", start=3661.5, end=3661.7),
-        Word(text="дела?", start=3661.8, end=3662.0),
+        Segment(
+            start=0.0,
+            end=1.25,
+            text="Привет.",
+            words=[Word(text="Привет.", start=0.0, end=1.25)],
+        ),
+        Segment(
+            start=3661.5,
+            end=3662.0,
+            text="Как дела?",
+            words=[
+                Word(text="Как", start=3661.5, end=3661.7),
+                Word(text="дела?", start=3661.8, end=3662.0),
+            ],
+        ),
     ],
     language="ru",
 )
@@ -95,7 +103,7 @@ def node(tmp_path, monkeypatch):
 
 
 def post(n, *, who="service", files=None, **data):
-    data.setdefault("model", "parakeet")
+    data.setdefault("model", "mnema")
     return n.client.post(URL, data=data, files=files or AUDIO, headers=n.h[who])
 
 
@@ -171,7 +179,7 @@ def test_verbose_json_gives_only_the_asked_granularity(node):
     answer = node.client.post(
         URL,
         data={
-            "model": "parakeet",
+            "model": "mnema",
             "response_format": "verbose_json",
             "timestamp_granularities[]": "word",
         },
@@ -186,7 +194,7 @@ def test_verbose_json_gives_both_granularities(node):
     answer = node.client.post(
         URL,
         data={
-            "model": "parakeet",
+            "model": "mnema",
             "response_format": "verbose_json",
             "timestamp_granularities[]": ["segment", "word"],
         },
@@ -231,7 +239,7 @@ def test_a_refused_request_queues_nothing_and_leaves_no_upload(node, fields, sta
 def test_the_model_and_the_file_are_required(node):
     response = node.client.post(URL, files=AUDIO, headers=node.h["service"])
     assert refusal(response, 400, "missing_required_parameter")["param"] == "model"
-    response = node.client.post(URL, data={"model": "parakeet"}, headers=node.h["service"])
+    response = node.client.post(URL, data={"model": "mnema"}, headers=node.h["service"])
     assert refusal(response, 400, "missing_required_parameter")["param"] == "file"
 
 
@@ -243,7 +251,7 @@ def test_a_file_name_the_server_cannot_keep_is_refused(node):
 
 def test_whisper_1_is_parakeet_and_cloud_is_never_chosen(node):
     assert post(node, model="whisper-1").status_code == 200
-    assert post(node, model="parakeet").status_code == 200
+    assert post(node, model="mnema").status_code == 200
     assert [call["backend"] for call in node.calls] == ["parakeet", "parakeet"]
 
 
@@ -255,7 +263,7 @@ def test_language_reaches_the_engine_and_the_prompt_does_not(node):
 @pytest.mark.parametrize("token", [None, "wrong"])
 def test_a_bad_token_gets_an_openai_401(node, token):
     headers = {} if token is None else {"Authorization": f"Bearer {token}"}
-    response = node.client.post(URL, data={"model": "parakeet"}, files=AUDIO, headers=headers)
+    response = node.client.post(URL, data={"model": "mnema"}, files=AUDIO, headers=headers)
     refusal(response, 401, "invalid_api_key")
     assert node.calls == []
 
@@ -437,11 +445,11 @@ def test_the_openai_package_reads_every_format(served):
     assert client.audio.transcriptions.create(model="whisper-1", file=file).text == TRANSCRIPT.text
     for answer in ("text", "srt", "vtt"):
         text = client.audio.transcriptions.create(
-            model="parakeet", file=file, response_format=answer, language="ru", prompt="Mnema"
+            model="mnema", file=file, response_format=answer, language="ru", prompt="Mnema"
         )
         assert "Как дела?" in text
     verbose = client.audio.transcriptions.create(
-        model="parakeet",
+        model="mnema",
         file=file,
         response_format="verbose_json",
         timestamp_granularities=["word", "segment"],
@@ -454,7 +462,7 @@ def test_the_openai_package_reads_every_format(served):
 def test_the_openai_package_gets_its_own_errors(served):
     file = ("talk.mp3", b"audio bytes")
     with pytest.raises(openai.AuthenticationError) as denied:
-        sdk(served, token="wrong").audio.transcriptions.create(model="parakeet", file=file)
+        sdk(served, token="wrong").audio.transcriptions.create(model="mnema", file=file)
     assert denied.value.code == "invalid_api_key"
     with pytest.raises(openai.NotFoundError) as unknown:
         sdk(served).audio.transcriptions.create(model="gpt-4o-transcribe", file=file)
@@ -466,7 +474,7 @@ def test_a_client_that_leaves_cancels_the_job(served):
     served.hold.set()
     boundary = "mnema"
     body = (
-        f'--{boundary}\r\nContent-Disposition: form-data; name="model"\r\n\r\nparakeet\r\n'
+        f'--{boundary}\r\nContent-Disposition: form-data; name="model"\r\n\r\nmnema\r\n'
         f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="a.mp3"\r\n\r\n'
         f"audio bytes\r\n--{boundary}--\r\n"
     ).encode()
@@ -487,11 +495,11 @@ def test_a_job_waiting_in_the_queue_goes_with_its_client(served):
     served.hold.set()
     file = ("talk.mp3", b"audio bytes")
     with ThreadPoolExecutor(1) as pool:
-        first = pool.submit(sdk(served).audio.transcriptions.create, model="parakeet", file=file)
+        first = pool.submit(sdk(served).audio.transcriptions.create, model="mnema", file=file)
         assert served.started.wait(5)
         client = sdk(served, timeout=httpx.Timeout(0.2))
         with pytest.raises(openai.APITimeoutError):
-            client.audio.transcriptions.create(model="parakeet", file=file)
+            client.audio.transcriptions.create(model="mnema", file=file)
         over(lambda: jobs(served) == 1, "the waiting job stayed in the queue")
         served.release.set()
         assert first.result(5).text == TRANSCRIPT.text

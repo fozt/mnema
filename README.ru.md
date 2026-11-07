@@ -392,7 +392,7 @@ claude mcp add mnema -- mnema-mcp
 |---|---|
 | Base URL | `http://СЕРВЕР:ПОРТ/api/v1` |
 | API key | токен устройства |
-| Model | `parakeet` (`whisper-1` та же модель, для клиентов с жёстко заданным именем) |
+| Model | `mnema` (подойдёт и `whisper-1`, для клиентов с жёстко заданным именем) |
 
 Каждому сервису нужен свой токен. Выпустите приглашение на сервере и обменяйте код после
 `#invite=` на токен:
@@ -414,7 +414,7 @@ from openai import OpenAI
 
 client = OpenAI(base_url="http://СЕРВЕР:ПОРТ/api/v1", api_key="ТОКЕН", timeout=3600)
 with open("call.mp3", "rb") as audio:
-    result = client.audio.transcriptions.create(model="parakeet", file=audio)
+    result = client.audio.transcriptions.create(model="mnema", file=audio)
 print(result.text)
 ```
 
@@ -422,6 +422,7 @@ print(result.text)
 (`json`, `text`, `srt`, `vtt`, `verbose_json`) и, с `verbose_json`, `timestamp_granularities[]`
 (`segment`, `word`). Ошибки приходят в формате OpenAI.
 
+- **Токен только на бэкенде:** запрос идёт из вашего бэкенда, а не из браузера: иначе токен окажется у всех посетителей, и браузер такой запрос не пропустит.
 - **Модели:** только Parakeet. Облачного распознавания здесь нет, поэтому сервис не потратит ключ
   OpenAI того человека, чей токен у него.
 - **Поля без действия:** `prompt` и `temperature` принимаются и ничего не меняют, у Parakeet таких

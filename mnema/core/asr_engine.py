@@ -56,8 +56,9 @@ def replies(words: list[Word], *, gap: float = REPLY_GAP_S) -> list[Segment]:
         if out and w.start - out[-1].end <= gap:
             last = out[-1]
             out[-1] = last.model_copy(update={"end": w.end, "text": f"{last.text} {w.text}"})
+            out[-1].words.append(w)
         else:
-            out.append(Segment(start=w.start, end=w.end, text=w.text))
+            out.append(Segment(start=w.start, end=w.end, text=w.text, words=[w]))
     return out
 
 

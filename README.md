@@ -396,7 +396,7 @@ server instead. It needs three settings:
 |---|---|
 | Base URL | `http://SERVER:PORT/api/v1` |
 | API key | a device token |
-| Model | `parakeet` (`whisper-1` is the same model, for clients with a fixed name) |
+| Model | `mnema` (`whisper-1` works too, for clients with a fixed name) |
 
 Give every service a token of its own. Make an invite on the server, and exchange the code after
 `#invite=` for a token:
@@ -418,7 +418,7 @@ from openai import OpenAI
 
 client = OpenAI(base_url="http://SERVER:PORT/api/v1", api_key="TOKEN", timeout=3600)
 with open("call.mp3", "rb") as audio:
-    result = client.audio.transcriptions.create(model="parakeet", file=audio)
+    result = client.audio.transcriptions.create(model="mnema", file=audio)
 print(result.text)
 ```
 
@@ -426,6 +426,7 @@ print(result.text)
 `text`, `srt`, `vtt`, `verbose_json`) and, with `verbose_json`, `timestamp_granularities[]`
 (`segment`, `word`). Errors have the OpenAI format.
 
+- **Token on the backend only:** the request comes from your backend, not the browser: there the token would reach every visitor, and the browser would refuse such a request.
 - **Models:** only Parakeet. Cloud recognition is not available here, so a service cannot spend the
   OpenAI key of the person whose token it holds.
 - **Fields without effect:** `prompt` and `temperature` are accepted and change nothing, Parakeet
