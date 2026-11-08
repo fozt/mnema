@@ -117,6 +117,9 @@ _QUEUE_SECONDS = 30
 # current default (with the headphones gone, the default is the built-in microphone).
 _REOPEN_INTERVAL = 2.0  # seconds between reopen attempts
 _REOPEN_BUDGET = 60.0  # seconds since the stream died; after that the source ends
+# a live stream delivers a block every 0.1 s, silence too; none for this long means it is dead
+# while still reporting itself active (Core Audio's AUHAL error -50 at the start of a recording)
+_STALL_S = 3.0
 
 
 class MicUnavailable(MediaError):
@@ -200,6 +203,7 @@ class MicSource:
         self._died_at = 0.0
         self._reopen_last = 0.0
         self._reopen_count = 0
+        self._heard = 0.0  # the clock at the last block of the current stream, or its opening
         self._gen = 0  # stream generation: an old stream's finished_callback leaves the new one
 
     @property
@@ -285,6 +289,7 @@ class MicSource:
         def _callback(indata, frames, time, status) -> None:  # noqa: ANN001 - sounddevice contract
             # errors are not raised into the audio thread; the frame is queued as is
             nonlocal first_block
+            self._heard = self._clock()
             if first_block:
                 first_block = False
                 self._catch_up(frames)
@@ -296,6 +301,7 @@ class MicSource:
             if not self._stopped and gen == self._gen:
                 self._mark_dead()
 
+        self._heard = self._clock()
         return sd.RawInputStream(
             samplerate=self._samplerate,
             blocksize=self._blocksize,
@@ -317,8 +323,10 @@ class MicSource:
         except queue.Empty:
             if self._stopped:
                 return None
-            # silence plus an inactive stream: died without finished_callback
-            if not self._dead and self._stream_died():
+            # an inactive stream, or an active one that delivers nothing: died without
+            # finished_callback
+            stalled = self._clock() - self._heard > _STALL_S
+            if not self._dead and (self._stream_died() or stalled):
                 self._mark_dead()
             return b""
         if first is None:

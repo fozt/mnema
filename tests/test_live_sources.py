@@ -188,6 +188,20 @@ def test_micsource_survives_stream_death_and_reopens(monkeypatch) -> None:
     assert src.read() is None
 
 
+def test_micsource_reopens_an_active_stream_that_delivers_nothing(monkeypatch) -> None:
+    """Core Audio may fail at the start of a recording while the stream still says it is
+    active: after a few seconds without a single block the microphone is reopened, not after
+    minutes."""
+    src, clock, _stream_cls = _flaky_mic(monkeypatch)
+    first = src._stream
+    assert src.read() == b"" and src._stream is first  # a moment of nothing is not death
+    clock["t"] = 4.0
+    assert src.read() == b""  # nothing for 4 s: dead
+    assert src.read() == b""  # reopened on the next read
+    assert src._stream is not first and src._stream.active
+    assert "переоткрыт" in src.notice
+
+
 def test_micsource_reopen_attempts_are_rate_limited(monkeypatch) -> None:
     """Attempts are at most every _REOPEN_INTERVAL: the device is not retried without a pause."""
     src, clock, stream_cls = _flaky_mic(monkeypatch)
