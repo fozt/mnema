@@ -202,6 +202,20 @@ def test_micsource_reopens_an_active_stream_that_delivers_nothing(monkeypatch) -
     assert "переоткрыт" in src.notice
 
 
+def test_micsource_follows_a_new_default_microphone_at_once(monkeypatch) -> None:
+    """Headphones connected: the system's default input changes, and the stream on the old one
+    is reopened on the next read, before any silence gives it away."""
+    default = {"id": 41}
+    src, _clock, _stream_cls = _flaky_mic(monkeypatch, default_input=lambda: default["id"])
+    first = src._stream
+    assert src.read() == b"" and src._stream is first
+    default["id"] = 73
+    assert src.read() == b""
+    assert src._stream is not first and src._stream.active
+    assert "переоткрыт" in src.notice
+    assert src.read() == b"" and src._reopen_count == 1  # the new default is now the stream's
+
+
 def test_micsource_reopen_attempts_are_rate_limited(monkeypatch) -> None:
     """Attempts are at most every _REOPEN_INTERVAL: the device is not retried without a pause."""
     src, clock, stream_cls = _flaky_mic(monkeypatch)

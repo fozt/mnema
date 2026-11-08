@@ -11,6 +11,7 @@ import logging
 import math
 import platform
 import queue
+import sys
 import time
 from array import array
 from collections import deque
@@ -143,6 +144,37 @@ def mic_missing_text() -> str:
     )
 
 
+def default_input_id() -> int | None:
+    """The system's default input device by Core Audio; None off the Mac or on a failure. Cheap:
+    one property read, no PortAudio (it keeps the device list of its start)."""
+    if sys.platform != "darwin":
+        return None
+    import ctypes
+
+    class _Address(ctypes.Structure):
+        _fields_ = [
+            ("selector", ctypes.c_uint32),
+            ("scope", ctypes.c_uint32),
+            ("element", ctypes.c_uint32),
+        ]
+
+    try:
+        ca = ctypes.CDLL("/System/Library/Frameworks/CoreAudio.framework/CoreAudio")
+        address = _Address(int.from_bytes(b"dIn ", "big"), int.from_bytes(b"glob", "big"), 0)
+        device, size = ctypes.c_uint32(0), ctypes.c_uint32(4)
+        status = ca.AudioObjectGetPropertyData(
+            ctypes.c_uint32(1),  # the system object
+            ctypes.byref(address),
+            ctypes.c_uint32(0),
+            None,
+            ctypes.byref(size),
+            ctypes.byref(device),
+        )
+    except OSError:
+        return None
+    return device.value if status == 0 and device.value else None
+
+
 def _refresh_portaudio() -> None:
     """Reload PortAudio's device list (headphones plugged in or out). Affects only PortAudio
     streams, which here is just the microphone; system audio uses a Core Audio tap or parec."""
@@ -182,6 +214,7 @@ class MicSource:
         label: str = "mic",
         tee: Callable[[bytes], None] | None = None,
         clock: Callable[[], float] = time.monotonic,  # injectable for tests of reopening
+        default_input: Callable[[], int | None] = default_input_id,
     ) -> None:
         self.name = label
         self._device = device
@@ -204,6 +237,8 @@ class MicSource:
         self._reopen_last = 0.0
         self._reopen_count = 0
         self._heard = 0.0  # the clock at the last block of the current stream, or its opening
+        self._default_input = default_input
+        self._input = None  # the default input the stream was opened on (the system's id)
         self._gen = 0  # stream generation: an old stream's finished_callback leaves the new one
 
     @property
@@ -266,6 +301,7 @@ class MicSource:
         try:
             self._stream = self._open_stream(self._device)
             self._stream.start()
+            logger.info("microphone: %s", self._device_name(self._device))
             return
         except Exception as first:  # noqa: BLE001 - second chance below
             error: Exception = first
@@ -274,6 +310,7 @@ class MicSource:
             try:
                 self._stream = self._open_stream(device)
                 self._stream.start()
+                logger.info("microphone: %s", self._device_name(device))
                 return
             except Exception as e:  # noqa: BLE001
                 error = e
@@ -302,6 +339,7 @@ class MicSource:
                 self._mark_dead()
 
         self._heard = self._clock()
+        self._input = self._default_input() if device is None else None
         return sd.RawInputStream(
             samplerate=self._samplerate,
             blocksize=self._blocksize,
@@ -316,6 +354,8 @@ class MicSource:
         """All queued frames at once, like the system source: one 100 ms block per visit does not
         drain the queue when the session loop shares turns between sources (the other source's
         blocking read() takes up to 0.5 s in silence), and the overflow reported false gaps."""
+        if not self._dead and not self._stopped and self._input_changed():
+            self._mark_dead()  # the system took another microphone (headphones connected)
         if self._dead and not self._stopped:
             self._try_reopen()
         try:
@@ -345,6 +385,16 @@ class MicSource:
             self._chronicle.push(nxt)
             parts.append(nxt)
         return b"".join(parts)
+
+    def _input_changed(self) -> bool:
+        """The stream follows the default input, and the system now has another one."""
+        if self._input is None:
+            return False
+        now = self._default_input()
+        if now is None or now == self._input:
+            return False
+        logger.info("the default microphone changed: reopening")
+        return True
 
     def _stream_died(self) -> bool:
         """The stream stopped by itself (device gone, PortAudio error)."""
@@ -383,6 +433,7 @@ class MicSource:
             self._dead = False
             self._reopen_count += 1
             name = self._device_name(device)
+            logger.info("microphone reopened: %s", name)
             if self._reopen_count > 1:
                 self.notice = _(
                     "[microphone reopened ×{count}: {name}, some speech may be missing]",
