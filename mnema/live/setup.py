@@ -59,6 +59,7 @@ from .naming import (
     is_default_name,
     part_label,
     part_of,
+    recording_start,
     started_iso,
     titled_path,
     wav_seconds,
@@ -88,6 +89,7 @@ class LiveConfig(BaseModel):
     lang: str | None = None  # recognition language as chosen; None: decided by the recording
     translate: str | None = None  # my language for two-way translation; None: no translation
     summary: bool = True  # summary.txt of the whole recording; the title comes from the same pass
+    summary_hint: str | None = None  # the user's summary template for this recording
     summary_lang: str | None = None  # summary and title language (ru/en); None: the call's
     # auto (Parakeet) | parakeet | a cloud model "openai/…"
     asr: str = "auto"
@@ -865,14 +867,23 @@ def _finalize_live(
     # A title from the content: from the final translation (title_hint) or the model.
     points: list[str] = []
     about = ""
+    blocks: list[claude.SummaryBlock] = []
     refused: LightNote | None = None  # no summary from the model: no title from it either
     here = cloud_ready
     if here and prepared.config.summary and full:
         # Any text gets the title and summary in one pass; without a summary, only the title.
         p_title(None, _step(STEP_MESSAGES["summary"]))
-        summary = summarize_text(full, run, warnings, p_title, lang=prepared.config.summary_lang)
+        summary = summarize_text(
+            full,
+            run,
+            warnings,
+            p_title,
+            lang=prepared.config.summary_lang,
+            hint=prepared.config.summary_hint,
+            base=prepared.base,
+        )
         logger.info("summary and title: %.0f s", run.steps["summary"])
-        points, about = summary.points, summary.about
+        points, about, blocks = summary.points, summary.about, summary.blocks
         title_hint = title_hint or summary.title or None
         if summary.engine == "none" and summary.note is not None:
             refused = summary.note
@@ -923,7 +934,7 @@ def _finalize_live(
     result.silent_labels = [t for t in prepared.writers if t in run.silent]
     result.languages = languages
     if points:
-        result.summary_md = write_summary(base, about, points)
+        result.summary_md = write_summary(base, about, points, blocks)
     mp3 = (
         _mix_recording(rec_paths, base, warnings, silent=result.silent_labels, on=p_save)
         if cfg.mix_audio
@@ -953,10 +964,14 @@ def summarize_text(
     on: Progress,
     *,
     lang: str | None = None,
+    hint: str | None = None,
+    base: Path | None = None,
 ) -> claude.Summary:
-    """The shared step: title, gist and summary by the active cloud model."""
+    """The shared step: title, gist and summary by the active cloud model; hint — the user's
+    template, base — the recording (its start dates the call)."""
     t0 = time.monotonic()
-    summary = _summarize(text, warnings, on, lang=lang)
+    when = recording_start(base)[0] if base is not None else None
+    summary = _summarize(text, warnings, on, lang=lang, hint=hint, when=when)
     model = _model_of(summary.engine, summary.note)
     run.steps["summary"] = _took(t0)
     run.summary = _meta.LightRun(engine=summary.engine, model=model, lang=_lang_code(text, lang))
@@ -964,13 +979,19 @@ def summarize_text(
 
 
 def _summarize(
-    text: str, warnings: list[Remark], on: Progress, *, lang: str | None = None
+    text: str,
+    warnings: list[Remark],
+    on: Progress,
+    *,
+    lang: str | None = None,
+    hint: str | None = None,
+    when: datetime | None = None,
 ) -> claude.Summary:
     """Title, gist and summary of the whole text by the cloud model, in lang (ru/en) or the
     call's language. A failure gives a remark and nothing else: saving must go on."""
     lang = _lang_name(text, lang)
     try:
-        summary = claude.title_summary_ex(text, lang=lang, on=on)
+        summary = claude.title_summary_ex(text, lang=lang, hint=hint, when=when, on=on)
     except Exception as e:  # noqa: BLE001 - a model failure must not stop saving
         warnings.append(_remarks.summary_failed(human_reason(e)))
         return claude.Summary()
@@ -985,6 +1006,7 @@ def summarize_folder(
     base: Path,
     *,
     lang: str | None,
+    hint: str | None = None,
     summary: bool = True,
     retitle: bool | None = None,
     translate: str | None = None,
@@ -1009,7 +1031,8 @@ def summarize_folder(
     warnings: list[Remark] = []
     found = claude.Summary()
     if summary:
-        found = summarize_text(text, run, warnings, on, lang=lang)  # cancelling raises here
+        # cancelling raises here
+        found = summarize_text(text, run, warnings, on, lang=lang, hint=hint, base=base)
         if not found.title and found.engine == "none" and found.note is not None:
             if remark := _remarks.light(Step.TITLE, found.note):
                 warnings.append(remark)
@@ -1036,7 +1059,7 @@ def summarize_folder(
             on_base(new)
     result = LiveResult(transcript_txt=new / "transcript.txt", base=new)
     if found.points:
-        result.summary_md = write_summary(new, found.about, found.points)
+        result.summary_md = write_summary(new, found.about, found.points, found.blocks)
     if translation:
         result.translation_md = new / "translation.md"
         result.translation_md.write_text(translation.strip() + "\n", encoding="utf-8")

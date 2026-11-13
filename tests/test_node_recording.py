@@ -395,7 +395,7 @@ def test_live_text_finalization_summarizes_any_length_without_asr(tmp_path, monk
     assert result["run"]["status"] == "ok" and result["run"]["kind"] == "process"
     assert "transcript.txt" not in result["files"]
     assert result["files"].get("summary.txt")
-    assert len(calls) == 1 and "summary" in calls[0]["messages"][0]["content"]
+    assert len(calls) == 1 and '"topics"' in calls[0]["messages"][0]["content"]
 
 
 def test_live_text_without_model_still_finalizes_and_explains_missing_summary(
@@ -577,7 +577,7 @@ def test_short_recording_gets_title_and_summary_in_one_request(tmp_path, monkeyp
     result = _wait(client, _start(client, labels=("mic",)))["result"]
     assert result["files"]["summary.txt"].startswith("Готовим выпуск.")
     assert result["folder"] == "2026-10-22_Подготовка выпуска"
-    assert len(calls) == 1 and "summary" in calls[0]["messages"][0]["content"]
+    assert len(calls) == 1 and '"topics"' in calls[0]["messages"][0]["content"]
 
 
 @pytest.mark.parametrize("failure", ["balance", "garbled"])

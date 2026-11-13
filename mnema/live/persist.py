@@ -9,9 +9,13 @@ import os
 import tempfile
 from collections.abc import Sequence
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from ..core.models import Segment, Transcript
 from .models import LiveResult, Track
+
+if TYPE_CHECKING:
+    from ..llm.claude import SummaryBlock
 
 
 def _transcript(tracks: list[Track], language: str | None) -> Transcript:
@@ -72,12 +76,48 @@ def write_transcript(
     return txt
 
 
-def write_summary(base: Path, about: str, points: list[str]) -> Path:
-    """summary.txt: the gist of the call, then the points. The recording's title is the folder
-    name and is not in the file."""
+SUMMARY_TEMPLATE = ".mnema-summary.md"  # the user's summary guidance: in the library, a section
+_TEMPLATE_LIMIT = 4000  # characters of one template file
+
+
+def summary_hint(base: Path, root: Path | None = None) -> str | None:
+    """The user's summary template for the recording in base: the library's own, then its
+    section's; None without either. Plain text the user writes (who they are, what matters
+    in these calls); it goes to the model with the transcript."""
+    from ..config import library_root
+
+    root = (root or library_root()).absolute()
+    folder = base.absolute().parent
+    if folder == root:
+        places = [root]
+    elif folder.parent == root:  # a recording in a section
+        places = [root, folder]
+    else:  # outside the library (a CLI folder): no template
+        places = []
+    texts = []
+    for place in places:
+        try:
+            text = (place / SUMMARY_TEMPLATE).read_text(encoding="utf-8").strip()
+        except (OSError, UnicodeDecodeError):
+            continue
+        if text:
+            texts.append(text[:_TEMPLATE_LIMIT])
+    return "\n\n".join(texts) or None
+
+
+def write_summary(
+    base: Path, about: str, points: list[str], blocks: Sequence[SummaryBlock] = ()
+) -> Path:
+    """summary.txt: the gist of the call, the points (a topic with its details indented below
+    it), then each block under its own heading line. The recording's title is the folder name
+    and is not in the file. The gist stays the first paragraph: the panel and the phone show
+    it (fixture summary-v1)."""
     path = base / "summary.txt"
     lead = f"{about}\n\n" if about else ""
-    path.write_text(lead + "\n".join(f"- {p}" for p in points) + "\n", encoding="utf-8")
+    text = lead + "\n".join(f"- {p}" for p in points) + "\n"
+    for block in blocks:
+        text += f"\n{block.title}:\n" + "\n".join(f"- {p}" for p in block.points) + "\n"
+    path.write_text(text, encoding="utf-8")
     return path
 
 

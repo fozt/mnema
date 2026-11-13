@@ -46,7 +46,8 @@ def _sys(kw: dict) -> str:
 
 
 def _user(kw: dict) -> str:
-    return kw["messages"][1]["content"]
+    """The data the model got, without the instructions repeated after it."""
+    return kw["messages"][1]["content"].split("\n\n---\n", 1)[0]
 
 
 def _no_api(monkeypatch) -> None:
@@ -167,7 +168,7 @@ def test_summary_requests_and_validates_times_only_for_stamped_transcript(
     assert result.title == "Созвон"
     assert result.about == "Решили."
     assert result.points == (["[0:20] А", "Б", "В"] if timed else ["А", "Б", "В"])
-    assert ("Каждый пункт начинается с времени абзаца" in _sys(calls[0])) == timed
+    assert ("начинай с времени абзаца" in _sys(calls[0])) == timed
 
 
 def test_long_summary_keeps_times_from_original_transcript(monkeypatch) -> None:
@@ -180,8 +181,8 @@ def test_long_summary_keeps_times_from_original_transcript(monkeypatch) -> None:
     text = ("[0:12] mic: " + "слово " * 40 + "\n\n") * 1600 + "[4:05] system: Конец"
     result = claude.title_summary_ex(text)
     assert len(calls) > 2
-    assert all("- [м:сс]" in _sys(call) for call in calls[:-1])
-    assert "Каждый пункт начинается с времени абзаца" in _sys(calls[-1])
+    assert all("## [м:сс]" in _sys(call) for call in calls[:-1])
+    assert "начинай с времени абзаца" in _sys(calls[-1])
     assert result.points == ["[4:05] В конце", "За пределами"]
 
 
@@ -565,8 +566,8 @@ def test_gemini_flash_sends_low_reasoning_in_one_request(monkeypatch, model):
     [
         ("anthropic/claude-sonnet-4-5", {"thinking": {"type": "enabled", "budget_tokens": 1024}}),
         ("openai/gpt-5", {"reasoning_effort": "low"}),
-        ("openrouter/openai/gpt-5", {"reasoning_effort": "low"}),
-        ("openrouter/qwen/qwen3-32b", ({}, {"reasoning_effort": "low"})),
+        ("openrouter/openai/gpt-5", {"reasoning": {"enabled": False}}),
+        ("openrouter/qwen/qwen3-32b", {"reasoning": {"enabled": False}}),
         ("openai/gpt-4o", {}),
     ],
 )
@@ -653,3 +654,80 @@ def test_short_llm_tasks_leave_room_for_sdk_reasoning(monkeypatch, task):
     body = bodies[0]
     assert body["thinking"] == {"type": "enabled", "budget_tokens": 1024}
     assert body["max_tokens"] == 2048 > body["thinking"]["budget_tokens"], body
+
+
+_DETAILED = {
+    "kind": "рабочий созвон",
+    "topics": [
+        {
+            "at": "[0:05]",
+            "topic": "Скролл таблиц",
+            "points": ["Сергей сделал скролл.", "Ваня проверит."],
+        },
+        {"at": "83:13", "topic": "Поздняя тема", "points": ["Решили не трогать."]},
+        {"at": "", "topic": "Без времени", "points": ["Пункт."]},
+    ],
+    "mine": ["[0:40] Я проверю бэкенд.", "[9:59:59] Время, которого нет в разговоре."],
+    "agreed": ["[0:20] Выкатить в пятницу."],
+    "open": [],
+    "about": "Команда сверила задачи перед ревью.",
+    "title": "Дейли перед ревью",
+}
+
+
+def test_detailed_summary_keeps_topics_with_details_and_the_blocks(monkeypatch) -> None:
+    """Each topic keeps its time and its details under it; a time written without brackets or
+    past the end of the call is fixed or dropped; empty blocks are left out, and the block
+    headings follow the summary's language."""
+    import json
+
+    monkeypatch.setenv("MNEMA_MODEL", "deepseek/deepseek-chat")
+    _answers(monkeypatch, lambda kw: json.dumps(_DETAILED, ensure_ascii=False))
+    text = "[0:05] mic: Скролл готов.\n\n[0:20] system: В пятницу.\n\n[1:23:13] mic: Не трогаем."
+    s = claude.title_summary_ex(text)
+    assert s.title == "Дейли перед ревью" and s.about == "Команда сверила задачи перед ревью."
+    assert s.points == [
+        "[0:05] Скролл таблиц\n  - Сергей сделал скролл.\n  - Ваня проверит.",
+        "[1:23:13] Поздняя тема\n  - Решили не трогать.",
+        "Без времени\n  - Пункт.",
+    ]
+    assert [(b.title, b.points) for b in s.blocks] == [
+        ("Мои задачи и обещания", ["[0:40] Я проверю бэкенд.", "Время, которого нет в разговоре."]),
+        ("Договорились", ["[0:20] Выкатить в пятницу."]),
+    ]
+
+
+def test_summary_gets_the_users_template_the_date_and_a_size_for_its_length(monkeypatch) -> None:
+    """The user's template and the call's date reach the model; a long call is asked for a
+    longer summary and gets a larger answer budget than a short one."""
+    import json
+    from datetime import datetime
+
+    monkeypatch.setenv("MNEMA_MODEL", "deepseek/deepseek-chat")
+    calls = _answers(monkeypatch, lambda kw: json.dumps(_DETAILED, ensure_ascii=False))
+    when = datetime(2026, 11, 13, 10, 0)
+    claude.title_summary_ex("[0:05] mic: Короткий разговор.", hint="Меня зовут Аня.", when=when)
+    claude.title_summary_ex("[0:05] mic: Начало.\n\n[1:30:00] mic: Конец.", when=when)
+    short, long = calls
+    assert "Меня зовут Аня." in _sys(short) and "2026-11-13, пятница" in _sys(short)
+    assert "Меня зовут Аня." not in _sys(long)
+    assert long["max_tokens"] > short["max_tokens"]
+    assert "около 90 мин" in _sys(long) and "около 1 мин" in _sys(short)
+
+
+def test_openrouter_turns_reasoning_off_and_falls_back_when_a_model_must_reason(monkeypatch):
+    """A reasoning model on OpenRouter would spend the whole answer budget thinking: reasoning
+    goes off; a model that refuses that gets the lowest effort instead, once."""
+    seen = []
+
+    def answer(kw):
+        seen.append(kw["extra_body"]["reasoning"])
+        if kw["extra_body"]["reasoning"] == {"enabled": False}:
+            raise RuntimeError("Reasoning is mandatory for this endpoint and cannot be disabled.")
+        return "готово"
+
+    _answers(monkeypatch, answer)
+    model = "openrouter/test/must-reason"
+    assert claude._stream_text("s", "c", creds=_c(model)) == "готово"
+    assert claude._stream_text("s", "c", creds=_c(model)) == "готово"
+    assert seen == [{"enabled": False}, {"effort": "low"}, {"effort": "low"}]

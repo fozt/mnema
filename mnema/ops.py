@@ -242,6 +242,8 @@ class _RecordingBase(BaseModel):
     started: AwareDatetime
     name: str  # the recording folder name
     summary_lang: str | None = None
+    # the user's summary template for this recording (the library's and its section's)
+    summary_hint: str | None = Field(default=None, max_length=8000)
 
     @field_validator("name")
     @classmethod

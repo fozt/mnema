@@ -633,3 +633,24 @@ def test_client_texts_render_in_english(tmp_path, monkeypatch):
             process(base, Node(result()), "recording", params(base), {"mic": base / "mic.wav"})
         assert str(unsafe.value) == "Cannot replace a recording file: summary.txt"
     assert all(_english(text) for text in (*seen, str(offline.value), str(busy.value)))
+
+
+def test_summary_template_goes_to_the_server_only_when_the_user_wrote_one(tmp_path, monkeypatch):
+    """A server older than templates refuses an unknown field: without a template nothing is
+    added; with one, its text goes with the job."""
+    from types import SimpleNamespace
+
+    from mnema.live import recording_client
+    from mnema.live.persist import SUMMARY_TEMPLATE
+
+    monkeypatch.setenv("MNEMA_LIVE_DIR", str(tmp_path))
+    node = Node(result(summary=True))
+    monkeypatch.setattr(recording_client, "MnemaClient", lambda url, token: node)  # the network
+    connection = SimpleNamespace(url="http://selected-node", token="t")
+    base = folder(tmp_path)
+    recording_client.summarize_on_node(base, connection)
+    (tmp_path / SUMMARY_TEMPLATE).write_text("Меня зовут Аня.", encoding="utf-8")
+    recording_client.summarize_on_node(base, connection)
+    first, second = (c[2]["params"] for c in node.calls if c[0] == "submit")
+    assert "summary_hint" not in first
+    assert second["summary_hint"] == "Меня зовут Аня."

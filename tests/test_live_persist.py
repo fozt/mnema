@@ -93,3 +93,43 @@ def _mask() -> int:
     current = os.umask(0)
     os.umask(current)
     return current
+
+
+def test_summary_file_keeps_the_gist_first_and_the_blocks_after_the_topics(tmp_path) -> None:
+    """The panel and the phone read the gist as the first paragraph: topics with details and the
+    headed blocks after them do not change it."""
+    from mnema.bar.recordings import _gist
+    from mnema.live.persist import write_summary
+    from mnema.llm.claude import SummaryBlock
+
+    path = write_summary(
+        tmp_path,
+        "Суть разговора.",
+        ["[0:05] Тема\n  - Деталь один.\n  - Деталь два."],
+        [SummaryBlock(title="Договорились", points=["[0:20] Выкатить в пятницу."])],
+    )
+    assert path.read_text(encoding="utf-8") == (
+        "Суть разговора.\n\n"
+        "- [0:05] Тема\n  - Деталь один.\n  - Деталь два.\n"
+        "\nДоговорились:\n- [0:20] Выкатить в пятницу.\n"
+    )
+    assert _gist(path.read_text(encoding="utf-8")) == "Суть разговора."
+
+
+def test_summary_template_comes_from_the_library_and_the_recordings_section(tmp_path) -> None:
+    """The library's template applies to every recording, a section's only to its recordings;
+    a folder outside the library has none."""
+    from mnema.live.persist import SUMMARY_TEMPLATE, summary_hint
+
+    root = tmp_path / "mnema"
+    (root / "Работа" / "2026-11-13_Дейли").mkdir(parents=True)
+    (root / "2026-11-13_Звонок").mkdir()
+    assert summary_hint(root / "2026-11-13_Звонок", root) is None
+    (root / SUMMARY_TEMPLATE).write_text("Меня зовут Аня.\n", encoding="utf-8")
+    (root / "Работа" / SUMMARY_TEMPLATE).write_text("Кто что сделал.", encoding="utf-8")
+    assert summary_hint(root / "2026-11-13_Звонок", root) == "Меня зовут Аня."
+    assert (
+        summary_hint(root / "Работа" / "2026-11-13_Дейли", root)
+        == "Меня зовут Аня.\n\nКто что сделал."
+    )
+    assert summary_hint(tmp_path / "elsewhere" / "2026-11-13_Звонок", root) is None

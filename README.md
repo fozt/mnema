@@ -253,7 +253,7 @@ a folder named after the call, for example `2026-10-21_Release planning`:
 | File | What it is |
 |---|---|
 | `transcript.txt` | The transcript in paragraphs, each with its time and track: `[12:34] mic:` (you) or `system:` (the other side) |
-| `summary.txt` | The gist in one or two sentences, then the main points, each with the time it came up |
+| `summary.txt` | The gist in one or two sentences, the topics in order with their details and times, then *My tasks and promises*, *Agreed* and *Open questions* |
 | `recording.mp3` | Both tracks mixed together |
 | `mic.wav`, `system.wav` | The original tracks |
 | `video.mp4` | The screen with the sound (Mac, with *Screen* on) |
@@ -278,6 +278,18 @@ its own title, language, recognition and tracks.
 in the language set in *Summary language* (the conversation's by default). Without a model you
 still get the transcript. A recording with text and no summary (no model, the model failed or
 summaries were off) has *Summarize* in its menu.
+
+The longer the conversation, the more detailed the summary: topics go in order, each with its
+time and what exactly was said, decided and why. *My tasks and promises* lists what you took on,
+so the model does better when it knows who you are. Write that, and anything else you want from
+your summaries, in a `.mnema-summary.md` file in `~/mnema` (for every recording) or in a section
+folder (for that section's recordings, on top of the common one), for example:
+
+```
+I'm Anna, a team lead. In work calls, note who took which task and by when.
+```
+
+The file is hidden, like every name starting with a dot; the phone does not send it.
 
 ### Recognition
 
@@ -316,7 +328,7 @@ A Mac without a server reads it from `MNEMA_ASR_API_KEY` in `~/.config/mnema/.en
 | Provider | Where to get a key | Note |
 |---|---|---|
 | Gemini | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) | Free tier with a daily limit per model |
-| OpenRouter | [openrouter.ai/settings/keys](https://openrouter.ai/settings/keys) | Free models; allow them in the privacy settings |
+| OpenRouter | [openrouter.ai/settings/keys](https://openrouter.ai/settings/keys) | For summaries we suggest `openai/gpt-6-luna`: under a cent per hour of conversation. Allow free models in the privacy settings |
 | DeepSeek | [platform.deepseek.com/api_keys](https://platform.deepseek.com/api_keys) | Paid, very cheap |
 | OpenAI, Claude, Qwen, Groq | the provider's console | Paid |
 

@@ -925,7 +925,7 @@ def _summary_model(monkeypatch, answer) -> list[str]:
     sent: list[str] = []
 
     def completion(**kw):
-        sent.append(kw["messages"][1]["content"])
+        sent.append(kw["messages"][1]["content"].split("\n\n---\n", 1)[0])  # data, not rules
         out = answer()
         if isinstance(out, BaseException):
             raise out

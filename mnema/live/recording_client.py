@@ -41,7 +41,7 @@ from .naming import (
     started_iso,
     titled_path,
 )
-from .persist import _atomic_bytes
+from .persist import _atomic_bytes, summary_hint
 from .setup import PROCESSING_MARK
 
 _STOP_WAIT_S = 120.0  # cancelling on the node is cooperative: the model stops at its next answer
@@ -517,7 +517,11 @@ def _params(base: Path, *, summary_lang: str | None) -> dict:
         if started is not None:
             meta.set_started(base, started)
     # Unknown start: the node needs some value, but it is not written to meta
-    return {"name": base.name, "started": started or meta.now(), "summary_lang": summary_lang}
+    params = {"name": base.name, "started": started or meta.now(), "summary_lang": summary_lang}
+    # only when there is one: a server before templates refuses the unknown field
+    if hint := summary_hint(base):
+        params["summary_hint"] = hint
+    return params
 
 
 class LocalNode:

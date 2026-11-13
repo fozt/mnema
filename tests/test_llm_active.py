@@ -211,7 +211,7 @@ def test_summary_parts_stay_on_one_model_when_env_file_changes(monkeypatch) -> N
             path.write_text(
                 f"MNEMA_MODEL=gemini/gemini-flash-lite-latest\nMNEMA_API_KEY={GEMINI_KEY}\n"
             )
-        return _SUMMARY_JSON if "ПОЛНУЮ" in kw["messages"][0]["content"] else "- обсудили"
+        return _SUMMARY_JSON if '"topics"' in kw["messages"][0]["content"] else "- обсудили"
 
     calls = _litellm(monkeypatch, answer)
     text = "\n".join(["mic: " + "слово " * 40] * 1000)
@@ -230,7 +230,7 @@ def test_second_summary_part_failure_leaves_no_summary(monkeypatch) -> None:
 
     def answer(kw):
         system, part = kw["messages"][0]["content"], kw["messages"][1]["content"]
-        if "КУСОК" in system and part != calls[0]["messages"][1]["content"]:
+        if "ЧАСТЬ длинной" in system and part != calls[0]["messages"][1]["content"]:
             return _err(
                 "Too Many Requests", 429
             )  # the second part hits a limit, even after retries
@@ -240,7 +240,7 @@ def test_second_summary_part_failure_leaves_no_summary(monkeypatch) -> None:
     text = "\n".join(["mic: " + "слово " * 40] * 1000)  # ~245k characters: parts for qwen-max
     s = claude.title_summary_ex(text)
     assert (s.engine, s.points) == ("none", [])
-    assert not any("ПОЛНУЮ" in c["messages"][0]["content"] for c in calls)
+    assert not any('"topics"' in c["messages"][0]["content"] for c in calls)
 
 
 # ── process environment and file ──
@@ -327,7 +327,7 @@ def test_summary_single_long_track_and_reduced_parts_fit_model_input(monkeypatch
 
     def answer(kw):
         system, content = kw["messages"][0]["content"], kw["messages"][1]["content"]
-        if "ПОЛНУЮ" in system:
+        if '"topics"' in system:
             assert all(decision in content for decision in decisions)
             return _SUMMARY_JSON
         if not content.startswith("Собеседники: "):
@@ -355,7 +355,7 @@ def test_summary_stops_when_model_does_not_shorten_parts(monkeypatch) -> None:
     assert result.engine == "none" and not result.points and not result.title
     assert result.note and "сократить текст" in result.note.cloud_detail
     assert len(calls) < 10
-    assert not any("ПОЛНУЮ" in c["messages"][0]["content"] for c in calls)
+    assert not any('"topics"' in c["messages"][0]["content"] for c in calls)
 
 
 def test_gemini_behind_gateway_skips_google(monkeypatch) -> None:
@@ -573,7 +573,7 @@ def test_summary_in_parts_reports_progress_in_english(monkeypatch) -> None:
         tries.append(1)
         if len(tries) == 1:
             return _err("Service overloaded", 503)
-        if "КУСОК" in kw["messages"][0]["content"]:
+        if "ЧАСТЬ длинной" in kw["messages"][0]["content"]:
             return "- обсудили часть"
         return _SUMMARY_JSON
 
@@ -587,6 +587,7 @@ def test_summary_in_parts_reports_progress_in_english(monkeypatch) -> None:
             claude.translate("mic: hello")
     assert summary.title == "Дейли"
     assert "The model is busy, retrying in 5 s…" in seen
-    assert "Summarizing part 1 of 3…" in seen and "Writing the summary and title…" in seen
+    assert any(m.startswith("Summarizing part 1 of ") for m in seen)
+    assert "Writing the summary and title…" in seen
     assert str(no_model.value) == "No model configured"
     assert not [m for m in seen if _CYRILLIC.search(m)]

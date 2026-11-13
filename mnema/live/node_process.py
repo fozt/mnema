@@ -193,6 +193,7 @@ def process_recording(root: Path, values: dict, on: Progress) -> dict:
         summary=params.summary,
         translate=params.translate,
         summary_lang=params.summary_lang,
+        summary_hint=params.summary_hint,
         runner=None,
         mix_audio=False,
     )
@@ -238,6 +239,7 @@ def summarize_recording(path: Path, values: dict, on: Progress) -> dict:
         summary=params.summary,
         translate=params.translate,
         summary_lang=params.summary_lang,
+        summary_hint=params.summary_hint,
         runner=None,
         record=False,
         mix_audio=False,
@@ -296,6 +298,7 @@ def summarize_recording(path: Path, values: dict, on: Progress) -> dict:
                 result = summarize_folder(
                     base,
                     lang=params.summary_lang,
+                    hint=params.summary_hint,
                     summary=params.summary,
                     retitle=params.retitle,
                     translate=params.translate,

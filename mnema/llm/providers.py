@@ -292,12 +292,18 @@ def check_key(provider: Provider, key: str, *, timeout: float = 10.0) -> list[Mo
         raise MediaError(human_sentence(e)) from e
 
 
+# compared on real calls (2026-11-13): near the best detail at about a fiftieth of its price
+_OPENROUTER_SUMMARY = "openai/gpt-6-luna"
+
+
 def recommended(provider: Provider, models: list[ModelInfo]) -> str | None:
-    """The model preselected in the model window: Gemini
-    gemini-flash-latest, DeepSeek deepseek-chat, OpenRouter the first free Qwen; otherwise the
-    first listed; with no list, qwen-plus for Qwen and None for the rest."""
+    """The model preselected in the model window: Gemini gemini-flash-latest, DeepSeek
+    deepseek-chat, OpenRouter GPT-6 Luna, else its first free Qwen; otherwise the first listed;
+    with no list, qwen-plus for Qwen and None for the rest."""
     ids = [m.id for m in models]
     if provider == Provider.OPENROUTER:
+        if _OPENROUTER_SUMMARY in ids:  # a detailed summary for fractions of a cent
+            return _OPENROUTER_SUMMARY
         free_qwen = next((m.id for m in models if m.free and m.id.startswith("qwen/")), None)
         if free_qwen:
             return free_qwen
