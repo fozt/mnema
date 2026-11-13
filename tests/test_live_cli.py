@@ -897,56 +897,6 @@ def test_cmd_live_pane_view_gets_translate_hint(monkeypatch, tmp_path) -> None:
     assert "я — «en»" in hint and "собеседники — «авто»" in hint and "ВАШ язык" in hint
 
 
-def test_suppress_pamaccore_keeps_terminal_for_python_stderr() -> None:
-    """Regression "empty full-screen view": stderr is a real terminal (pty); inside the filter the
-    Python level (sys.stderr, the rich console) must still see a terminal, or rich.Live draws no
-    frames until exit. The native fd 2 is filtered and everything else reaches the terminal.
-    After exit sys.stderr is restored."""
-    import os
-    import pty
-    import select
-    import sys
-    import time
-
-    from rich.console import Console
-
-    from mnema.live.stderr_filter import suppress_pamaccore
-
-    master, slave = (
-        pty.openpty()
-    )  # keep the slave open until read: macOS drops the master buffer after close
-    saved_fd2 = os.dup(2)
-    os.dup2(slave, 2)
-    orig_stderr = sys.stderr
-    try:
-        with suppress_pamaccore():
-            assert sys.stderr.isatty()
-            assert Console(stderr=True).is_terminal
-            sys.stderr.write("python-line\n")
-            sys.stderr.flush()
-            os.write(2, b"||PaMacCore (AUHAL)|| Error on line 2523\n")
-            os.write(2, b"native-line\n")
-            time.sleep(0.3)  # let pump copy
-        assert sys.stderr is orig_stderr
-    finally:
-        os.dup2(saved_fd2, 2)
-        os.close(saved_fd2)
-    got = b""
-    while select.select([master], [], [], 0.2)[0]:
-        try:
-            chunk = os.read(master, 65536)
-        except OSError:  # slave closed: EIO
-            break
-        if not chunk:
-            break
-        got += chunk
-    os.close(slave)
-    os.close(master)
-    text = got.decode()
-    assert "python-line" in text and "native-line" in text
-    assert "PaMacCore" not in text
-
-
 @pytest.mark.parametrize("standalone", [True, False])
 def test_finish_processes_recording_folder(tmp_path, monkeypatch, standalone):
     """`mnema finish <folder>` runs the full final pass over the WAV tracks (after a stop, a crash

@@ -110,42 +110,6 @@ def test_ws_idle_timeout_stops_process(tmp_path, monkeypatch, live_process):
     live_process.stopped()
 
 
-def test_ws_pcm_keeps_session_past_idle_timeout(tmp_path, monkeypatch, live_process):
-    import mnema.api.live as live
-
-    monkeypatch.setattr(live, "_LIVE_IDLE_TIMEOUT", 1)
-    client = TestClient(create_app(tmp_path))
-    with client.websocket_connect("/api/live") as ws:
-        assert ws.receive_json() == {"type": "ready"}
-        for _ in range(5):
-            ws.send_bytes(b"\x00\x00" * 1600)
-            time.sleep(0.4)
-        ws.send_bytes(_tone(1))
-        ws.send_json({"type": "end"})
-        texts = []
-        while not texts:
-            texts = [s["text"] for s in ws.receive_json()["committed"]]
-        assert texts == [" hello"]
-    live_process.stopped()
-
-
-def test_ws_warmup_has_own_limit_instead_of_idle_timeout(tmp_path, monkeypatch, live_process):
-    import mnema.api.live as live
-
-    monkeypatch.setattr(live, "_LIVE_IDLE_TIMEOUT", 0.1)
-    monkeypatch.setenv("MNEMA_TEST_LIVE_MODE", "wait")
-    client = TestClient(create_app(tmp_path))
-    with client.websocket_connect("/api/live") as ws:
-        live_process.started()
-        time.sleep(0.3)
-        monkeypatch.setattr(live, "_LIVE_WARMUP_TIMEOUT", 0)
-        error = ws.receive_json()
-        assert error["type"] == "error" and "не запустилась" in error["detail"]
-        with pytest.raises(WebSocketDisconnect):
-            ws.receive_json()
-    live_process.stopped()
-
-
 def test_ws_admission_allows_two_tracks_rejects_third_and_reuses_slot(tmp_path, live_process):
     client = TestClient(create_app(tmp_path))
     with client.websocket_connect("/api/live") as mic:

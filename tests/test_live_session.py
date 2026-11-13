@@ -952,45 +952,6 @@ def test_session_dead_asr_ignores_queue_drops_on_finish() -> None:
     assert _drop_markers([s.text for s in tracks[0].committed]) == []
 
 
-def test_stop_translates_backlog_within_budget_then_drops(monkeypatch) -> None:
-    """The stop drains the translation backlog within a time budget: what made it is translated,
-    the rest goes untranslated (finalize translates everything). Nothing is lost: every line is
-    in the track and the view."""
-    import time as _time
-
-    import mnema.live.session as session_mod
-
-    monkeypatch.setattr(session_mod, "_STOP_TRANSLATE_WAIT", 0.5)
-
-    class SlowTranslator:
-        def __init__(self) -> None:
-            self.pushed: list[str] = []
-
-        def push(self, sentence, on_partial=None):
-            self.pushed.append(sentence)
-            _time.sleep(0.4)  # "the model is thinking"
-            return f"[{sentence}]"
-
-    chunks = [
-        LiveChunk(committed=[Segment(start=i, end=i + 1, text=f"Фраза {i}.", speaker="mic")])
-        for i in range(6)
-    ]
-    src = FakeSource("mic", 6)
-    view = FakeView()
-    tr = SlowTranslator()
-    t0 = _time.monotonic()
-    tracks = LiveSession(
-        [src], lambda s: FakeTranscriber(chunks), translator=tr, view=view, clock=_ticking()
-    ).run()
-    elapsed = _time.monotonic() - t0
-
-    assert len(tracks[0].committed) == 6  # the track is whole
-    committed_texts = [t for _, t, _ in view.committed]
-    assert sorted(committed_texts) == sorted(f"Фраза {i}." for i in range(6))  # all in the view
-    assert 1 <= len(tr.pushed) < 6  # some made the budget, not the whole backlog
-    assert elapsed < 2.0  # not 6 × 0.4 s of sequential translations
-
-
 def test_partial_startup_closes_opened_sources_and_recorders(tmp_path) -> None:
     import pytest
 

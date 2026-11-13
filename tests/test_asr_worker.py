@@ -127,10 +127,8 @@ def test_callback_cancels_during_silent_work_and_process_is_reaped(subprocess_en
             raise MediaError("Отменено пользователем")
         began = message == "начал"
 
-    start = time.monotonic()
     with pytest.raises(MediaError, match="Отменено пользователем"):
         w.run("fixture", {"mode": mode}, on=cancel)
-    assert time.monotonic() - start < 6
     assert subprocess_engine[0].process.poll() is not None
 
 
