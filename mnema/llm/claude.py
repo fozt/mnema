@@ -397,7 +397,9 @@ _SUMMARY_SYSTEM = (
     "обсуждали: не «обсудили проблему с доступом», а в чём проблема и что решили. Болтовню и "
     "повторы опускай, содержательные отступления сохраняй. "
     "mine — мои задачи и обещания: что я взял на себя, пообещал или что мне поручили, со сроком, "
-    "если он назван. Только явно сказанное: «надо бы» и «можно было бы» — не обещание. "
+    "если он назван. Только явно сказанное: «надо бы» и «можно было бы» — не обещание. В mine — "
+    "только сказанное на моей дорожке или явно поручённое мне; «я сделаю», «на меня» на дорожке "
+    "остальных — слова собеседника, его обещание идёт в agreed. "
     "agreed — о чём договорились: решения, с которыми явно согласились, и обещания остальных "
     "(кто, что, к какому сроку). Предложение без согласия — не договорённость. "
     "open — что осталось нерешённым или ждёт ответа. "
@@ -456,9 +458,12 @@ def check_stamps(points: list[str], text: str) -> list[str]:
     for point in points:
         match = re.match(STAMP, point)
         if match:
+            rest = point[match.end() :].lstrip()
+            while extra := re.match(STAMP, rest):  # "[1:40] [1:48] …": the first time stays
+                rest = rest[extra.end() :].lstrip()
             seconds = parse_stamp(match[0])
-            if seconds is None or end is None or seconds > end:
-                point = point[match.end() :].lstrip()
+            bad = seconds is None or end is None or seconds > end
+            point = rest if bad or not rest else f"{match[0]} {rest}"
         if point:
             checked.append(point)
     return checked
@@ -523,20 +528,23 @@ def _parse_summary(raw: str) -> Summary:
 
     text = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw.strip(), flags=re.S)
     m = re.search(r"\{.*\}", text, flags=re.S)
-    try:
-        data = json.loads(m.group(0) if m else text)
+    try:  # strict=False: a line break inside a string is not an error
+        data = json.loads(m.group(0) if m else text, strict=False)
     except (ValueError, TypeError):
-        if text.lstrip().startswith("{"):
+        if text.lstrip().startswith("{"):  # cut off or broken: every whole item still counts
             t = re.search(r'"title"\s*:\s*"([^"]{1,100})"', text)
             a = re.search(r'"about"\s*:\s*"([^"]{1,600})"', text)
-            return Summary(
-                title=t.group(1).strip() if t else "",
-                about=a.group(1).strip() if a else "",
-                points=_points(_whole_items(text)),
-            )
-        lines = [ln.strip("-•* ").strip() for ln in text.splitlines() if ln.strip()]
-        head = lines[0] if lines and len(lines[0]) <= 100 else ""
-        return Summary(title=head, points=lines[1:] if head else [])
+            data = {
+                "title": t.group(1) if t else "",
+                "about": a.group(1) if a else "",
+                **{key: _whole_items(text, key) for key in ("topics", "summary", *_BLOCKS)},
+            }
+            if not data["topics"]:
+                del data["topics"]
+        else:
+            lines = [ln.strip("-•* ").strip() for ln in text.splitlines() if ln.strip()]
+            head = lines[0] if lines and len(lines[0]) <= 100 else ""
+            return Summary(title=head, points=lines[1:] if head else [])
     if not isinstance(data, dict):
         return Summary(points=_points(data))
     title = str(data.get("title") or "").strip()
@@ -578,15 +586,15 @@ def _topics(items: list) -> list[str]:
     return points
 
 
-def _whole_items(text: str) -> list:
-    """Whole items of the "summary" array in truncated JSON: a string cut mid-word and
+def _whole_items(text: str, key: str) -> list:
+    """Whole items of the key's array in broken or truncated JSON: an item cut mid-word and
     everything after it are dropped."""
     import json
 
-    m = re.search(r'"summary"\s*:\s*\[', text)
+    m = re.search(rf'"{key}"\s*:\s*\[', text)
     if m is None:
         return []
-    decoder, items, i = json.JSONDecoder(), [], m.end()
+    decoder, items, i = json.JSONDecoder(strict=False), [], m.end()
     while True:
         rest = text[i:]
         i += len(rest) - len(rest.lstrip(" \t\r\n,"))

@@ -668,7 +668,7 @@ _DETAILED = {
         {"at": "", "topic": "Без времени", "points": ["Пункт."]},
     ],
     "mine": ["[0:40] Я проверю бэкенд.", "[9:59:59] Время, которого нет в разговоре."],
-    "agreed": ["[0:20] Выкатить в пятницу."],
+    "agreed": ["[0:20] [0:21] Выкатить в пятницу."],
     "open": [],
     "about": "Команда сверила задачи перед ревью.",
     "title": "Дейли перед ревью",
@@ -676,9 +676,9 @@ _DETAILED = {
 
 
 def test_detailed_summary_keeps_topics_with_details_and_the_blocks(monkeypatch) -> None:
-    """Each topic keeps its time and its details under it; a time written without brackets or
-    past the end of the call is fixed or dropped; empty blocks are left out, and the block
-    headings follow the summary's language."""
+    """Each topic keeps its time and its details under it; a time written without brackets,
+    repeated or past the end of the call is fixed or dropped; empty blocks are left out, and the
+    block headings follow the summary's language."""
     import json
 
     monkeypatch.setenv("MNEMA_MODEL", "deepseek/deepseek-chat")
@@ -731,3 +731,28 @@ def test_openrouter_turns_reasoning_off_and_falls_back_when_a_model_must_reason(
     assert claude._stream_text("s", "c", creds=_c(model)) == "готово"
     assert claude._stream_text("s", "c", creds=_c(model)) == "готово"
     assert seen == [{"enabled": False}, {"effort": "low"}, {"effort": "low"}]
+
+
+def test_a_broken_or_cut_off_answer_keeps_every_whole_topic_and_block(monkeypatch) -> None:
+    """A line break inside a string or an answer cut at the cap must not lose the summary: whole
+    topics and blocks stay, the item cut mid-word goes."""
+    monkeypatch.setenv("MNEMA_MODEL", "deepseek/deepseek-chat")
+    broken = (
+        '{"kind": "созвон", "topics": [{"at": "[0:05]", "topic": "Скролл", "points": '
+        '["Сергей сделал\nскролл."]}], "agreed": ["[0:20] Выкатить в пятницу."], '
+        '"about": "Сверили задачи.", "title": "Дейли"}'
+    )
+    cut = (
+        '{"kind": "созвон", "agreed": ["[0:20] Выкатить в пятницу."], "topics": ['
+        '{"at": "[0:05]", "topic": "Скролл", "points": ["Сергей сделал скролл."]}, '
+        '{"at": "[0:30]", "topic": "Отчёты", "points": ["Ваня начал отч'
+    )
+    text = "[0:05] mic: Скролл готов.\n\n[0:30] system: Отчёты."
+    for raw in (broken, cut):
+        _answers(monkeypatch, lambda kw, raw=raw: raw)
+        s = claude.title_summary_ex(text)
+        assert s.points[0].startswith("[0:05] Скролл\n  - Сергей сделал")
+        assert [(b.title, b.points) for b in s.blocks] == [
+            ("Договорились", ["[0:20] Выкатить в пятницу."])
+        ]
+    assert len(s.points) == 1
