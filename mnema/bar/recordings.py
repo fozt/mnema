@@ -359,7 +359,7 @@ def move_record(root: Path, folder: Path, section: str, *, create: bool = False)
     is "New section…": the title is cleaned like a folder name (naming.folder_title), a section
     differing only in case is that section, otherwise it is created. Already there: the folder
     stays. An empty title raises ValueError; a missing section or recording, or a name taken
-    during the move, OSError; another process of this computer processing it (CLI, MCP: the
+    during the move, OSError; another process of this computer processing it (the CLI: the
     recording_client.alone lock) MediaError. The recording stays in place in every such case."""
     from ..live.recording_client import alone
 

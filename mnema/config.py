@@ -34,8 +34,8 @@ def data_dir() -> Path:
 
 
 def bar_prefs_file() -> Path:
-    """App settings (bar.json): written by the app; the CLI and MCP also read where a Mac
-    processes (node.selected_processing)."""
+    """App settings (bar.json): written by the app; the CLI also reads where a Mac processes
+    (node.selected_processing)."""
     return config_dir() / "bar.json"
 
 

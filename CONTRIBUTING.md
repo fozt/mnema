@@ -74,10 +74,8 @@ task mac:app   # dist/ffmpeg, then dist/mac/Mnema.app, Mnema-X.Y.Z-mac.zip and M
 `scripts/build_mac_app.py --out DIR --ffmpeg PREFIX` puts the Swift panel and `mnema-asr`, a
 pinned Python 3.12 with the core and `menubar` packages, and ffmpeg into one bundle, signs it ad
 hoc, and writes the zip for updates and the DMG (lzma, about 84 MB). The app has no
-heavy Python: a list of packages that must not get in (torch, onnxruntime, yt-dlp, rich, mcp and
-the like) fails the build if one comes, the `mnema` command is a separate package, and only
-`Resources/bin/mnema-mcp` stays, a stub that tells an old MCP configuration how to install the
-command. `--smoke` (or `scripts/smoke_mac_app.py APP`) then checks it under a temporary home: the
+heavy Python: a list of packages that must not get in (torch, onnxruntime, yt-dlp, rich and
+the like) fails the build if one comes, and the `mnema` command is a separate package. `--smoke` (or `scripts/smoke_mac_app.py APP`) then checks it under a temporary home: the
 signature, that nothing loads libraries from outside the bundle and the system, that `mnema-asr`
 answers and lists its models, that none of the forbidden packages is in the bundle, ffmpeg, and the
 engine started the way the app starts it. Judge it by the exit code, and run it before any release
@@ -133,7 +131,6 @@ Linux and the phone send recordings to a server.
 | `mnema/sync/`, `mnema/library/` | Syncing recording texts between devices and the server |
 | `mnema/bar/` | The desktop app logic: state, panel model, settings, processing queue. The macOS UI is SwiftUI in `mnema/bar/macos` and talks to the Python engine over a JSON line protocol (`protocol.py`); Linux uses AppIndicator and GTK |
 | `mnema/cli/` | The `mnema` command, in the separate `mnema[cli]` package |
-| `mnema/mcp/` | The `mnema-mcp` server, installed with the command |
 | `android/` | The Android app (Kotlin, Compose) and its call recording helper |
 | `tests/` | Python tests; `tests/fixtures/` holds cases shared with the Kotlin and Swift tests |
 
@@ -157,7 +154,7 @@ by that user:
   reads only the file of the current user, never the process environment or the shared `.env`,
   and without a user it raises. The server has no model of its own and no command that sets one;
   the app writes the file through `/api/model` (`MnemaClient.model_*`). Outside the server (the
-  Mac without a server, the command line, MCP) the settings come from the machine's `.env`.
+  Mac without a server, the command line) the settings come from the machine's `.env`.
   Keys are hidden in logs from both kinds of files (`llm/redact.py`).
 - The queue serves users in turn. A local recognition job starts when `MemAvailable` (within the
   cgroup limit) is at least 2 GiB or no local job runs. Slots are `MNEMA_JOB_WORKERS`, by default
@@ -231,7 +228,7 @@ Model weights have licenses: add the attribution to the README and `build_mac_ap
 Linux, `swift build` and `swift test` of the macOS app, and the Android unit tests, lint and helper
 check. Run `task lint` and `task test` before sending a pull request; `task typecheck` (`ty`)
 stays local; on a Mac it reports a few diagnostics that are the same on every run (Linux-only
-modules, the `mcp` types), and a change must not add more.
+modules), and a change must not add more.
 
 ## Releases
 
@@ -250,7 +247,7 @@ builds, each in its own job:
 
 - the reproducible source archive `mnema-X.Y.Z.tar.gz` (Linux app updates) and from it the wheel
   `mnema-X.Y.Z-py3-none-any.whl` of the command with `mnema-X.Y.Z-constraints.txt`, checked by a
-  `uv tool install` into a clean directory (`mnema --version`, `mnema-mcp initialize`);
+  `uv tool install` into a clean directory (`mnema --version`);
 - the LGPL ffmpeg (CI on `main` caches it until `scripts/build_ffmpeg.sh` changes; a tag reads
   that cache and never writes one);
 - `Mnema-X.Y.Z-mac.zip` (Mac app updates), `Mnema-X.Y.Z.dmg` (installs) and

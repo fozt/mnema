@@ -373,7 +373,7 @@ def _apply(base: Path, pending: _Pending, answer: dict, on_base) -> tuple[Path, 
 
 @contextmanager
 def alone(base: Path):
-    """One processing per folder on this computer: the app, the CLI and MCP are separate
+    """One processing per folder on this computer: the app and the CLI are separate
     processes and do not see each other's jobs. The lock is on the folder itself, so a rename
     keeps it and process exit releases it. When taken, MediaError(_ALREADY); "Move to section"
     (bar/recordings.move_record) sees the same error and does not move the recording."""

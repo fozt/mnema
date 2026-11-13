@@ -61,8 +61,6 @@
   "The new name is already taken": "Новое имя уже занято",
   "The local file has already changed": "Локальный файл уже изменился",
   "The server file has already changed": "Файл на сервере уже изменился",
-  "The MCP SDK is missing. {hint}": "Нет MCP SDK. {hint}",
-  "No such file: {path}": "Нет файла: {path}",
   "Both sides edited the file; which edit is newer is unknown": "Файл изменён и здесь, и на сервере; неизвестно, какая правка новее",
   "The recordings library on the server changed; sync again": "Библиотека записей на сервере изменилась; повторите синхронизацию"
 }

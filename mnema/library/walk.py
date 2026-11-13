@@ -1,5 +1,5 @@
 """Library walk for display and actions: the feed, unprocessed recordings, sections for a new
-recording, audio cleanup and the MCP list. Section or recording is layout.kind with the sections of
+recording and audio cleanup. Section or recording is layout.kind with the sections of
 the last sync (known); folders outside the root, recordings with links pointing outside and
 unreadable folders are skipped. The full walk for sync, where a skip is an error rather than a
 deletion, is sync.scan and LibraryFiles."""
@@ -92,16 +92,3 @@ def walk(root: Path, *, known: Collection[str] = (), depth: int = 2) -> list[Fol
             queue.extend((child, name) for child in entry.folders)
         found.append(entry)
     return found
-
-
-def recordings(root: Path, *, known: Collection[str] = ()) -> list[dict]:
-    """Recordings for MCP: path under the root, the folder and its visible files."""
-    return [
-        {
-            "name": f.relative,
-            "path": str(f.path),
-            "files": sorted(name for name in f.files if not hidden(name)),
-        }
-        for f in walk(root, known=known)
-        if f.kind is Kind.RECORD
-    ]

@@ -217,13 +217,12 @@ def test_cloud_recognition_without_a_key_says_so_in_the_remark(monkeypatch, tmp_
 
 @pytest.mark.parametrize("saved", [None, {"recognition": "mac"}])
 def test_a_mac_without_mnema_app_processes_on_the_connected_server(tmp_path, monkeypatch, saved):
-    """No mnema-asr of Mnema.app (the command alone): the app, the CLI, MCP and dispatch send
+    """No mnema-asr of Mnema.app (the command alone): the app, the CLI and dispatch send
     the recording to the connected server whatever recognition is saved; --local stays here."""
     from mnema.bar.runtime import BarRuntime
     from mnema.client import MnemaClient
     from mnema.config import bar_prefs_file
     from mnema.dispatch import resolve_runner
-    from mnema.mcp import tools
 
     monkeypatch.setattr(base, "STANDALONE", True)
     monkeypatch.setenv("MNEMA_LIVE_DIR", str(tmp_path / "notes"))
@@ -234,15 +233,8 @@ def test_a_mac_without_mnema_app_processes_on_the_connected_server(tmp_path, mon
     if saved is not None:
         bar_prefs_file().parent.mkdir(parents=True, exist_ok=True)
         bar_prefs_file().write_text(json.dumps(saved), encoding="utf-8")
-    runners = []
-    monkeypatch.setattr(
-        tools,
-        "dispatch",
-        lambda op, src, params, *, runner, local, **k: runners.append(runner) or {},
-    )
-    tools.transcribe_recording("/x/a.mp3")
     app = BarRuntime(prefs_file=bar_prefs_file()).processing_connection()
-    assert {(c.url, c.token) for c in (app, *runners)} == {("http://vps:8000", "vps-token")}
+    assert app is not None and (app.url, app.token) == ("http://vps:8000", "vps-token")
     assert resolve_runner(None) == "http://vps:8000"
     assert resolve_runner(None, local=True) is None
 

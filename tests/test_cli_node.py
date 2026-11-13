@@ -1,4 +1,4 @@
-"""Where to process: one rule for the app, the CLI and MCP (node.selected_processing)."""
+"""Where to process: one rule for the app and the CLI (node.selected_processing)."""
 
 import argparse
 import json
@@ -112,15 +112,14 @@ SERVER = ("http://vps:8000", "vps-token")
         "linux-without-server",
     ],
 )
-def test_app_cli_and_mcp_process_in_one_place(
+def test_app_and_cli_process_in_one_place(
     tmp_path, monkeypatch, standalone, saved, server, expected
 ):
-    """The app, the CLI and MCP process in one place: the app's choice in bar.json holds for the
-    CLI and MCP too."""
+    """The app and the CLI process in one place: the app's choice in bar.json holds for the CLI
+    too."""
     from mnema.bar.runtime import BarRuntime
     from mnema.config import bar_prefs_file
     from mnema.dispatch import resolve_runner
-    from mnema.mcp import tools
 
     monkeypatch.setattr(base, "STANDALONE", standalone)
     if standalone:  # Mnema.app with its mnema-asr
@@ -134,17 +133,7 @@ def test_app_cli_and_mcp_process_in_one_place(
         bar_prefs_file().parent.mkdir(parents=True, exist_ok=True)
         bar_prefs_file().write_text(json.dumps({**saved, "mic": True}), encoding="utf-8")
     app = BarRuntime(prefs_file=bar_prefs_file()).processing_connection()
-    runners = []
-    monkeypatch.setattr(
-        tools,
-        "dispatch",
-        lambda op, src, params, *, runner, local, **k: (
-            runners.append(None if local else runner) or {}
-        ),
-    )
-    tools.transcribe_recording("/x/a.mp3")
-    found = {None if c is None else (c.url, c.token) for c in (app, *runners)}
-    assert found == {expected}
+    assert (None if app is None else (app.url, app.token)) == expected
     assert _cli_runner(monkeypatch, tmp_path) == expected
     assert resolve_runner(None) == (expected[0] if expected else None)  # compress, mp3 and the like
 
@@ -168,11 +157,10 @@ def test_cli_flags_go_over_the_rule(tmp_path, monkeypatch, standalone):
 
 @pytest.mark.parametrize("local", [False, True])
 def test_translation_on_a_connected_mac_uses_the_server_model(tmp_path, monkeypatch, local):
-    """A Mac recognizes here by default, but translation needs the user's model: the CLI and MCP
-    send it to the connected server; --local keeps it on this Mac."""
+    """A Mac recognizes here by default, but translation needs the user's model: the CLI sends it
+    to the connected server; --local keeps it on this Mac."""
     from mnema.cli import commands
     from mnema.cli.parser import build_parser
-    from mnema.mcp import tools
 
     monkeypatch.setattr(base, "STANDALONE", True)
     monkeypatch.setenv("MNEMA_RUNNER", SERVER[0])
@@ -184,7 +172,6 @@ def test_translation_on_a_connected_mac_uses_the_server_model(tmp_path, monkeypa
         return {"markdown": "# перевод"}
 
     monkeypatch.setattr(cli_pkg, "dispatch", dispatch)
-    monkeypatch.setattr(tools, "dispatch", dispatch)
     monkeypatch.setattr(cli_pkg, "run_streaming", lambda label, fn, **kw: fn(on=lambda *a: None))
     monkeypatch.setattr(
         cli_pkg, "run_with_progress", lambda label, fn, **kw: fn(on=lambda *a: None)
@@ -195,6 +182,4 @@ def test_translation_on_a_connected_mac_uses_the_server_model(tmp_path, monkeypa
     args = build_parser().parse_args(["translate", str(src), "-o", str(tmp_path / "a.md"), *flags])
     commands.cmd_translate(args)
     assert (tmp_path / "a.md").read_text(encoding="utf-8").startswith("# перевод")
-    if not local:
-        tools.translate_recording(str(src))
-    assert seen == ([None] if local else [SERVER, SERVER])
+    assert seen == ([None] if local else [SERVER])

@@ -60,7 +60,7 @@ def as_user(name: str | None) -> Iterator[None]:
 
 
 def current_user() -> str | None:
-    """The user of this context; None outside the server (CLI, Mac, MCP)."""
+    """The user of this context; None outside the server (CLI, Mac)."""
     return _user.get()
 
 

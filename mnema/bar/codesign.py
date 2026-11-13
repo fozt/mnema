@@ -28,8 +28,6 @@ CODE_PATHS = (
     "Contents/Resources/*.lproj/",
     "Contents/Resources/Mnema.icns",
     "Contents/Resources/licenses/",
-    # names the mnema command wheel of this very release
-    "Contents/Resources/bin/mnema-mcp",
     "Contents/Resources/python/lib/python3.12/site-packages/mnema/",
     "Contents/Resources/python/lib/python3.12/site-packages/mnema-*.dist-info/",
 )

@@ -34,7 +34,6 @@ serve several people, each with their own devices, library and model.
   recordings library, model and keys.
 - **Command line** (a separate package) for files and links: transcribe a video or a YouTube
   link, live captions, translate, compress, merge tracks.
-- **MCP server** so Claude and other assistants can transcribe and read your recordings.
 - **OpenAI-compatible API** on your server, so other services can transcribe with your Parakeet.
 - **English and Russian interface**, following the system language.
 
@@ -107,8 +106,8 @@ recognition *On this Mac* or make the first recording without it, and shows the 
 `~/Library/Application Support/Mnema/models`.
 
 Opened straight from the disk image, Mnema asks to be moved to *Applications* first. On its first
-start it turns on *Open at login*. The `mnema` command and `mnema-mcp` are installed separately
-(see [Command line](#command-line)). Updates come from GitHub Releases: *⋯ → Settings… → General
+start it turns on *Open at login*. The `mnema` command is installed separately (see
+[Command line](#command-line)). Updates come from GitHub Releases: *⋯ → Settings… → General
 → Check for updates* looks for a new version, and when there is one, *Update* downloads it and
 replaces this app in place, so Mnema has to stay in a folder you can write to, such as
 *Applications*. When only Mnema's own code changed, the update is about 4 MB instead of the whole
@@ -359,7 +358,7 @@ uv tool install "mnema[cli] @ https://github.com/fozt/mnema/releases/download/vX
 ```
 
 The constraints file holds the versions of the dependencies the release was tested with. The
-command installs `mnema` and `mnema-mcp` into `~/.local/bin`; add that folder to `PATH` if your
+command installs `mnema` into `~/.local/bin`; add that folder to `PATH` if your
 shell doesn't have it. Update with the same command and `--force` (`mnema update` prints it).
 On a Mac the command recognizes through the installed Mnema app, so install the app too, or
 connect a server; on Linux it recognizes on the CPU with Parakeet or on a server. The Linux app
@@ -390,14 +389,9 @@ explicitly. For YouTube videos that require sign-in add `--cookies-from-browser 
 
 ### Claude and other assistants
 
-`mnema-mcp` comes with the command and is an MCP server with four tools: `transcribe` (a file
-or a link; the transcript is also saved outside the recordings library), `translate`,
-`list_recordings` (the recordings library of this computer) and `read_transcript`. It processes
-where the `mnema` command does. Add it to Claude Code:
-
-```bash
-claude mcp add mnema -- mnema-mcp
-```
+Recordings are plain files, so an assistant such as Claude Code reads them straight from the
+library: `~/mnema/<section>/<recording>/summary.txt` and `transcript.txt`. Point it at the folder
+and ask about your calls.
 
 ### Other services
 

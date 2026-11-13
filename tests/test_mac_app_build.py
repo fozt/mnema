@@ -54,19 +54,6 @@ def test_console_scripts_run_the_python_next_to_them(tmp_path):
     assert f"python={os.path.realpath(moved)}/Mnema.app/Contents/Resources/python/bin/" in out
 
 
-def test_mcp_client_of_the_old_app_is_told_how_to_get_the_command(tmp_path):
-    """MCP configs still start Resources/bin/mnema-mcp of the app: it fails and names the wheel of
-    this very release with the versions it was tested with."""
-    stub = build.write_mcp_stub(tmp_path / "bin", "0.5.0")
-    done = subprocess.run([str(stub)], capture_output=True, text=True, input="{}\n")
-    assert done.returncode != 0 and done.stdout == ""
-    release = "https://github.com/fozt/mnema/releases/download/v0.5.0"
-    wheel = f"{release}/mnema-0.5.0-py3-none-any.whl"
-    constraints = f"{release}/mnema-0.5.0-constraints.txt"
-    assert f'uv tool install "mnema[cli] @ {wheel}" --constraints {constraints}' in done.stderr
-    assert len(stub.read_text().splitlines()) == 3
-
-
 def test_builder_paths_are_outside_and_system_paths_are_not():
     for path in ("/Users/runner/miniconda3/lib", "/opt/homebrew/opt/libomp/lib/libomp.dylib"):
         assert build.outside(path)
@@ -147,7 +134,6 @@ def test_trim_drops_build_tools_and_test_suites_but_keeps_what_imports_them(tmp_
         "bin/pip3",
         "bin/mnema",  # the command is a package of its own now
         "bin/mnema-bar",
-        "bin/mnema-mcp",
     ]
     rel = {p: (home / p if p.startswith("bin/") else site / p) for p in kept + dropped}
     for path in rel.values():
@@ -160,7 +146,7 @@ def test_trim_drops_build_tools_and_test_suites_but_keeps_what_imports_them(tmp_
 
 @pytest.mark.parametrize(
     "dist", ["mutagen-1.47.0", "torch-2.8.0", "yt_dlp-2026.10.21", "scikit_learn-1.7.2",
-             "silero_vad-6.2.1", "rich-15.0.0", "mcp-1.20.0", "Deno-2.9.8"],
+             "silero_vad-6.2.1", "rich-15.0.0", "Deno-2.9.8"],
 )  # fmt: skip
 def test_trim_refuses_a_bundle_with_a_package_that_must_not_ship(tmp_path, dist):
     home = tmp_path / "python"
@@ -198,7 +184,6 @@ CODE = [
     "Contents/Info.plist",
     "Contents/MacOS/Mnema",
     "Contents/Resources/Mnema.icns",
-    "Contents/Resources/bin/mnema-mcp",
     "Contents/Resources/en.lproj/InfoPlist.strings",
     "Contents/Resources/licenses/THIRD-PARTY.txt",
     f"{SITE}/mnema-0.5.0.dist-info/RECORD",

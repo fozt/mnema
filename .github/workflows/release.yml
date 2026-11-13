@@ -80,11 +80,6 @@ jobs:
           uv tool install --python 3.12 "mnema[cli] @ file://$PWD/dist/mnema-$version-py3-none-any.whl" \
             --constraints "$PWD/dist/mnema-$version-constraints.txt"
           "$RUNNER_TEMP/bin/mnema" --version | grep -qx "mnema $version"
-      - name: mnema-mcp answers initialize
-        timeout-minutes: 2
-        run: |
-          printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"release","version":"0"}}}' \
-            | HOME="$RUNNER_TEMP" "$RUNNER_TEMP/bin/mnema-mcp" | grep -q '"serverInfo"'
 
   ffmpeg:
     runs-on: macos-15

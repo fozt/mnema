@@ -1265,7 +1265,7 @@ def cmd_serve(args) -> None:
     from ..install_setup import DEFAULT_PORT, server_token
 
     try:
-        import fastapi  # noqa: F401 - the Mac app has uvicorn (through mcp) but no fastapi
+        import fastapi  # noqa: F401 - the Mac app carries no server stack
         import uvicorn
     except ImportError:
         die(_("The server needs the full extra: uv sync --extra full"))

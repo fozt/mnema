@@ -170,7 +170,7 @@ def test_apply_prepares_new_locked_environment_and_never_changes_checkout(
 def test_app_release_installs_what_its_system_processes_with(release, monkeypatch):
     """The Linux app updates as ./install.sh client installs it: the tray and the command, no
     engines (the server processes). User settings stay."""
-    installed = {"pystray", "whisperx", "whisperlivekit", "mcp"}
+    installed = {"pystray", "whisperx", "whisperlivekit"}
     monkeypatch.setattr(
         update.importlib.util, "find_spec", lambda name: object() if name in installed else None
     )

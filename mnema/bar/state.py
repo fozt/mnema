@@ -65,7 +65,7 @@ class Recognition(StrEnum):
     """Where speech is recognized: this Mac, the connected server (MNEMA_RUNNER) or the cloud
     (by the server when connected, else by this Mac). Linux has only the server and the cloud."""
 
-    MAC = "mac"  # node.MAC: the CLI and MCP read the same values
+    MAC = "mac"  # node.MAC: the CLI reads the same values
     SERVER = "server"
     CLOUD = "cloud"
 

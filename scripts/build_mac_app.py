@@ -5,8 +5,7 @@
 
 Layout: Contents/MacOS/Mnema (the Swift panel) and mnema-asr (recognition on CoreML),
 Contents/Resources/python (uv-managed python-build-standalone, pinned, with the app's packages
-installed into it), Contents/Resources/bin (ffmpeg and ffprobe from PREFIX/bin; mnema-mcp only
-tells old MCP configs how to get the mnema command, a package of its own),
+installed into it), Contents/Resources/bin (ffmpeg and ffprobe from PREFIX/bin),
 Contents/Resources/licenses. Every path is relative to the bundle, so the app runs from wherever
 it is copied. Packages the app must not carry fail the build (FORBIDDEN). Without --ffmpeg the
 app uses ffmpeg from PATH (a warning says so). --sources also writes
@@ -51,12 +50,12 @@ SWIFT_PRODUCTS = ("Mnema", "mnema-asr")  # both into Contents/MacOS
 PY = "python3.12"
 PYTHON_VERSION = "3.12.16"  # python-build-standalone: the same interpreter in every build
 # The heavy Python the app does without: recognition is mnema-asr, the command (rich, yt-dlp,
-# deno, mcp) is a package of its own. mutagen (GPL) only came with yt-dlp. Distribution names,
+# deno) is a package of its own. mutagen (GPL) only came with yt-dlp. Distribution names,
 # canonical (PEP 503).
 FORBIDDEN = (
     "torch", "torchaudio", "mlx", "mlx-whisper", "parakeet-mlx", "whisperx", "gigaam", "numba",
     "scipy", "scikit-learn", "librosa", "transformers", "silero-vad", "onnxruntime",
-    "whisperlivekit", "yt-dlp", "deno", "rich", "mcp", "mutagen",
+    "whisperlivekit", "yt-dlp", "deno", "rich", "mutagen",
 )  # fmt: skip
 # stdlib parts the app never imports
 _STDLIB_DROP = ("idlelib", "tkinter", "test", "turtledemo", "turtle.py")
@@ -78,16 +77,6 @@ _SHEBANG = (
     '#!/bin/sh\n\'\'\'exec\' "$(dirname -- "$(realpath -- "$0")")"/{py} "$0" "$@"\n\' \'\'\'\n'
 )
 
-# Old MCP configs start the app's mnema-mcp: it says where the command is now
-MCP_STUB = (
-    "#!/bin/sh\n"
-    "echo 'mnema-mcp is part of the mnema command now. Install it: "
-    'uv tool install "mnema[cli] @ {wheel}" --constraints {constraints}\' >&2\n'
-    "exit 1\n"
-)
-_RELEASE = "https://github.com/fozt/mnema/releases/download/v{version}/"
-WHEEL = _RELEASE + "mnema-{version}-py3-none-any.whl"
-CONSTRAINTS = _RELEASE + "mnema-{version}-constraints.txt"  # the versions it was tested with
 # The weights mnema-asr downloads on first use: CC-BY-4.0 asks for attribution
 MODELS = """\
 Models Mnema downloads on first use (not part of this app)
@@ -203,17 +192,6 @@ def trim(python_home: Path) -> int:
             freed += sum(f.lstat().st_size for f in path.rglob("*") if not f.is_dir())
             shutil.rmtree(path)
     return freed
-
-
-def write_mcp_stub(bin_dir: Path, version: str) -> Path:
-    stub = bin_dir / "mnema-mcp"
-    bin_dir.mkdir(parents=True, exist_ok=True)
-    text = MCP_STUB.format(
-        wheel=WHEEL.format(version=version), constraints=CONSTRAINTS.format(version=version)
-    )
-    stub.write_text(text, encoding="utf-8")
-    stub.chmod(0o755)
-    return stub
 
 
 def swift_licenses(checkouts: Path, dest: Path) -> None:
@@ -549,7 +527,7 @@ def assemble(out: Path, ffmpeg: Path | None, version: str, sources: bool = False
     say(f"trimmed {trim(res / 'python') / 2**20:.0f} MB the app never imports")
     relocate_scripts(res / "python" / "bin")
     bin_dir = res / "bin"
-    write_mcp_stub(bin_dir, version)
+    bin_dir.mkdir(parents=True, exist_ok=True)
     licenses = res / "licenses"
     licenses.mkdir()
     shutil.copy2(ROOT / "LICENSE", licenses / "Mnema-LICENSE")

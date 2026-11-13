@@ -26,8 +26,8 @@ MAC, SERVER, CLOUD = "mac", "server", "cloud"  # bar.json "recognition" (bar.sta
 
 def saved_recognition() -> str | None:
     """Where recognition runs, as the app saved it in bar.json, or None. An older file's
-    "where": "server" means the server. Read without the app's modules: the CLI and MCP need the
-    rule too."""
+    "where": "server" means the server. Read without the app's modules: the CLI needs the rule
+    too."""
     from .config import bar_prefs_file
 
     try:
@@ -48,7 +48,7 @@ def selected_processing(
     local: bool = False,
     recognition: str | None = None,
 ) -> Connection | None:
-    """Where to process, one rule for the app, the CLI and MCP; None is this computer.
+    """Where to process, one rule for the app and the CLI; None is this computer.
     CLI flags win: --local is here, --runner the given server. "On the server" and "In the
     cloud" (recognition; None reads bar.json) go to the connected MNEMA_RUNNER server, "On this
     Mac" and no server stay here. Only a Mac recognizes itself, and only with mnema-asr of

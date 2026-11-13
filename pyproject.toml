@@ -4,7 +4,7 @@ version = "0.6.5"
 description = "Meeting recordings: transcription, translation, summaries, merging, compression"
 requires-python = ">=3.12"
 # The core is what the Mac app ships: recording, sync, the server connection and summaries
-# without a server (litellm). The command (`mnema`, `mnema-mcp`) is the "cli" extra, the server's
+# without a server (litellm). The command (`mnema`) is the "cli" extra, the server's
 # recognition and web stack are "full".
 dependencies = [
     "pydantic>=2",
@@ -29,7 +29,7 @@ parakeet = [
 ]
 # Terminal output of the command and the live view
 term = ["rich"]
-# The mnema command and mnema-mcp: `uv tool install "mnema[cli] @ <wheel of the release>"`, and
+# The mnema command: `uv tool install "mnema[cli] @ <wheel of the release>"`, and
 # the Linux client (./install.sh client). On a Mac it recognizes through the app's mnema-asr, on
 # Linux with Parakeet on ONNX.
 cli = [
@@ -40,7 +40,6 @@ cli = [
     "yt-dlp[default]>=2026.10.21",
     # JS runtime for YouTube: the deno binary lands in the environment, no separate install.
     "deno>=2.9.8",
-    "mcp>=1.2,<2",  # mnema-mcp; 2.0 renamed FastMCP (mcp.server.fastmcp)
     "websockets>=12",  # mnema live --runner
     "numpy",  # system audio PCM conversion (float32 48 kHz → int16 16 kHz)
     "pyobjc-framework-Cocoa; platform_system == 'Darwin'",  # system audio through a Core Audio tap
@@ -66,7 +65,6 @@ menubar = [
     "PyGObject<3.51; platform_system == 'Linux'",
 ]
 # For one release: the update of 0.4 asks for these extras. Remove in 0.6.
-mcp = ["mnema[cli]"]
 whisper = []
 gigaam = []
 live = []
@@ -93,7 +91,6 @@ dev = [{ include-group = "tools" }]
 [project.scripts]
 mnema = "mnema.cli:main"
 mnema-bar = "mnema.bar.app:main"
-mnema-mcp = "mnema.mcp.server:main"
 
 [build-system]
 requires = ["hatchling==1.33.0"]  # the wheel names its generator: the same in every build

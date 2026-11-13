@@ -4,13 +4,12 @@
 
 The signature holds, no Mach-O loads anything outside the bundle and the system, mnema-asr answers
 --version and lists its models without downloading any, the bundled ffmpeg and ffprobe run and
-mnema finds them, no package of the forbidden list is in the bundle and every library in it
-imports after the trim (system audio included), and the old mnema-mcp names the wheel of the
-command. Then the engine is started the way the app starts it (the Swift launcher, the embedded
-Python): it answers with a panel state and quits, its first start writes app.json and the login
-item, and `mnema-bar --headless` offers exactly Automatic and the models of mnema-asr, as
-local_asr_choices does. Everything runs under a temporary HOME: nothing of the real user's
-settings is read or written.
+mnema finds them, no package of the forbidden list is in the bundle and every library in it imports
+after the trim (system audio included). Then the engine is started the way the app starts it (the
+Swift launcher, the embedded Python): it answers with a panel state and quits, its first start
+writes app.json and the login item, and `mnema-bar --headless` offers exactly Automatic and the
+models of mnema-asr, as local_asr_choices does. Everything runs under a temporary HOME: nothing of
+the real user's settings is read or written.
 """
 
 from __future__ import annotations
@@ -34,9 +33,7 @@ if __package__ in (None, ""):
 
 from mnema.macapp import app_helper
 from scripts.build_mac_app import (
-    CONSTRAINTS,
     FORBIDDEN,
-    WHEEL,
     load_commands,
     macho_files,
     outside,
@@ -108,16 +105,6 @@ def check_asr(app: Path, env: dict[str, str], home: Path) -> list[str]:
     if downloaded := [p for p in home.rglob("*") if p.is_file()]:
         raise SmokeError(f"mnema-asr models wrote files: {downloaded[:5]}")
     return [m["id"] for m in models[0]]
-
-
-def check_mcp(app: Path, env: dict[str, str], version: str) -> None:
-    """The mnema-mcp of old MCP configs fails and names the command's wheel of this release."""
-    stub = app / "Contents" / "Resources" / "bin" / "mnema-mcp"
-    out = run([str(stub)], env, input="{}\n")
-    advice = f'"mnema[cli] @ {WHEEL.format(version=version)}" --constraints '
-    advice += CONSTRAINTS.format(version=version)
-    if out.returncode == 0 or out.stdout or advice not in out.stderr:
-        raise SmokeError(f"mnema-mcp:\n{out.stdout}\n{out.stderr[-2000:]}")
 
 
 # mnema's own media path inside the bundle, run the way the engine runs it: the tools it resolves
@@ -327,8 +314,6 @@ def smoke(app: Path, *, version: str | None = None, ffmpeg: bool = False) -> Non
         env = isolated_env(home)
         models = check_asr(app, env, home)
         say(f"mnema-asr answers, models {', '.join(models)}, none downloaded")
-        check_mcp(app, env, built)
-        say("mnema-mcp names the wheel of the mnema command")
         tools = res / "bin"
         if (tools / "ffmpeg").exists():
             for tool in ("ffmpeg", "ffprobe"):

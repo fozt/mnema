@@ -268,7 +268,7 @@ def test_app_moves_a_record_through_the_protocol(tmp_path, notes) -> None:
 
 
 def test_record_processed_by_another_process_stays_put(tmp_path, notes) -> None:
-    """Another process of this computer processes the recording (CLI `mnema finish`, MCP) and
+    """Another process of this computer processes the recording (CLI `mnema finish`) and
     holds the folder lock: the move is refused with a notice; once unlocked it moves."""
     import fcntl
     import os

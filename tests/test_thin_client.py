@@ -87,7 +87,7 @@ def test_the_mac_apps_engine_imports_without_the_command_and_engines() -> None:
     """Mnema.app ships only the core and the menubar extra: its engine (the panel's protocol,
     recording, system audio, the recognition worker) loads none of the command's packages and
     no local engine."""
-    absent = {"rich", "yt_dlp", "deno", "mcp", "websockets", "onnxruntime", "torch", "mlx"}
+    absent = {"rich", "yt_dlp", "deno", "websockets", "onnxruntime", "torch", "mlx"}
     script = (
         _blocker(absent)
         + "import mnema.bar.headless, mnema.bar.runtime, mnema.live.system_audio\n"

@@ -3,7 +3,7 @@
 One model for every task. On the server (users.strict) the model and keys are the lines of the
 user's file ~/.config/mnema/users/<name>.env (the owner's too), written from the app through
 the model API: every field comes from there, the process environment and the shared .env do
-not reach it; without the file or a line there is none. Outside the server (Mac, CLI, MCP)
+not reach it; without the file or a line there is none. Outside the server (Mac, CLI)
 MNEMA_MODEL, MNEMA_API_KEY, MNEMA_API_BASE and the cloud recognition key MNEMA_ASR_API_KEY are
 lines of ~/.config/mnema/.env or process environment variables (export): with MNEMA_MODEL in
 the process environment model, key and address come from there, otherwise all three from the
