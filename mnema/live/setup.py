@@ -450,13 +450,17 @@ def build_live(
 
 # Silence gate of the offline pass: like live (sources.EnergyChronicle), but on the WAV
 # itself, where batch timestamps are exact; when in doubt (broken wav, empty interval) the
-# segment is kept.
-_GATE_RMS = 300
+# segment is kept. The gate follows the track's own pauses, so a quiet microphone keeps its
+# speech, and is never stricter than a loud room needs.
+_GATE_RMS = 300  # the strictest gate (≈ -41 dBFS)
+_GATE_MIN = 5  # the most lenient gate (≈ -76 dBFS): below it a window is silence anywhere
+_GATE_SNR = 4  # speech stands at least this many times above the pauses
+_GATE_PAUSES = 0.05  # the pauses: the quietest share of 100 ms windows
 _GATE_MARGIN = 0.3  # a small margin around the interval
 
 
-def _wav_speech_rms(wav: Path, start: float, end: float) -> float | None:
-    """Peak RMS of 100 ms windows in a WAV interval (int16 mono); None when unknown."""
+def _wav_window_rms(wav: Path, start: float, end: float) -> list[float] | None:
+    """RMS of each 100 ms window in a WAV interval (int16 mono); None when unknown."""
     import array
     import contextlib
     import wave
@@ -470,31 +474,36 @@ def _wav_speech_rms(wav: Path, start: float, end: float) -> float | None:
                 return None
             w.setpos(a)
             raw = w.readframes(b - a)
+        win = max(1, rate // 10)
         try:  # numpy comes with the live extra; bare CI falls back to pure Python
             import numpy as np
 
             data = np.frombuffer(raw, dtype="<i2").astype(np.float64)
             if not len(data):
                 return None
-            win = max(1, rate // 10)
             pad = (-len(data)) % win
             chunks = np.pad(data, (0, pad)).reshape(-1, win)
-            return float(np.sqrt((chunks**2).mean(axis=1)).max())
+            return np.sqrt((chunks**2).mean(axis=1)).tolist()
         except ImportError:
             data = array.array("h", raw[: len(raw) // 2 * 2])
             if not data:
                 return None
-            win = max(1, rate // 10)
-            best = 0.0
-            for i in range(0, len(data), win):
-                c = data[i : i + win]
-                best = max(best, (sum(x * x for x in c) / len(c)) ** 0.5)
-            return best
+            windows = (data[i : i + win] for i in range(0, len(data), win))
+            return [(sum(x * x for x in c) / len(c)) ** 0.5 for c in windows]
     return None
 
 
-def _wav_is_silent(wav: Path, *, chunk_sec: float = 60.0, on: Progress = noop) -> bool:
-    """Is the whole recording physical silence? `on` between chunks lets processing stop."""
+def _wav_speech_rms(wav: Path, start: float, end: float) -> float | None:
+    """Peak RMS of 100 ms windows in a WAV interval; None when unknown."""
+    windows = _wav_window_rms(wav, start, end)
+    return max(windows) if windows else None
+
+
+def _wav_gate(
+    wav: Path, *, chunk_sec: float = 60.0, on: Progress = noop
+) -> tuple[float, bool] | None:
+    """The track's silence gate and whether the whole recording stays under it (physical
+    silence); None when unknown. `on` between chunks lets processing stop."""
     import wave as wave_mod
 
     try:
@@ -502,21 +511,27 @@ def _wav_is_silent(wav: Path, *, chunk_sec: float = 60.0, on: Progress = noop) -
             rate = w.getframerate() or 1
             total = w.getnframes() / rate
     except (OSError, EOFError, wave_mod.Error):
-        return False
-    if total <= 0:
-        return False
+        return None
+    windows: list[float] = []
     t = 0.0
     while t < total:
         on(None, _("Checking audio…"))
-        rms = _wav_speech_rms(wav, t, min(t + chunk_sec, total))
-        if rms is None or rms >= _GATE_RMS:
-            return False
+        windows += _wav_window_rms(wav, t, min(t + chunk_sec, total)) or []
         t += chunk_sec
-    return True
+    if not windows:
+        return None
+    pauses = sorted(windows)[int(len(windows) * _GATE_PAUSES)]
+    gate = min(_GATE_RMS, max(_GATE_MIN, _GATE_SNR * pauses))
+    return gate, max(windows) < gate
 
 
 def _refine_track(
-    prepared: PreparedLive, track: Track, wav: Path, on: Progress, lang: str | None
+    prepared: PreparedLive,
+    track: Track,
+    wav: Path,
+    on: Progress,
+    lang: str | None,
+    gate: float | None = None,
 ) -> tuple[list[Segment], Transcript]:
     """Offline transcription of a WAV track → (segments replacing the live text, the core
     transcript).
@@ -550,7 +565,7 @@ def _refine_track(
     dropped = 0
     for seg in tr.segments:
         rms = _wav_speech_rms(wav, seg.start - _GATE_MARGIN, seg.end + _GATE_MARGIN)
-        if rms is not None and rms < _GATE_RMS:
+        if rms is not None and gate is not None and rms < gate:
             dropped += 1  # "speech" from physical silence: a hallucination of the decoder
             continue
         segs.append(Segment(start=seg.start, end=seg.end, text=seg.text, speaker=track.label))
@@ -606,18 +621,22 @@ def _refine_tracks(
     run = prepared.run
     # Only recorded tracks can be refined: without a recording (--no-save) there is nothing.
     candidates: list[tuple[Track, Path]] = []
+    gates: dict[str, float] = {}
     for track in tracks:
         writer = prepared.writers.get(track.label)
         wav = writer.path if writer is not None else None
         if wav is None or not wav.exists() or wav.stat().st_size <= WAV_HEADER:
             continue  # empty recording: keep the live text
-        if _wav_is_silent(wav, on=on_asr):
+        gate = _wav_gate(wav, on=on_asr)
+        if gate is not None and gate[1]:
             # A track without a single sound (system silent all call): ASR would waste minutes.
             # The processing side decides silence; clients send the tracks as they are. Silence is
             # normal (nobody spoke there), so it is no remark: only the history keeps it.
             logger.debug("offline pass [%s]: the whole recording is silent, skipping", track.label)
             run.silent.append(track.label)
             continue
+        if gate is not None:
+            gates[track.label] = gate[0]
         candidates.append((track, wav))
     if not candidates:
         on_asr(1.0, "")
@@ -678,7 +697,9 @@ def _refine_tracks(
             sl(None, _recognizing(track.label))
             t0 = time.monotonic()
             try:
-                segs, tr = _refine_track(prepared, track, wav, track_progress, lang)
+                segs, tr = _refine_track(
+                    prepared, track, wav, track_progress, lang, gates.get(track.label)
+                )
                 # Step timings go to the log (bar.log), so slow steps are easy to find.
                 logger.info(
                     "recognition %s: %.0f s for ~%.0f s of audio",

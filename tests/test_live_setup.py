@@ -350,30 +350,45 @@ def test_finalize_dialog_pins_offline_speaker_labels(monkeypatch, tmp_path) -> N
     assert result.translation_md is not None
 
 
-def test_refine_gate_drops_segments_from_wav_silence(monkeypatch, tmp_path) -> None:
-    """The offline pass drops segments whose WAV interval is physical silence (batch decode
-    hallucinations like "Thank you" on long pauses); speech segments stay."""
+@pytest.mark.parametrize(("hiss", "voice"), [(2, 30), (50, 300)])
+def test_refine_gate_keeps_quiet_speech_and_drops_text_from_the_pauses(
+    monkeypatch, tmp_path, hiss, voice
+) -> None:
+    """The offline pass drops "speech" decoded from a pause (hallucinations on long silence)
+    and keeps real speech however quiet the microphone: a far microphone (-60 dBFS speech) and
+    a noisy room alike."""
     import math
+    import random
     import wave
 
-    from mnema.live import setup as setup_mod
+    _patch_build(monkeypatch, {})
+    _no_llm(monkeypatch)
+    _fake_dispatch(
+        monkeypatch,
+        {
+            "text": "Thank you. Quiet words.",
+            "segments": [
+                {"start": 0.5, "end": 3.5, "text": "Thank you."},
+                {"start": 4.2, "end": 5.8, "text": "Quiet words."},
+            ],
+            "language": "en",
+        },
+    )
+    prepared = build_live(LiveConfig(), base=tmp_path / "live-q")
+    path = prepared.writers["mic"].path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    rate, noise = 16000, random.Random(0)
+    samples = [noise.randint(-hiss, hiss) for _ in range(rate * 6)]
+    for i in range(rate * 4, rate * 6):  # 4–6 s: speech (a 220 Hz tone) over the hiss
+        samples[i] += int(voice * math.sin(2 * math.pi * 220 * i / rate))
+    with wave.open(str(path), "wb") as w:
+        w.setparams((1, 2, rate, 0, "NONE", "not compressed"))
+        w.writeframes(b"".join(x.to_bytes(2, "little", signed=True) for x in samples))
 
-    wav = tmp_path / "mic.wav"
-    rate = 16000
-    with wave.open(str(wav), "wb") as w:
-        w.setnchannels(1)
-        w.setsampwidth(2)
-        w.setframerate(rate)
-        silence = b"\x00\x00" * (rate * 4)  # 0–4 s: silence
-        tone = b"".join(  # 4–6 s: "speech" (a 220 Hz tone, amplitude 6000)
-            int(6000 * math.sin(2 * math.pi * 220 * i / rate)).to_bytes(2, "little", signed=True)
-            for i in range(rate * 2)
-        )
-        w.writeframes(silence + tone)
+    result, _full = finalize_live(prepared, _live_tracks(), retitle=False)
 
-    assert setup_mod._wav_speech_rms(wav, 0.5, 3.5) < 300  # silence
-    assert setup_mod._wav_speech_rms(wav, 4.2, 5.8) > 300  # speech
-    assert setup_mod._wav_speech_rms(wav, 100.0, 101.0) is None  # outside the file: unknown
+    txt = result.transcript_txt.read_text(encoding="utf-8")
+    assert "Quiet words." in txt and "Thank you." not in txt
 
 
 @pytest.mark.parametrize(
@@ -401,7 +416,7 @@ def test_finalize_translates_foreign_conversation(monkeypatch, tmp_path, text, f
         assert called == [] and result.translation_md is None
 
 
-def test_wav_is_silent_detects_speech_anywhere(monkeypatch, tmp_path) -> None:
+def test_silence_scan_detects_speech_anywhere(monkeypatch, tmp_path) -> None:
     """The scan is complete: a line in the middle of long silence makes the file not silent."""
     import math
     import wave
@@ -420,7 +435,7 @@ def test_wav_is_silent_detects_speech_anywhere(monkeypatch, tmp_path) -> None:
             for i in range(rate)
         )
         w.writeframes(silence + tone + silence)  # speech surrounded by silence
-    assert setup_mod._wav_is_silent(wav) is False
+    assert setup_mod._wav_gate(wav)[1] is False
 
     quiet = tmp_path / "q.wav"
     with wave.open(str(quiet), "wb") as w:
@@ -428,7 +443,7 @@ def test_wav_is_silent_detects_speech_anywhere(monkeypatch, tmp_path) -> None:
         w.setsampwidth(2)
         w.setframerate(rate)
         w.writeframes(b"\x00\x00" * (rate * 11))
-    assert setup_mod._wav_is_silent(quiet) is True
+    assert setup_mod._wav_gate(quiet)[1] is True
 
 
 def test_silence_scan_can_be_cancelled_between_chunks(tmp_path) -> None:
@@ -449,7 +464,7 @@ def test_silence_scan_can_be_cancelled_between_chunks(tmp_path) -> None:
             raise setup_mod.FinalizeCancelled()
 
     with pytest.raises(setup_mod.FinalizeCancelled):
-        setup_mod._wav_is_silent(wav, chunk_sec=1.0, on=cancel)
+        setup_mod._wav_gate(wav, chunk_sec=1.0, on=cancel)
     assert callbacks == 2
 
 
@@ -627,7 +642,6 @@ def test_finalize_two_tracks_make_recording_mp3(monkeypatch, tmp_path) -> None:
         return dst
 
     monkeypatch.setattr(audio_mod, "mix", fake_mix)
-    monkeypatch.setattr(setup_mod, "_wav_is_silent", lambda wav, **kwargs: False)
     prepared = build_live(LiveConfig(), base=tmp_path / "live-m")
     prepared.writers["system"] = types.SimpleNamespace(path=tmp_path / "live-m" / "system.wav")
     _write_wav(prepared, "mic")
