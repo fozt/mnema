@@ -192,8 +192,8 @@ def test_node_asr_error_preserves_known_provider_reason() -> None:
 
     error = Refused("Key rejected while processing /srv/x/mic.wav")
     notice = remarks.asr_failed("mic", error, live_kept=False)
-    assert remarks.node_asr_reason(error) == "ключ модели не подошёл"
-    assert "ключ модели не подошёл" in notice.cause and "/srv" not in notice.text
+    assert remarks.node_asr_reason(error) == "ключ OpenAI для распознавания не подошёл"
+    assert "ключ OpenAI для распознавания не подошёл" in notice.cause and "/srv" not in notice.text
 
 
 @pytest.mark.parametrize("here", [True, False])

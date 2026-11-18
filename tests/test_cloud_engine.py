@@ -270,9 +270,19 @@ def test_a_rejected_key_is_a_track_remark_in_the_users_words(tmp_path, speech, s
     with pytest.raises(litellm.AuthenticationError) as refused:
         _recognize(_track(tmp_path / "mic.wav", 4))
     assert len(sent.calls) == 1
-    expected = "Не удалось распознать дорожку «Микрофон»: ключ модели не подошёл"
+    expected = "Не удалось распознать дорожку «Микрофон»: ключ OpenAI для распознавания не подошёл"
     for error in (refused.value, MediaError(str(refused.value))):
         assert remarks.asr_failed("mic", error, live_kept=False).cause == expected
+    both = [
+        remarks.asr_failed(label, refused.value, live_kept=False) for label in ("mic", "system")
+    ]
+    lines = remarks.menu_lines(both)
+    assert lines[0] == "Ключ OpenAI не подошёл"  # the card names the key, not only the tracks
+    assert "«Микрофон» не распознана" in " ".join(lines) and "«Системный звук»" in " ".join(lines)
+    assert both[0].hint == (
+        "Замените ключ OpenAI для распознавания в настройках Mnema на Mac и обработайте запись "
+        "ещё раз"
+    )
 
 
 def test_no_key_is_refused_before_any_request(tmp_path, speech, sent) -> None:

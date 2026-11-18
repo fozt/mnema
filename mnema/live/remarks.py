@@ -363,20 +363,38 @@ def node_asr_reason(error: Exception) -> str:
         return str(error)
     if isinstance(error, HelperError) and error.known:  # no space, no network, an Intel Mac
         return error.reason
-    if classify(error) is not ErrorKind.OTHER:
+    kind = classify(error)
+    if kind is ErrorKind.INVALID_KEY:  # recognition has one key: the OpenAI one
+        return _("the OpenAI recognition key was rejected")
+    if kind is ErrorKind.DISABLED:
+        return _("the OpenAI recognition key is disabled")
+    if kind is not ErrorKind.OTHER:
         return human_reason(error)
     return _("error on the Mac") if base.processed_here() else _("error on the server")
 
 
 def asr_failed(label: str, reason: str | Exception, *, live_kept: bool) -> Remark:
-    detail = node_asr_reason(reason if isinstance(reason, Exception) else RuntimeError(reason))
+    error = reason if isinstance(reason, Exception) else RuntimeError(reason)
+    detail = node_asr_reason(error)
     source = _source(label)
+    if classify(error) in (ErrorKind.INVALID_KEY, ErrorKind.DISABLED):  # the key comes first
+        hint = _(
+            "Replace the OpenAI recognition key {where} and process the recording again",
+            where=_where(),
+        )
+        short = _("OpenAI key rejected")
+        short_effect = _("track “{source}” not recognized", source=source)
+    else:
+        hint = _("Once the cause is fixed, process the recording again")
+        short = _("Track “{source}” not recognized", source=source)
+        short_effect = ""
     return Remark(
         step=Step.ASR,
         cause=_("Could not recognize the “{source}” track: {detail}", source=source, detail=detail),
         effect=_(_LIVE_KEPT) if live_kept else _(_NO_TRACK_SPEECH),
-        hint=_("Once the cause is fixed, process the recording again"),
-        short=_("Track “{source}” not recognized", source=source),
+        hint=hint,
+        short=short,
+        short_effect=short_effect,
     )
 
 

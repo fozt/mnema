@@ -100,5 +100,10 @@
   "The video stops at that point": "Видео обрывается на этом месте",
   "Screen disconnected": "Экран отключился",
   "Screen recording failed": "Запись экрана не удалась",
-  "The video may be missing or incomplete": "Видео может отсутствовать или быть неполным"
+  "The video may be missing or incomplete": "Видео может отсутствовать или быть неполным",
+  "the OpenAI recognition key was rejected": "ключ OpenAI для распознавания не подошёл",
+  "the OpenAI recognition key is disabled": "ключ OpenAI для распознавания отключён",
+  "Replace the OpenAI recognition key {where} and process the recording again": "Замените ключ OpenAI для распознавания {where} и обработайте запись ещё раз",
+  "OpenAI key rejected": "Ключ OpenAI не подошёл",
+  "track “{source}” not recognized": "дорожка «{source}» не распознана"
 }
