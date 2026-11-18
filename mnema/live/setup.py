@@ -525,6 +525,31 @@ def _wav_gate(
     return gate, max(windows) < gate
 
 
+# Background in another script: in a track of Cyrillic speech, a reply without a Cyrillic letter
+# that is far quieter than the track's own speech is a distant voice or a mumble the model heard
+# in another language (a video behind the other side). A loud one stays: it may be a real quote.
+_BACKGROUND_SHARE = 0.25  # of the track's median speech peak (-12 dB)
+_CYRILLIC_SHARE = 0.8  # of the replies with letters: a Cyrillic track
+_CYRILLIC_MIN = 10
+_CYRILLIC = re.compile(r"[\u0400-\u04ff]")
+_LETTER = re.compile(r"[^\W\d_]")
+
+
+def _background(kept: list[tuple[Segment, float | None]]) -> set[int]:
+    """Indices of the replies that are quiet background in another script."""
+    lettered = [(i, seg, rms) for i, (seg, rms) in enumerate(kept) if _LETTER.search(seg.text)]
+    cyrillic = [rms for _i, seg, rms in lettered if _CYRILLIC.search(seg.text)]
+    peaks = sorted(rms for rms in cyrillic if rms is not None)
+    if len(cyrillic) < max(_CYRILLIC_MIN, _CYRILLIC_SHARE * len(lettered)) or not peaks:
+        return set()
+    floor = peaks[len(peaks) // 2] * _BACKGROUND_SHARE
+    return {
+        i
+        for i, seg, rms in lettered
+        if rms is not None and rms < floor and not _CYRILLIC.search(seg.text)
+    }
+
+
 def _refine_track(
     prepared: PreparedLive,
     track: Track,
@@ -561,16 +586,25 @@ def _refine_track(
 
     if not tr.segments and any(_spoken(s) for s in track.committed):
         raise _NoSpeech(_("recognition found no speech"))
-    segs: list[Segment] = []
+    kept: list[tuple[Segment, float | None]] = []
     dropped = 0
     for seg in tr.segments:
         rms = _wav_speech_rms(wav, seg.start - _GATE_MARGIN, seg.end + _GATE_MARGIN)
         if rms is not None and gate is not None and rms < gate:
             dropped += 1  # "speech" from physical silence: a hallucination of the decoder
             continue
-        segs.append(Segment(start=seg.start, end=seg.end, text=seg.text, speaker=track.label))
-    if dropped:
-        logger.debug("offline silence gate [%s]: segments dropped: %d", track.label, dropped)
+        kept.append((seg, rms))
+    background = _background(kept)
+    segs = [
+        Segment(start=seg.start, end=seg.end, text=seg.text, speaker=track.label)
+        for i, (seg, _rms) in enumerate(kept)
+        if i not in background
+    ]
+    if dropped or background:
+        logger.debug(
+            "offline gate [%s]: silence %d, background in another script %d",
+            track.label, dropped, len(background),
+        )  # fmt: skip
     if not segs and any(s.text.strip() for s in track.committed):
         raise _NoSpeech(_("all detected speech turned out to be silence"))
     return segs, tr

@@ -391,6 +391,52 @@ def test_refine_gate_keeps_quiet_speech_and_drops_text_from_the_pauses(
     assert "Quiet words." in txt and "Thank you." not in txt
 
 
+@pytest.mark.parametrize("russian", [10, 3])
+def test_quiet_replies_in_another_script_are_dropped_from_a_russian_track(
+    monkeypatch, tmp_path, russian
+) -> None:
+    """A quiet reply in Latin letters on a Russian track is background the model heard as
+    another language and is dropped; a loud Latin reply (a real quote) and a quiet Russian one
+    stay. A track with few Russian replies is not judged by them."""
+    import math
+    import wave
+
+    rate = 16000
+    replies = [(float(i), "Русская реплика.", 6000) for i in range(russian)]
+    t = float(russian)
+    replies += [
+        (t + 0.5, "Okay, so we can skip this.", 300),  # background
+        (t + 2.0, "Claude Code.", 6000),  # a loud quote
+        (t + 3.5, "Тихо сказала.", 300),
+    ]
+    samples = [0] * int((t + 5) * rate)
+    for start, _text, amplitude in replies:
+        for i in range(int(start * rate), int((start + 0.6) * rate)):
+            samples[i] = int(amplitude * math.sin(2 * math.pi * 220 * i / rate))
+    _patch_build(monkeypatch, {})
+    _no_llm(monkeypatch)
+    _fake_dispatch(
+        monkeypatch,
+        {
+            "text": " ".join(text for _s, text, _a in replies),
+            "segments": [{"start": s, "end": s + 0.6, "text": text} for s, text, _a in replies],
+            "language": "ru",
+        },
+    )
+    prepared = build_live(LiveConfig(), base=tmp_path / "live-b")
+    path = prepared.writers["mic"].path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with wave.open(str(path), "wb") as w:
+        w.setparams((1, 2, rate, 0, "NONE", "not compressed"))
+        w.writeframes(b"".join(x.to_bytes(2, "little", signed=True) for x in samples))
+
+    result, _full = finalize_live(prepared, _live_tracks(), retitle=False)
+
+    txt = result.transcript_txt.read_text(encoding="utf-8")
+    assert "Claude Code." in txt and "Тихо сказала." in txt
+    assert ("Okay, so we can skip this." in txt) is (russian < 10)
+
+
 @pytest.mark.parametrize(
     ("text", "foreign"), [("Let us start the daily.", True), ("Привет всем.", False)]
 )
