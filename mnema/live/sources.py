@@ -121,6 +121,13 @@ _REOPEN_BUDGET = 60.0  # seconds since the stream died; after that the source en
 # a live stream delivers a block every 0.1 s, silence too; none for this long means it is dead
 # while still reporting itself active (Core Audio's AUHAL error -50 at the start of a recording)
 _STALL_S = 3.0
+# The track follows the clock: a pause in the blocks longer than this becomes silence at its place
+_CLOCK_SLACK_S = 1.0
+# A stream whose blocks run this far off the clock over _RATE_CHECK_S has the wrong rate (AirPods
+# switched their own rate after the stream opened: 24 kHz taken as 16 kHz stretches speech 1.5x
+# and carries the track ahead of the other one) and is reopened, which reads the rate again.
+_RATE_CHECK_S = 5.0
+_RATE_TOLERANCE = 0.15
 
 
 class MicUnavailable(MediaError):
@@ -277,11 +284,12 @@ class MicSource:
                 self.recording_error = self.recording_error or track_stopped(self.name)
         self._put_dropping_oldest(pcm)
 
-    def _catch_up(self, frames: int) -> None:
-        """Silence up to the block of `frames` that just arrived, by the clock."""
+    def _catch_up(self, frames: int, slack: float = 0.0) -> None:
+        """Silence up to the block of `frames` that just arrived, by the clock, when the track is
+        more than `slack` seconds behind."""
         started = self._clock() - frames / self._samplerate
         behind = samples_behind(self.origin, started, self._emitted, self._samplerate)
-        if behind:
+        if behind > slack * self._samplerate:
             self._emit(bytes(behind * 2))
 
     def available(self) -> bool:
@@ -322,15 +330,26 @@ class MicSource:
         self._gen += 1
         gen = self._gen
         first_block = True
+        began = 0.0  # the clock at this stream's first sample
+        delivered = 0  # samples of this stream
 
         def _callback(indata, frames, time, status) -> None:  # noqa: ANN001 - sounddevice contract
             # errors are not raised into the audio thread; the frame is queued as is
-            nonlocal first_block
-            self._heard = self._clock()
+            nonlocal first_block, began, delivered
+            now = self._heard = self._clock()
             if first_block:
                 first_block = False
+                began = now - frames / self._samplerate
                 self._catch_up(frames)
+            else:
+                self._catch_up(frames, slack=_CLOCK_SLACK_S)
             self._emit(bytes(indata))
+            delivered += frames
+            span = now - began
+            off = delivered / (span * self._samplerate) - 1 if span >= _RATE_CHECK_S else 0.0
+            if abs(off) > _RATE_TOLERANCE and gen == self._gen and not self._dead:
+                logger.info("microphone: blocks run %+.0f%% off the clock, reopening", off * 100)
+                self._mark_dead()
 
         def _finished() -> None:
             # the stream died on its own (device gone, PortAudio error): not our stop(), not an

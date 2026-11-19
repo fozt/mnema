@@ -241,9 +241,32 @@ def test_first_block_delay_counts_only_once() -> None:
     src.timebase = (1, 1)
     src.origin = 100.0
     src.on_input(_block(480), 0.0, 100_500_000_000)
-    src.on_input(_block(480), 480.0, 200_000_000_000)
+    src.on_input(_block(480), 480.0, 100_510_000_000)
 
     assert len(_samples(written)) == 8000 + 320
+
+
+def test_blocks_that_stopped_without_a_counter_jump_leave_silence_by_the_clock() -> None:
+    """The tap went quiet for 30 s and came back with its counter where it stopped: the track
+    keeps the 30 s, so the other track's replies stay in order."""
+    src, written = _tap()
+    src.timebase = (1, 1)
+    src.origin = 100.0
+    src.on_input(_block(480), 0.0, 100_000_000_000)
+    src.on_input(_block(480), 480.0, 130_010_000_000)
+    src.on_input(_block(480), 960.0, 130_020_000_000)
+
+    assert len(_samples(written)) == round(30.03 * 16000)
+
+
+def test_a_short_pause_in_the_blocks_adds_nothing() -> None:
+    src, written = _tap()
+    src.timebase = (1, 1)
+    src.origin = 100.0
+    src.on_input(_block(480), 0.0, 100_000_000_000)
+    src.on_input(_block(480), 480.0, 100_500_000_000)  # half a second late: the slack covers it
+
+    assert len(_samples(written)) == 320
 
 
 def test_first_block_without_a_host_time_uses_the_clock() -> None:

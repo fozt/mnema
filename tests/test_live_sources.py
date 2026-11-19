@@ -162,6 +162,51 @@ def test_micsource_reopened_stream_keeps_real_time(monkeypatch) -> None:
     src.stop()
 
 
+def test_micsource_pause_in_the_blocks_becomes_silence(monkeypatch) -> None:
+    """The stream stopped delivering for 2 s and went on: the track keeps the 2 s."""
+    recorded: list[bytes] = []
+    src, clock, _ = _flaky_mic(monkeypatch, tee=recorded.append)
+    src.origin = 0.0
+    block = b"\x01\x02" * 1600
+    for t in (0.1, 0.2, 2.3, 2.4):
+        clock["t"] = t
+        src._stream.cb(block, 1600, None, None)
+
+    assert sum(len(part) for part in recorded) // 2 == round(2.4 * 16000)
+    assert b"".join(recorded)[-2 * 3200 :] == block * 2
+
+
+def test_micsource_reopens_a_stream_running_off_the_clock(monkeypatch) -> None:
+    """AirPods switched to 24 kHz under a 16 kHz stream: 1.5x the samples per second. The stream
+    is reopened within seconds instead of stretching the rest of the call."""
+    src, clock, Stream = _flaky_mic(monkeypatch, tee=lambda pcm: None)
+    src.origin = 0.0
+    first = src._stream
+    block = b"\x01\x02" * 2400  # 150 ms of samples every 100 ms
+    for i in range(1, 70):
+        clock["t"] = i * 0.1
+        first.cb(block, 2400, None, None)
+    clock["t"] = 7.1
+    src.read()
+
+    assert src._stream is not first and isinstance(src._stream, Stream)
+    src.stop()
+
+
+def test_micsource_keeps_a_stream_on_the_clock(monkeypatch) -> None:
+    src, clock, _ = _flaky_mic(monkeypatch, tee=lambda pcm: None)
+    src.origin = 0.0
+    first = src._stream
+    block = b"\x01\x02" * 1600
+    for i in range(1, 200):
+        clock["t"] = i * 0.1 + (0.03 if i % 3 else 0.0)  # callbacks jitter
+        first.cb(block, 1600, None, None)
+    src.read()
+
+    assert src._stream is first
+    src.stop()
+
+
 def test_micsource_survives_stream_death_and_reopens(monkeypatch) -> None:
     """A dead stream does not end the source: read() returns b'', once the device is back the
     stream reopens, frames keep coming and `notice` reports the reopening."""

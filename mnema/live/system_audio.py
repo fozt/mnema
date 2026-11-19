@@ -39,6 +39,8 @@ _QUEUE_SECONDS = 30  # same queue limit as MicSource (see sources.py)
 _TAP_BLOCK_SECONDS = 0.02  # IOProc gets the device buffer (~10-20 ms); estimate for the queue
 _TAP_MIN_MACOS = (14, 2)  # AudioHardwareCreateProcessTap appeared in macOS 14.2
 _GAP_SLACK_SECONDS = 0.05  # a filled gap may carry the track this far ahead of the clock
+# blocks that stopped coming with the device counter standing still: past this, silence by the clock
+_CLOCK_SLACK_SECONDS = 1.0
 _PAREC_LATENCY_MS = 50  # without it the server hands parec about 2 s at a time
 
 
@@ -197,10 +199,11 @@ class _BufferedSource:
                 self.recording_error = self.recording_error or track_stopped(self.name)
         self._put_dropping_oldest(pcm)
 
-    def _catch_up(self, first_sample_at: float) -> None:
-        """Silence up to a block whose first sample is at this time on the origin's clock."""
+    def _catch_up(self, first_sample_at: float, slack: float = 0.0) -> None:
+        """Silence up to a block whose first sample is at this time on the origin's clock, when
+        the track is more than `slack` seconds behind."""
         behind = samples_behind(self.origin, first_sample_at, self._emitted, _TARGET_RATE)
-        if behind:
+        if behind > slack * _TARGET_RATE:
             self._emit(bytes(behind * 2))
 
     def _put_dropping_oldest(self, item: bytes | None) -> None:
@@ -380,6 +383,8 @@ class CoreAudioTapSource(_BufferedSource):
             self._catch_up(self._first_sample_at(host_time, frames))
         elif late > 0:
             self._fill_lost(self._real_gap(late, self._first_sample_at(host_time, frames)))
+        else:  # no jump in the counter, yet the clock may have gone on without blocks
+            self._catch_up(self._first_sample_at(host_time, frames), slack=_CLOCK_SLACK_SECONDS)
         if sample_time is not None and (late or self._next_sample is None):
             self._next_sample = sample_time
         if self._next_sample is not None:
