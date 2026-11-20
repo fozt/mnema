@@ -146,8 +146,8 @@ def node_address(found: Iterable[tuple[str, str]] | None = None) -> str | None:
 
 
 def server_command(args: str) -> str:
-    """A server command as a person on the server's machine runs it: ./mnema.sh in the folder of
-    install.sh for the server in Docker, the mnema command elsewhere (a developer's serve)."""
+    """A server command as a person on the server's machine runs it: ./mnema.sh in the server's
+    folder for the server in Docker, the mnema command elsewhere (a developer's serve)."""
     from .config import Settings
 
     return ("./mnema.sh " if Settings().container else "mnema ") + args

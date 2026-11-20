@@ -1,28 +1,25 @@
 #!/usr/bin/env bash
-# Two explicit modes: the app (client) or the server in Docker.
+# Two explicit modes: the app (client) or the server in Docker (install-server.sh, with this clone).
 set -euo pipefail
 cd "$(dirname "$0")"
 
-# say, SERVER_DIR, server_commands
-# shellcheck source=scripts/common.sh
-source scripts/common.sh
+# Messages in Russian for a Russian interface language (looked up as mnema.i18n.detect does).
+RU=""
+for value in "${MNEMA_UI_LANG:-}" "${LC_ALL:-}" "${LC_MESSAGES:-}" "${LANG:-}"; do
+  value="${value//[[:space:]]/}"
+  if [ -n "$value" ]; then
+    case "$value" in [Rr][Uu]*) RU=1;; esac
+    break
+  fi
+done
 
-# usage [server|client]: the short overview, or one mode's options
+# say ENGLISH RUSSIAN
+say() { if [ -n "$RU" ]; then printf '%s\n' "$2"; else printf '%s\n' "$1"; fi; }
+
+# usage [client]: the short overview, or the app's options (the server's: install-server.sh)
 usage() {
   if [ -n "$RU" ]; then
     case "${1:-}" in
-      server) cat <<'HELP'
-Использование: ./install.sh server [--url http://адрес:порт] [--build] [--swap-size 4G]
-
-Ставит сервер Mnema в Docker (нужен Docker Engine с Compose). Настройки и данные — в
-~/mnema-server (или MNEMA_SERVER_DIR), команды сервера — ./mnema.sh в этой папке.
-
-  --url АДРЕС      адрес, по которому сервер видят устройства, например домен; запоминается.
-                   Без него — адрес этого компьютера в сети
-  --build          собрать образ из этой папки, а не скачивать
-  --swap-size 4G   добавить swap, от 1G до 64G; 0 — не предлагать
-HELP
-      ;;
       client) cat <<'HELP'
 Использование: ./install.sh client [ПРИГЛАШЕНИЕ]
 
@@ -43,18 +40,6 @@ HELP
     esac
   else
     case "${1:-}" in
-      server) cat <<'HELP'
-Usage: ./install.sh server [--url http://address:port] [--build] [--swap-size 4G]
-
-Installs the Mnema server in Docker (Docker Engine with Compose is needed). Settings and data go
-to ~/mnema-server (or MNEMA_SERVER_DIR); the server's commands are ./mnema.sh in this folder.
-
-  --url URL        the address devices use to reach the server, such as a domain; remembered.
-                   Without it, this machine's network address
-  --build          build the image from this folder instead of pulling it
-  --swap-size 4G   add swap, 1G to 64G; 0 to not offer it
-HELP
-      ;;
       client) cat <<'HELP'
 Usage: ./install.sh client [INVITATION]
 
@@ -80,164 +65,24 @@ if [ $# -eq 0 ]; then usage; exit 1; fi
 if [ "$1" = --help ] || [ "$1" = -h ]; then usage; exit 0; fi
 MODE="$1"; shift
 case "$MODE" in client|server) ;; *) usage; exit 1;; esac
-SWAP_SIZE=""
-URL=""
-BUILD=""
+# The server: install-server.sh, with this clone's files (it can build the image here)
+if [ "$MODE" = server ]; then
+  MNEMA_INSTALL_AGAIN="./install.sh server" exec bash ./install-server.sh "$@"
+fi
 CONNECTION=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --help|-h) usage "$MODE"; exit 0;;
-    --swap-size)
-      if [ $# -lt 2 ] || ! [[ "$2" =~ ^(0|([1-9]|[1-5][0-9]|6[0-4])[Gg])$ ]]; then
-        say "--swap-size: 1G to 64G, for example --swap-size 4G, or 0 for no swap" \
-          "--swap-size: от 1G до 64G, например --swap-size 4G, или 0, если swap не нужен"
-        exit 1
-      fi
-      SWAP_SIZE="${2%[Gg]}"; shift 2;;
-    --url)
-      if [ "$MODE" != server ] || [ $# -lt 2 ]; then usage "$MODE"; exit 1; fi
-      if ! [[ "$2" =~ ^https?://[^[:space:]#\$\"\'\\]+$ ]]; then
-        say "--url: an address like http://203.0.113.5:38837" "--url: адрес вроде http://203.0.113.5:38837"
-        exit 1
-      fi
-      URL="$2"; shift 2;;
-    --build)
-      if [ "$MODE" != server ]; then usage "$MODE"; exit 1; fi
-      BUILD=1; shift;;
     -*) usage "$MODE"; exit 1;;
     *) [ -z "$CONNECTION" ] || { usage "$MODE"; exit 1; }; CONNECTION="$1"; shift;;
   esac
 done
-if [ "$MODE" != server ] && [ -n "$SWAP_SIZE" ]; then
-  usage "$MODE"; exit 1
-fi
-if [ "$MODE" != client ] && [ -n "$CONNECTION" ]; then
-  usage "$MODE"; exit 1
-fi
 
 as_root() {
   if [ "$(id -u)" = 0 ]; then "$@"; else sudo "$@"; fi
 }
 
 OS="$(uname -s)"
-
-# The server: a container from compose.yaml in ~/mnema-server, data in ~/mnema-server/data.
-# Nothing else on this machine: its commands are ./mnema.sh in this folder.
-if [ "$MODE" = server ]; then
-  if ! command -v docker >/dev/null || ! docker compose version >/dev/null 2>&1; then
-    say "The server runs in Docker. Install Docker Engine with the Compose plugin: https://docs.docker.com/engine/install/" \
-      "Сервер работает в Docker. Установите Docker Engine с плагином Compose: https://docs.docker.com/engine/install/"
-    exit 1
-  fi
-  if ! docker_error="$(docker info 2>&1 >/dev/null)"; then
-    case "$docker_error" in
-      *"permission denied"*)
-        say "This user has no access to Docker. Add it to the docker group, open a new shell and install again:" \
-          "У этого пользователя нет доступа к Docker. Добавьте его в группу docker, откройте новую оболочку и установите снова:"
-        printf '  sudo usermod -aG docker %s\n  newgrp docker\n' "$(id -un)" ;;
-      *)
-        say "Docker isn't running. Start it and install again:" \
-          "Docker не запущен. Запустите его и установите снова:"
-        printf '  sudo systemctl enable --now docker\n' ;;
-    esac
-    exit 1
-  fi
-  # 0.3.0 ran the server as this systemd service; two servers would share nothing but the name
-  if command -v systemctl >/dev/null && systemctl cat mnema.service >/dev/null 2>&1; then
-    say "A server of an earlier Mnema runs here as the systemd service mnema. Stop it first: sudo systemctl disable --now mnema" \
-      "Здесь работает сервер прежней Mnema, служба systemd mnema. Сначала остановите её: sudo systemctl disable --now mnema"
-    exit 1
-  fi
-  if [ -n "$SWAP_SIZE" ] && [ "$OS" != Linux ]; then
-    say "--swap-size is for Linux." "--swap-size только для Linux."
-    exit 1
-  fi
-  # No swap (/proc/swaps lists none): ask at a terminal, otherwise tell how to add it.
-  # --swap-size 0 leaves it alone. Swap only offered never stops the install; asked for, it does.
-  SWAPS="${MNEMA_PROC_SWAPS:-/proc/swaps}" OFFERED=""
-  if [ -z "$SWAP_SIZE" ] && [ "$OS" = Linux ] && [ -r "$SWAPS" ] \
-    && [ -z "$(awk 'NR > 1' "$SWAPS")" ]; then
-    if [ -t 0 ]; then
-      answer=y
-      if [ -n "$RU" ]; then read -r -p "Подкачки нет. Добавить 4 ГБ? [Y/n] " answer || answer=n
-      else read -r -p "No swap. Add 4 GB? [Y/n] " answer || answer=n; fi
-      case "$answer" in [Nn]*) ;; *) SWAP_SIZE=4 OFFERED=1;; esac
-    else
-      say "No swap. Add it with: ./install.sh server --swap-size 4G" \
-        "Подкачки нет. Добавьте её: ./install.sh server --swap-size 4G"
-    fi
-  fi
-  if [ -n "$SWAP_SIZE" ] && [ "$SWAP_SIZE" != 0 ]; then
-    if [ -n "$OFFERED" ]; then
-      as_root bash "$PWD/scripts/setup-swap.sh" "$SWAP_SIZE" \
-        || say "Swap wasn't added, installing without it. Try later: ./install.sh server --swap-size 4G" \
-          "Подкачка не добавлена, установка идёт без неё. Попробуйте позже: ./install.sh server --swap-size 4G"
-    else
-      as_root bash "$PWD/scripts/setup-swap.sh" "$SWAP_SIZE"
-    fi
-  fi
-
-  DIR="$SERVER_DIR"
-  NAME="${MNEMA_NAME:-mnema}"
-  # the published image is pulled on every start (./mnema.sh update); one built here or given in
-  # MNEMA_IMAGE is used as it is
-  IMAGE="${MNEMA_IMAGE:-ghcr.io/fozt/mnema:latest}" PULL=never
-  if [ -n "$BUILD" ]; then
-    IMAGE=mnema:local
-    docker build -t "$IMAGE" "$PWD"
-  elif [ -z "${MNEMA_IMAGE:-}" ]; then
-    PULL=always
-    docker pull "$IMAGE"
-  fi
-
-  # The port is picked once; the image tells a free one and this computer's address, looked up
-  # on the host's network by the same rule as ./mnema.sh invite (node.node_address). The detected
-  # address goes to MNEMA_URL on every install; --url is remembered by ./mnema.sh invite --url and
-  # wins over it (node.node_url).
-  PORT="" FREE="" ADDRESS="" DETECTED=""
-  if [ -f "$DIR/.env" ]; then PORT="$(sed -n 's/^MNEMA_PORT=//p' "$DIR/.env" | tail -n 1)"; fi
-  read -r FREE ADDRESS < <(docker run --rm --network host "$IMAGE" python -m mnema.install_setup host) || true
-  PORT="${PORT:-$FREE}"
-  if [ -n "$ADDRESS" ]; then DETECTED="http://$ADDRESS:$PORT"; fi
-  if [ -z "$PORT" ] || { [ -z "$URL" ] && [ -z "$DETECTED" ] && ! [ -f "$DIR/data/config/mnema/server.json" ]; }; then
-    say "The server's network address wasn't found. Give it: ./install.sh server --url http://ADDRESS:${PORT:-PORT}" \
-      "Адрес сервера в сети не найден. Укажите его: ./install.sh server --url http://АДРЕС:${PORT:-ПОРТ}"
-    exit 1
-  fi
-
-  mkdir -p "$DIR/data"
-  chmod 700 "$DIR" "$DIR/data"
-  # the container runs as the owner of the data, never as root
-  uid="$(id -u)"; gid="$(id -g)"
-  if [ "$uid" = 0 ]; then
-    uid=1000; gid=1000
-    chown -R "$uid:$gid" "$DIR/data"
-  fi
-  cp "$PWD/compose.yaml" "$DIR/compose.yaml"
-  # the host's time zone: invitations say until when they are valid in local time
-  ZONE="$(readlink /etc/localtime 2>/dev/null | sed -n 's|.*/zoneinfo/||p')"
-  printf '%s\n' "MNEMA_NAME=$NAME" "MNEMA_IMAGE=$IMAGE" "MNEMA_PULL=$PULL" "MNEMA_PORT=$PORT" \
-    "MNEMA_URL=$DETECTED" "MNEMA_TZ=$ZONE" "MNEMA_UID=$uid" "MNEMA_GID=$gid" > "$DIR/.env"
-  docker compose -f "$DIR/compose.yaml" up -d --wait
-  # the command of 0.3.1, $DIR/mnema, and its link; never a file or link of someone else
-  link="$HOME/.local/bin/mnema"
-  if [ -L "$link" ] && [ "$(readlink "$link")" = "$DIR/mnema" ]; then rm -f "$link"; fi
-  if [ -f "$DIR/mnema" ] && ! [ -L "$DIR/mnema" ] \
-    && grep -q "^# The mnema command on the server's machine" "$DIR/mnema"; then
-    rm -f "$DIR/mnema"
-  fi
-
-  echo
-  say "The server listens on port $PORT." "Сервер принимает подключения на порту $PORT."
-  if [ -n "$URL" ]; then ./mnema.sh invite --url "$URL"; else ./mnema.sh invite; fi
-  echo
-  say "The model is set in the Mnema app on a Mac: Settings → Recording → Choose model…" \
-    "Модель задаётся в приложении Mnema на Mac: Настройки → Запись → Выбрать модель…"
-  echo
-  say "The server's commands, in $PWD:" "Команды сервера, в папке $PWD:"
-  server_commands "$NAME"
-  exit 0
-fi
 
 # Mnema.app is built only as the DMG of a release (scripts/build_mac_app.py), for arm64 only
 if [ "$OS" = Darwin ]; then

@@ -278,7 +278,7 @@ def container_healthy() -> bool:
 
 
 def host_defaults() -> str:
-    """For ./install.sh server, run in the image on the host's network: a free port of the host
+    """For install-server.sh, run in the image on the host's network: a free port of the host
     and its network address (node.node_address, may be empty), one line."""
     from .node import node_address
 

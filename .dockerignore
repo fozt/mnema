@@ -3,5 +3,9 @@
 !pyproject.toml
 !uv.lock
 !mnema/
+# the server's own files, for /app/host
+!compose.yaml
+!mnema.sh
+!scripts/setup-swap.sh
 mnema/bar/macos/
 **/__pycache__/

@@ -1,6 +1,6 @@
-# The Mnema server. ./install.sh server copies this file to ~/mnema-server and writes the
-# values below to ~/mnema-server/.env; the data lives in ~/mnema-server/data. Its commands run
-# from the folder of install.sh: ./mnema.sh users, invite, devices, update, logs.
+# The Mnema server. install-server.sh puts this file and ./mnema.sh in ~/mnema-server and writes
+# the values below to ~/mnema-server/.env; the data lives in ~/mnema-server/data. Its commands run
+# in that folder: ./mnema.sh users, invite, devices, update, logs.
 name: ${MNEMA_NAME:-mnema}
 services:
   mnema:

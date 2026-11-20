@@ -128,9 +128,10 @@ recognition job takes up to about 2 GB of memory; the installer offers to add 4 
 there is none (`--swap-size 4G` does it without asking, `--swap-size 0` never asks).
 
 ```bash
-git clone https://github.com/fozt/mnema.git && cd mnema
-./install.sh server
+curl -fsSL https://github.com/fozt/mnema/releases/latest/download/install-server.sh | bash
 ```
+
+Options go after `bash -s --`, for example `curl -fsSL https://github.com/fozt/mnema/releases/latest/download/install-server.sh | bash -s -- --swap-size 4G`.
 
 The installer starts the `mnema` container from the published image. Speech is recognized by
 Parakeet Ultra on ONNX Runtime, on the CPU; the model (about 910 MB) is downloaded into
@@ -147,12 +148,12 @@ installs keep it.
 Open the port the installer prints in your firewall. Docker publishes it past `ufw`, so `ufw`
 rules do not close it: use your provider's firewall for that.
 
-Everything lives in `~/mnema-server`: `compose.yaml` with its `.env`, and the data (settings,
-recordings, devices, model weights) in `data/`. Nothing else is installed on the machine. The
-server's commands run from the folder you cloned, next to `install.sh`:
+Everything lives in `~/mnema-server`: the server's commands `./mnema.sh`, `compose.yaml` with its
+`.env`, and the data (settings, recordings, devices, model weights) in `data/`. Nothing else is
+installed on the machine, and no copy of the source is needed. The commands run in that folder:
 
 ```bash
-cd ~/mnema && ./mnema.sh invite
+cd ~/mnema-server && ./mnema.sh invite
 ```
 
 | Command | What it does |
@@ -162,10 +163,11 @@ cd ~/mnema && ./mnema.sh invite
 | `./mnema.sh users add NAME` | Add a person and print their invite |
 | `./mnema.sh users remove NAME` | Disconnect all of a person's devices; their recordings stay |
 | `./mnema.sh devices` | Connected devices; `./mnema.sh devices note <id> "text"` adds a note, `./mnema.sh devices revoke <id>` disconnects one |
-| `./mnema.sh update` | Pull the latest image and restart the server with it, always: a changed server config applies |
+| `./mnema.sh update` | Pull the latest image and restart the server with it, always: a changed server config applies. `./mnema.sh` and `compose.yaml` come from the new image too |
 | `./mnema.sh logs` | Server log |
 
-`./install.sh server --build` builds the image from the checkout instead of pulling it.
+In a clone of the repository, `./install.sh server --build` builds the image from it instead of
+pulling it.
 
 The server speaks plain HTTP and requires a token from every device. If the network between your
 devices and the server is not trusted, put a TLS proxy in front of it.
@@ -177,7 +179,7 @@ another's recordings, jobs, uploads or settings; the owner (the first user, whos
 installer prints) is a person like the others. To add someone:
 
 ```bash
-cd ~/mnema && ./mnema.sh users add anna
+cd ~/mnema-server && ./mnema.sh users add anna
 ```
 
 Send the printed invite to that person. The name is lowercase Latin letters, digits, `-` and `_`.
@@ -407,7 +409,7 @@ server instead. It needs three settings:
 Give every service a token of its own. On the server this makes its user and prints the token:
 
 ```bash
-cd ~/mnema && ./mnema.sh token my-service
+cd ~/mnema-server && ./mnema.sh token my-service
 ```
 
 The service gets a user of its own, so it shares the queue fairly with your recordings, and

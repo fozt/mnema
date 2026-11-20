@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-# The Mnema server image: ./install.sh server runs it with compose.yaml, data and settings in
+# The Mnema server image: install-server.sh runs it with compose.yaml, data and settings in
 # the /data volume. Recognition is Parakeet Ultra and silero on ONNX Runtime (CPU), no torch.
 
 ARG PYTHON_IMAGE=python:3.12-slim-trixie
@@ -48,7 +48,7 @@ PY
 EOF
 
 FROM ${PYTHON_IMAGE}
-# ffmpeg for media, iproute2 for the host's address at install (./install.sh server), tini as
+# ffmpeg for media, iproute2 for the host's address at install (install-server.sh), tini as
 # PID 1 reaps the processes of finished jobs
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ffmpeg iproute2 tini \
@@ -78,6 +78,9 @@ ENV PATH=/app/.venv/bin:$PATH \
 # user of the image cannot write it, so every start of Python would compile them again.
 RUN python -m compileall -q -j0 /usr/local/lib/python3.12 \
     /app/.venv/lib/python3.12/site-packages/mnema
+# The server's own files on its machine: the installer and ./mnema.sh update take them from here,
+# so the commands there are always of this version
+COPY compose.yaml mnema.sh scripts/setup-swap.sh /app/host/
 USER mnema
 WORKDIR /data
 VOLUME /data

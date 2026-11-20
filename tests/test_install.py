@@ -114,6 +114,9 @@ elif name == "docker":
         sys.exit(int("denied" in missing or "daemon" in missing))
     elif args[:2] == ["image", "inspect"]:  # the image id: a pull brings a new one
         print("sha256:" + ("new" if pulled.exists() else "old"))
+    elif args[:4] == ["run", "--rm", "--entrypoint", "cat"]:  # the server's files in the image
+        print(pathlib.Path(os.environ["FAKE_IMAGE_FILES"], pathlib.Path(args[5]).name).read_text(),
+              end="")
     elif args[:1] == ["run"]:  # the image on the host's network
         assert args[1:4] == ["--rm", "--network", "host"]
         assert args[-2:] == ["mnema.install_setup", "host"]
@@ -151,6 +154,8 @@ elif name == "docker":
             print("mnema 9.9.9")
         elif command[2:] == ["devices"]:  # reads a line when stdin is attached
             print("read: " + (sys.stdin.readline().strip() if attached else ""))
+        if "-i" in args[1:3]:  # like docker exec -i from a pipe: the rest of stdin goes in
+            sys.stdin.read()
 elif name in ("ip", "ifconfig"):
     print("1: lo    inet 127.0.0.1/8 scope host lo")
     print("2: eth0    inet 203.0.113.7/24 brd 203.0.113.255 scope global eth0")
@@ -253,6 +258,11 @@ def system(tmp_path):
     (template / "python").chmod(0o755)
     (template / "mnema-bar").symlink_to(command)
     env["FAKE_VENV"] = str(template.parent)
+    image_files = tmp_path / "image-host"  # /app/host of the image
+    image_files.mkdir()
+    for source in ("compose.yaml", "mnema.sh", "scripts/setup-swap.sh"):
+        shutil.copy(REPO / source, image_files)
+    env["FAKE_IMAGE_FILES"] = str(image_files)
     return tmp_path, env
 
 
@@ -264,9 +274,8 @@ def calls(system):
 def installer(system, *args, answer: str | None = None):
     """./install.sh from a script, or (answer — what is typed) from a terminal."""
     root, env = system
-    shutil.copy(REPO / "install.sh", root / "install.sh")
-    shutil.copy(REPO / "mnema.sh", root / "mnema.sh")
-    shutil.copy(REPO / "compose.yaml", root / "compose.yaml")
+    for name in ("install.sh", "install-server.sh", "mnema.sh", "compose.yaml", "Dockerfile"):
+        shutil.copy(REPO / name, root / name)
     skip = shutil.ignore_patterns("__pycache__", "macos")
     shutil.copytree(REPO / "mnema", root / "mnema", ignore=skip, dirs_exist_ok=True)
     shutil.copytree(REPO / "scripts", root / "scripts", ignore=skip, dirs_exist_ok=True)
@@ -420,12 +429,14 @@ def test_server_runs_in_docker_and_writes_only_its_folder(system):
     assert oct(folder.stat().st_mode & 0o777) == oct((folder / "data").stat().st_mode & 0o777)
     assert folder.stat().st_mode & 0o777 == 0o700
     assert files_under(Path(env["HOME"])) == {
-        "mnema-server", "mnema-server/compose.yaml", "mnema-server/.env", "mnema-server/data",
+        "mnema-server", "mnema-server/compose.yaml", "mnema-server/mnema.sh", "mnema-server/.env",
+        "mnema-server/data",
     }  # fmt: skip
+    assert (folder / "mnema.sh").read_text() == (REPO / "mnema.sh").read_text()
     assert "http://203.0.113.7:43117#invite=one-time-code" in done.stdout
     assert "Сервер принимает подключения на порту 43117." in done.stdout
     assert "Настройки → Запись → Выбрать модель…" in done.stdout
-    assert f"Команды сервера, в папке {root}:" in done.stdout
+    assert f"Команды сервера, в папке {folder}:" in done.stdout
     assert "./mnema.sh logs" in done.stdout
 
 
@@ -691,10 +702,8 @@ def test_host_command_without_a_server_says_to_install_it(system):
     done = host_command(system, "invite")
     assert done.returncode != 0
     folder = server_dir(system)
-    assert (
-        done.stdout
-        == f"Сервер Mnema не установлен в {folder}. Установите его: ./install.sh server\n"
-    )
+    assert done.stdout.startswith(f"Сервер Mnema не установлен в {folder}. Установите его:\n")
+    assert "releases/latest/download/install-server.sh | bash" in done.stdout
     assert docker(system) == []
 
 
@@ -714,13 +723,95 @@ def test_host_update_pulls_the_image_and_recreates_the_container(system, built_h
         ["image", "inspect", "-f", "{{.Id}}", image],
         compose(system, "up", "-d", "--wait", "--force-recreate"),
         ["image", "inspect", "-f", "{{.Id}}", image],
+        ["run", "--rm", "--entrypoint", "cat", image, "/app/host/compose.yaml"],
+        ["run", "--rm", "--entrypoint", "cat", image, "/app/host/mnema.sh"],
         ["exec", "mnema", "mnema", "--version"],
     ]
     if not built_here:
-        expected.insert(-1, ["image", "rm", "sha256:old"])
+        expected.insert(4, ["image", "rm", "sha256:old"])
     assert docker(system) == expected
     assert "mnema 9.9.9" in done.stdout
     assert ("не скачивается: сервер перезапускается с ним как есть" in done.stdout) is built_here
+
+
+def piped_installer(system, *args: str) -> subprocess.CompletedProcess:
+    """install-server.sh as `curl … | bash -s --` runs it: no script file, no clone around."""
+    root, env = system
+    away = root / "elsewhere-cwd"
+    away.mkdir(exist_ok=True)
+    return subprocess.run(
+        ["bash", "-s", "--", *args],
+        env=env,
+        cwd=away,
+        capture_output=True,
+        text=True,
+        input=(REPO / "install-server.sh").read_text(),
+    )
+
+
+def test_server_installs_without_a_clone_from_the_image(system):
+    """Piped from curl: the server's files come from the image, the server's folder holds
+    everything and its commands work there; hints repeat the curl line."""
+    root, env = system
+    done = piped_installer(system)
+    assert done.returncode == 0, done.stderr
+    image = "ghcr.io/fozt/mnema:latest"
+    host = [c for c in docker(system) if c[:4] == ["run", "--rm", "--entrypoint", "cat"]]
+    assert host == [
+        ["run", "--rm", "--entrypoint", "cat", image, "/app/host/compose.yaml"],
+        ["run", "--rm", "--entrypoint", "cat", image, "/app/host/mnema.sh"],
+    ]
+    folder = server_dir(system)
+    assert (folder / "mnema.sh").read_text() == (REPO / "mnema.sh").read_text()
+    assert (folder / "mnema.sh").stat().st_mode & 0o111
+    assert "http://203.0.113.7:43117#invite=one-time-code" in done.stdout
+    assert "./mnema.sh logs" in done.stdout  # the invitation left the rest of the script
+    assert (
+        "curl -fsSL https://github.com/fozt/mnema/releases/latest/download/install-server.sh"
+        " | bash -s -- --swap-size 4G" in done.stdout
+    )
+    Path(env["FAKE_LOG"]).write_text("")
+    invite = subprocess.run(
+        [str(folder / "mnema.sh"), "invite"], env=env, capture_output=True, text=True,
+        stdin=subprocess.DEVNULL, cwd=root / "elsewhere-cwd",
+    )  # fmt: skip
+    assert invite.returncode == 0, invite.stderr
+    assert docker(system) == [["exec", "-i", "mnema", "mnema", "invite"]]
+
+
+def test_build_needs_a_clone(system):
+    done = piped_installer(system, "--build")
+    assert done.returncode != 0
+    assert "./install.sh server --build" in done.stdout
+    assert docker(system) == []
+
+
+def test_update_brings_the_commands_of_the_new_version(system):
+    """./mnema.sh update in the server's folder takes mnema.sh and compose.yaml from the image it
+    now runs; a changed compose.yaml is applied at once."""
+    root, env = system
+    assert piped_installer(system).returncode == 0
+    folder = server_dir(system)
+    image_files = Path(env["FAKE_IMAGE_FILES"])
+    newer = (
+        (REPO / "mnema.sh")
+        .read_text()
+        .replace("# Messages in Russian", "# v2\n# Messages in Russian")
+    )
+    (image_files / "mnema.sh").write_text(newer)
+    (image_files / "compose.yaml").write_text((REPO / "compose.yaml").read_text() + "# v2\n")
+    Path(env["FAKE_LOG"]).write_text("")
+    (root / "pulled").unlink(missing_ok=True)
+    done = subprocess.run(
+        [str(folder / "mnema.sh"), "update"], env=env, capture_output=True, text=True,
+        stdin=subprocess.DEVNULL,
+    )  # fmt: skip
+    assert done.returncode == 0, done.stderr
+    assert (folder / "mnema.sh").read_text() == newer
+    assert (folder / "compose.yaml").read_text().endswith("# v2\n")
+    assert docker(system)[-2:] == [compose(system, "up", "-d", "--wait"),
+                                   ["exec", "mnema", "mnema", "--version"]]  # fmt: skip
+    assert not list(folder.glob(".*.new"))
 
 
 def test_host_update_goes_back_when_the_new_image_does_not_start(system):
